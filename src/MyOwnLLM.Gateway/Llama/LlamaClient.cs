@@ -44,15 +44,29 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
     async Task<HttpResponseMessage> SendAsync(string path, object body, bool stream, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: Json) };
+        HttpResponseMessage response;
         try
         {
-            var response = await http.SendAsync(request, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, ct);
-            response.EnsureSuccessStatusCode();
-            return response;
+            response = await http.SendAsync(request, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, ct);
         }
-        catch (HttpRequestException e) when (e.StatusCode is null)
+        catch (HttpRequestException e)
         {
             throw new LlamaUnavailableException(http.BaseAddress?.ToString() ?? "(unset)", e);
         }
+        if (response.IsSuccessStatusCode) return response;
+
+        using (response)
+            throw new LlamaErrorException((int)response.StatusCode, await ErrorMessageAsync(response, ct));
+    }
+
+    static async Task<string> ErrorMessageAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            if (doc.RootElement.GetProperty("error").GetProperty("message").GetString() is { Length: > 0 } message) return message;
+        }
+        catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException) { }
+        return $"model server returned {(int)response.StatusCode} {response.ReasonPhrase}";
     }
 }

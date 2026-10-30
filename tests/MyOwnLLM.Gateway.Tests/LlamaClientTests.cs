@@ -93,13 +93,28 @@ public class LlamaClientTests
     }
 
     [Fact]
-    public async Task Error_status_is_not_reported_as_unreachable()
+    public async Task Error_status_carries_llama_message()
     {
-        var (client, _) = Create((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)));
+        var (client, _) = Create((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("""{"error":{"code":400,"message":"the request exceeds the available context size"}}""")
+        }));
 
-        var ex = await Assert.ThrowsAsync<HttpRequestException>(() => client.ChatAsync(Hello, 10, CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<LlamaErrorException>(() => client.ChatAsync(Hello, 10, CancellationToken.None));
 
-        Assert.Equal(HttpStatusCode.BadRequest, ex.StatusCode);
+        Assert.Equal(400, ex.Status);
+        Assert.Equal("the request exceeds the available context size", ex.Message);
+    }
+
+    [Fact]
+    public async Task Error_status_without_json_body_uses_status_text()
+    {
+        var (client, _) = Create((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+
+        var ex = await Assert.ThrowsAsync<LlamaErrorException>(() => client.ChatAsync(Hello, 10, CancellationToken.None));
+
+        Assert.Equal(503, ex.Status);
+        Assert.Equal("model server returned 503 Service Unavailable", ex.Message);
     }
 
     [Fact]

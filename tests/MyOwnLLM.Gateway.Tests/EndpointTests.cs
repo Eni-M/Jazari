@@ -195,6 +195,33 @@ public class EndpointTests : IDisposable
         Assert.Empty(_llama.Calls);
     }
 
+    [Theory]
+    [InlineData(400, HttpStatusCode.RequestEntityTooLarge)]
+    [InlineData(503, HttpStatusCode.ServiceUnavailable)]
+    [InlineData(500, HttpStatusCode.BadGateway)]
+    public async Task Llama_error_status_maps_to_gateway_status_with_message(int llamaStatus, HttpStatusCode expected)
+    {
+        _llama.Chat = _ => throw new LlamaErrorException(llamaStatus, "llama says no");
+
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("too big for real"));
+
+        Assert.Equal(expected, response.StatusCode);
+        Assert.Equal("llama says no", (await Json(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Failed_request_is_not_cached()
+    {
+        _llama.Chat = _ => throw new LlamaUnavailableException("http://127.0.0.1:8080/", new HttpRequestException());
+        var first = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("same"));
+        _llama.Chat = _ => Task.FromResult("works now");
+
+        var second = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("same"));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
+        Assert.Equal("works now", (await Json(second)).GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+    }
+
     [Fact]
     public async Task Infill_returns_content_with_id()
     {

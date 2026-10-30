@@ -18,7 +18,7 @@ public sealed record FeedbackRequest(string Id, bool Accepted);
 
 public static class ChatEndpoints
 {
-    const int DefaultChatTokens = 512, MaxChatTokens = 1024, DefaultInfillTokens = 64, StatusTokens = 150, StateNoteTokens = 220;
+    const int DefaultChatTokens = 512, MaxChatTokens = 1024, DefaultInfillTokens = 64, StatusTokens = 150;
     const string StatusQuestion = "Where are we left at? Answer with a short summary.";
     static readonly HybridCacheEntryOptions CacheFor = new() { Expiration = TimeSpan.FromHours(1), LocalCacheExpiration = TimeSpan.FromHours(1) };
     static readonly JsonSerializerOptions SnakeCase = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
@@ -32,13 +32,12 @@ public static class ChatEndpoints
         return group;
     }
 
-    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, GatewayOptions Options, ILogger<RequestQueue> Logger);
+    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, GatewayOptions Options);
 
     static Services Resolve(HttpContext http) => new(
         http.RequestServices.GetRequiredService<ILlamaClient>(), http.RequestServices.GetRequiredService<RequestQueue>(),
         http.RequestServices.GetRequiredService<ProjectStateStore>(), http.RequestServices.GetRequiredService<InteractionLog>(),
-        http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<GatewayOptions>(),
-        http.RequestServices.GetRequiredService<ILogger<RequestQueue>>());
+        http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<GatewayOptions>());
 
     static Task Chat(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
@@ -82,7 +81,7 @@ public static class ChatEndpoints
             }, SnakeCase, http.RequestAborted);
         }
 
-        if (project is not null) UpdateStateNoteLater(s, project, note, question, answer);
+        if (project is not null) http.RequestServices.GetRequiredService<StateNoteUpdater>().Record(project, question, answer);
     });
 
     static Task Infill(HttpContext http, InfillRequest request) => Guard(http, async s =>
@@ -114,22 +113,6 @@ public static class ChatEndpoints
             ? Results.NoContent()
             : Results.NotFound();
 
-    /// <summary>Rewrites the project's state note in idle time, after the user already has the answer.</summary>
-    static void UpdateStateNoteLater(Services s, string project, string? oldNote, string question, string answer) =>
-        _ = s.Queue.EnqueueAsync(WorkKind.Background, async ct =>
-        {
-            var git = await GitSummary.GetAsync(project, ct);
-            List<ChatMessage> prompt =
-            [
-                new("system", "You maintain a short project state note for a developer."),
-                new("user", $"Old note:\n{oldNote ?? "(none)"}\n\nLatest exchange:\nQ: {question}\nA: {answer}\n\n{git}\n\n" +
-                            "Write the updated project state note: current task, recent changes, open problems, last decisions. At most 150 words."),
-            ];
-            await s.State.SetAsync(project, await s.Llama.ChatAsync(prompt, StateNoteTokens, ct));
-            return 0;
-        }, CancellationToken.None).ContinueWith(t => s.Logger.LogWarning(t.Exception, "State note update failed for {Project}", project),
-            TaskContinuationOptions.OnlyOnFaulted);
-
     static async Task Guard(HttpContext http, Func<Services, Task> handle)
     {
         try { await handle(Resolve(http)); }
@@ -144,6 +127,9 @@ public static class ChatEndpoints
     static int? StatusFor(Exception e) => e switch
     {
         LlamaUnavailableException => StatusCodes.Status503ServiceUnavailable,
+        LlamaErrorException { Status: 400 } => StatusCodes.Status413PayloadTooLarge, // our requests are well-formed; 400 means context overflow
+        LlamaErrorException { Status: 503 } => StatusCodes.Status503ServiceUnavailable, // still loading the model
+        LlamaErrorException => StatusCodes.Status502BadGateway,
         QueueFullException => StatusCodes.Status429TooManyRequests,
         InputTooLargeException => StatusCodes.Status413PayloadTooLarge,
         SupersededException => StatusCodes.Status409Conflict,
