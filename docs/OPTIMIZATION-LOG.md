@@ -26,7 +26,11 @@ Plan and status (update as each step finishes):
 - [x] `/edit` line-trimmed fallback (commit `04d4ac6`, pushed)
 - [x] Research, 4 parts, notes in `research_notes/Jazari model bridge and efficiency/`: alternative runtimes and backends, cutting weight and memory, the gateway-to-llama-server bridge, usability
 - [x] Report in `reports/Jazari model bridge and efficiency.md`. Its plan (a) is the build list, (b) the measurements, (c) the decisions. Note: Granite 4.1 3B is dense, not hybrid (checked against its config.json); `gateway_bridge.md` is wrong on that point
-- [ ] Measure and build the safe wins on branch `jazari-optimize`, tests passing, one commit each
+- [ ] Measure and build the safe wins on branch `jazari-optimize`, tests passing, one commit each. Built so far (unit-tested, not yet tried with a real llama-server):
+  - Note updates wait 3 min of quiet and give way to chats (`ace29ae`)
+  - Review answer strings capped; workstation GC in the gateway, 22 to 17 MB private (`5a8d7fc`)
+  - READING n of total tokens, % and time left while the prompt is read, taskbar progress, tokens read / from cache / tok/s after each answer (`778f146`)
+  - `git diff | jazari ask ...` (`27aea6f`)
 - [ ] List what waits for Eni-M under "Decisions waiting"
 
 **Found 2026-10-30, session 2: this session runs on a different PC from the one measured above.** All measurements in this file come from the T480 (user `enim`). This PC (user `techcom`) is a Lenovo 20X3 with an **i5-1135G7** (Tiger Lake, 4 cores, 8 threads, AVX-512 and VNNI), **32 GB DDR4-2667 in two channels** (about 42 GB/s theoretical, twice the T480), Intel Iris Xe (96 EU, shared memory), 377 GB free on C:, Balanced power plan. Jazari, llama-server and the model are not installed here. The research report targets the T480. Its hardware advice (MX150, single channel, quant choice) does not carry over; its bridge and usability advice does. On this PC, answers should be roughly twice as fast (bandwidth), Iris Xe is a real option through llama.cpp Vulkan/SYCL or OpenVINO, and the AVX-512 path in llama.cpp applies.
