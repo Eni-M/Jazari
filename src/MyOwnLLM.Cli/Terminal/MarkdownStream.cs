@@ -1,0 +1,111 @@
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace MyOwnLLM.Cli.Terminal;
+
+/// <summary>
+/// Renders a streamed answer as restrained Markdown. In color mode tokens appear as they arrive and each
+/// finished line is redrawn once with its styling; in plain mode (no color / piped) only finished lines are written.
+/// </summary>
+public sealed partial class MarkdownStream(TextWriter output, Theme theme, int width)
+{
+    enum State { Text, InFence }
+
+    readonly StringBuilder _line = new();
+    readonly List<string[]> _table = [];
+    State _state;
+    int _shown; // characters of the current line already echoed raw (color mode)
+    bool Live => theme.Mode != ColorMode.None;
+
+    public void Write(string token)
+    {
+        foreach (var c in ConsoleText.Sanitize(token))
+        {
+            if (c == '\n') { FinishLine(); continue; }
+            _line.Append(c);
+        }
+        if (Live && _line.Length > _shown)
+        {
+            output.Write(theme.Paint(_line.ToString(_shown, _line.Length - _shown), Tone.Primary));
+            _shown = _line.Length;
+        }
+    }
+
+    public void Complete()
+    {
+        if (_line.Length > 0) FinishLine();
+        FlushTable();
+        if (Live) output.Write(Theme.Reset);
+    }
+
+    void FinishLine()
+    {
+        var line = _line.ToString();
+        EraseEcho();
+        _line.Clear();
+        _shown = 0;
+
+        if (_state == State.InFence)
+        {
+            if (line.TrimStart().StartsWith("```")) { _state = State.Text; return; }
+            foreach (var part in Ui.Wrap(line, width)) output.WriteLine(theme.Code(Live ? part.PadRight(width) : part));
+            return;
+        }
+
+        if (line.TrimStart().StartsWith('|')) { _table.Add(Cells(line)); return; }
+        FlushTable();
+
+        if (line.TrimStart().StartsWith("```"))
+        {
+            _state = State.InFence;
+            var language = line.Trim()[3..].Trim();
+            if (language.Length > 0) output.WriteLine(theme.Paint(language, Tone.Muted));
+            return;
+        }
+
+        var (prefix, body) = Heading().Match(line) is { Success: true } h ? ("", h.Groups[1].Value)
+            : Bullet().Match(line) is { Success: true } b ? ("  - ", b.Groups[1].Value)
+            : Numbered().Match(line) is { Success: true } n ? ($"  {n.Groups[1].Value}. ", n.Groups[2].Value)
+            : ("", line);
+        body = Link().Replace(Bold().Replace(body, "$1"), "$1 ($2)");
+
+        var lines = Ui.Wrap(body, width - prefix.Length);
+        for (var i = 0; i < lines.Count; i++)
+            output.WriteLine((i == 0 ? prefix : new string(' ', prefix.Length)) + Inline(lines[i]));
+    }
+
+    /// <summary>Removes the raw echo of the current line so the styled version can replace it (one redraw).</summary>
+    void EraseEcho()
+    {
+        if (!Live || _shown == 0) return;
+        var rows = (_shown - 1) / Math.Max(width, 1);
+        output.Write(rows > 0 ? $"\e[{rows}F\e[J" : "\r\e[J");
+    }
+
+    string Inline(string text) => InlineCode().Replace(text, m => theme.Code(m.Groups[1].Value)) is var styled && Live
+        ? theme.Paint(styled, Tone.Primary)
+        : styled;
+
+    void FlushTable()
+    {
+        if (_table.Count == 0) return;
+        var rows = _table.Where(r => !r.All(c => SeparatorCell().IsMatch(c))).ToList();
+        var widths = Enumerable.Range(0, rows.Max(r => r.Length)).Select(i => rows.Max(r => i < r.Length ? r[i].Length : 0)).ToArray();
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var text = string.Join("  ", rows[r].Select((c, i) => c.PadRight(widths[i]))).TrimEnd();
+            output.WriteLine(r == 0 && rows.Count > 1 ? theme.Paint(text, Tone.Muted) : Live ? theme.Paint(text, Tone.Primary) : text);
+        }
+        _table.Clear();
+    }
+
+    static string[] Cells(string line) => line.Trim().Trim('|').Split('|').Select(c => c.Trim()).ToArray();
+
+    [GeneratedRegex(@"^#{1,6}\s+(.*)$")] private static partial Regex Heading();
+    [GeneratedRegex(@"^\s*[-*]\s+(.*)$")] private static partial Regex Bullet();
+    [GeneratedRegex(@"^\s*(\d+)\.\s+(.*)$")] private static partial Regex Numbered();
+    [GeneratedRegex(@"\*\*(.+?)\*\*")] private static partial Regex Bold();
+    [GeneratedRegex(@"\[([^\]]+)\]\(([^)\s]+)\)")] private static partial Regex Link();
+    [GeneratedRegex(@"`([^`]+)`")] private static partial Regex InlineCode();
+    [GeneratedRegex(@"^:?-+:?$")] private static partial Regex SeparatorCell();
+}

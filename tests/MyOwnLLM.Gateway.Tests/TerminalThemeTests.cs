@@ -32,23 +32,23 @@ public class TerminalThemeTests
     {
         var s = new Theme(ColorMode.TrueColor, unicode: true).Paint("x", Tone.Muted);
 
-        Assert.Contains("\e[38;2;119;119;119m", s);
-        Assert.EndsWith("\e[0m", s);
+        Assert.Contains("\e[38;2;119;119;119m", s, StringComparison.Ordinal);
+        Assert.EndsWith("\e[0m", s, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Paint_256_uses_index() => Assert.Contains("\e[38;5;243m", new Theme(ColorMode.Ansi256, true).Paint("x", Tone.Muted));
+    public void Paint_256_uses_index() => Assert.Contains("\e[38;5;243m", new Theme(ColorMode.Ansi256, true).Paint("x", Tone.Muted), StringComparison.Ordinal);
 
     [Fact]
-    public void Paint_16_uses_basic_codes() => Assert.Contains("\e[97m", new Theme(ColorMode.Ansi16, true).Paint("x", Tone.Primary));
+    public void Paint_16_uses_basic_codes() => Assert.Contains("\e[97m", new Theme(ColorMode.Ansi16, true).Paint("x", Tone.Primary), StringComparison.Ordinal);
 
     [Fact]
     public void Code_truecolor_has_background_and_resets()
     {
         var s = new Theme(ColorMode.TrueColor, true).Code("y");
 
-        Assert.Contains("\e[48;2;21;21;21m", s);
-        Assert.EndsWith("\e[0m", s);
+        Assert.Contains("\e[48;2;21;21;21m", s, StringComparison.Ordinal);
+        Assert.EndsWith("\e[0m", s, StringComparison.Ordinal);
     }
 
     [Fact]
