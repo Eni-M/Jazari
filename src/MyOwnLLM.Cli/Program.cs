@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using MyOwnLLM.Cli;
 
+Console.OutputEncoding = System.Text.Encoding.UTF8;
 CliArgs cli;
 try { cli = CliArgs.Parse(args); }
 catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
@@ -57,7 +58,7 @@ async Task<int> Ask()
     if (!cli.Stream)
     {
         var json = await ReadJson(response);
-        Console.WriteLine(json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+        Console.WriteLine(ConsoleText.Sanitize(json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()));
         return Done(json.GetProperty("id").GetString());
     }
 
@@ -68,7 +69,7 @@ async Task<int> Ask()
         if (!line.StartsWith("data: ") || line == "data: [DONE]") continue;
         using var chunk = JsonDocument.Parse(line["data: ".Length..]);
         if (chunk.RootElement.TryGetProperty("id", out var idProp)) id = idProp.GetString();
-        if (chunk.RootElement.GetProperty("choices")[0].GetProperty("delta").TryGetProperty("content", out var c)) Console.Write(c.GetString());
+        if (chunk.RootElement.GetProperty("choices")[0].GetProperty("delta").TryGetProperty("content", out var c)) Console.Write(ConsoleText.Sanitize(c.GetString()));
     }
     Console.WriteLine();
     return Done(id);
@@ -80,7 +81,7 @@ async Task<int> Status()
     using var response = await http.PostAsJsonAsync("/v1/status", new { project_path = repo }, cts.Token);
     if (!response.IsSuccessStatusCode) return await Fail(response);
     var json = await ReadJson(response);
-    Console.WriteLine(json.GetProperty("summary").GetString());
+    Console.WriteLine(ConsoleText.Sanitize(json.GetProperty("summary").GetString()));
     return Done(json.GetProperty("id").GetString());
 }
 
@@ -94,7 +95,7 @@ async Task<int> Feedback()
 
 int Done(string? id)
 {
-    Console.WriteLine($"\e[2m[{id} · {watch.Elapsed.TotalSeconds:0.0} s]\e[0m");
+    Console.WriteLine($"\e[2m[{ConsoleText.Sanitize(id)} · {watch.Elapsed.TotalSeconds:0.0} s]\e[0m");
     return 0;
 }
 
@@ -107,6 +108,6 @@ async Task<int> Fail(HttpResponseMessage response)
     string message;
     try { message = JsonDocument.Parse(body).RootElement.GetProperty("error").GetString() ?? body; }
     catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException) { message = $"{(int)response.StatusCode} {response.ReasonPhrase}"; }
-    Console.Error.WriteLine(message);
+    Console.Error.WriteLine(ConsoleText.Sanitize(message));
     return 1;
 }
