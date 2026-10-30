@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MyOwnLLM.Gateway/MyOwnLLM.Gateway.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MyOwnLLM.Gateway.Tests/MyOwnLLM.Gateway.Tests.csproj" />
+  </Folder>
+</Solution>
