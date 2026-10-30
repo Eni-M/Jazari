@@ -39,20 +39,20 @@ public static class Welcome
     {
         ConnectionState.GatewayNotRunning =>
         [
-            @"1. In your MyOwnLLM folder: .\scripts\start-llama.ps1",
-            "2. In a second window there: dotnet run --project src/MyOwnLLM.Gateway",
-            "3. Then type /model here to check the connection.",
+            @"Jazari starts its servers itself once .\scripts\install-jazari.ps1 has run in your MyOwnLLM folder.",
+            @"To start them by hand there: .\scripts\start-llama.ps1, and in a second window dotnet run --project src/MyOwnLLM.Gateway",
+            "Then type /model here to check the connection.",
         ],
         ConnectionState.KeyRejected =>
         [
             "The gateway doesn't know this key.",
-            "1. In your MyOwnLLM folder: dotnet run --project src/MyOwnLLM.Gateway -- add-key",
-            "2. Save it: setx JAZARI_KEY <the new key>, then open a new terminal.",
+            "In your MyOwnLLM folder: dotnet run --project src/MyOwnLLM.Gateway -- add-key",
+            "then setx JAZARI_KEY <the new key> and open a new terminal.",
         ],
         _ =>
         [
-            "1. In your MyOwnLLM folder: dotnet run --project src/MyOwnLLM.Gateway -- add-key",
-            "2. Save it: setx JAZARI_KEY <the key>, then open a new terminal.",
+            @"In your MyOwnLLM folder run .\scripts\install-jazari.ps1: it sets everything up, including the key.",
+            "By hand: dotnet run --project src/MyOwnLLM.Gateway -- add-key, then setx JAZARI_KEY <the key>.",
         ],
     };
 

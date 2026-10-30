@@ -8,16 +8,29 @@ CliArgs cli;
 try { cli = CliArgs.Parse(args); }
 catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
 
-var settings = Settings.FromEnvironment(Environment.GetEnvironmentVariable);
-// The interactive session opens without a key and explains the setup; one-off commands can't do anything without one.
-if (settings.Key is null && cli.Command != "session")
+if (cli.Command == "stop")
 {
-    Console.Error.WriteLine("set JAZARI_KEY (in your MyOwnLLM folder run: dotnet run --project src/MyOwnLLM.Gateway -- add-key)");
+    Console.WriteLine($"stopped {ServerLauncher.StopServers()} Jazari server process(es)");
+    return 0;
+}
+
+// Everything machine-specific comes from the config the installer wrote, so nothing is hard-coded.
+var config = JazariConfig.Load(JazariConfig.DefaultPath);
+var runner = new ProcessRunner();
+var settings = Settings.FromEnvironment(Environment.GetEnvironmentVariable);
+
+// First run: create a key through the gateway and save it as JAZARI_KEY, so the user never has to.
+var key = await new KeyProvisioner(runner, KeyProvisioner.SaveToEnvironment).EnsureKeyAsync(settings.Key, config, CancellationToken.None);
+
+// The interactive session opens without a key and explains the setup; one-off commands can't do anything without one.
+if (key is null && cli.Command != "session")
+{
+    Console.Error.WriteLine("no API key: run scripts\\install-jazari.ps1 in your MyOwnLLM folder (or set JAZARI_KEY)");
     return 2;
 }
 
 using var http = new HttpClient { BaseAddress = settings.GatewayUrl, Timeout = TimeSpan.FromMinutes(10) };
-if (settings.Key is not null) http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.Key);
+if (key is not null) http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
 var gateway = new GatewayClient(http);
 
 var version = typeof(CliArgs).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
@@ -26,13 +39,23 @@ var theme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariabl
 var width = Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20);
 var directory = Path.GetFullPath(cli.RepoPath ?? Directory.GetCurrentDirectory());
 
+// Start llama-server and the gateway in the background if they aren't running yet.
+using var health = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+async Task<bool> LlamaReady(CancellationToken ct)
+{
+    try { return (await health.GetAsync("http://127.0.0.1:8080/health", ct)).IsSuccessStatusCode; }
+    catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { return false; }
+}
+var startupUi = new Ui(Console.Out, theme, width);
+await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay).EnsureRunningAsync(config, CancellationToken.None);
+
 if (cli.Command == "session")
 {
-    var ui = new Ui(Console.Out, theme, width);
+    var ui = startupUi;
     // PrettyPrompt needs a real console; pipes and some IDE terminals get plain line input instead.
     ILineReader reader = Console.IsInputRedirected || Console.IsOutputRedirected ? new TextLineReader(Console.In) : new PromptLineReader(theme);
     await InputLoop.RunAsync(new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory), ui, version, directory, reader,
-        hasKey: settings.Key is not null);
+        hasKey: key is not null);
     return 0;
 }
 
