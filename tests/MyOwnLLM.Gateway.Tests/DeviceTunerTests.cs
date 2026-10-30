@@ -32,6 +32,24 @@ public class DeviceTunerTests : IDisposable
     public void Threads_tried_are_half_three_quarters_and_all(int cores, int[] expected) =>
         Assert.Equal(expected, DeviceTuner.ThreadCounts(cores));
 
+    [Theory]
+    [InlineData(15443, 40)] // Iris Xe, shared memory: the whole model
+    [InlineData(1900, 18)]  // T480's MX150, 2 GB: part of it
+    [InlineData(500, 1)]    // too little to be worth measuring
+    public void Gpu_layers_are_what_fits_in_free_memory(int freeMiB, int layers) =>
+        Assert.Equal(layers, DeviceTuner.LayersThatFit(freeMiB, modelMiB: 2002, contextTokens: 16384));
+
+    [Fact]
+    public async Task A_small_gpu_is_measured_with_part_of_the_model()
+    {
+        var runner = new FakeRunner { Devices = "Available devices:\n  Vulkan0: NVIDIA GeForce MX150 (2048 MiB, 1900 MiB free)\n" };
+
+        await Tuner(runner).EnsureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
+
+        var gpuRun = Assert.Single(runner.Runs, r => r.Contains("Vulkan0"));
+        Assert.Equal("18", gpuRun[Array.IndexOf(gpuRun, "-ngl") + 1]);
+    }
+
     [Fact]
     public void Default_settings_fit_the_ram()
     {
@@ -93,11 +111,14 @@ public class DeviceTunerTests : IDisposable
     {
         public int Benches { get; private set; }
         public int BenchExit { get; init; }
+        public string Devices { get; init; } = "Available devices:\n  (none)\n";
+        public List<string[]> Runs { get; } = [];
 
         public Task<(int ExitCode, string Output)> RunAsync(string exe, string[] args, CancellationToken ct)
         {
-            if (args is ["--list-devices"]) return Task.FromResult((0, "Available devices:\n  (none)\n"));
+            if (args is ["--list-devices"]) return Task.FromResult((0, Devices));
             Benches++;
+            Runs.Add(args);
             return Task.FromResult((BenchExit, BenchJson));
         }
 

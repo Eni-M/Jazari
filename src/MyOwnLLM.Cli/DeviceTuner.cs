@@ -52,18 +52,27 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         var bench = Path.Combine(Path.GetDirectoryName(config.LlamaServer)!, "llama-bench.exe");
         if (_fileSize(bench) is null) return best;
 
+        // CPU threads first, then flash attention only at the best thread count: a slow laptop measures 4 options, not 6.
         var results = new List<(Tuning Settings, double Seconds)>();
         var threads = string.Join(',', ThreadCounts(machine.LogicalCores));
         ui.Metadata($"Measuring the CPU ({machine.CpuName.Trim()}) at {threads} threads.");
-        results.AddRange(await BenchAsync(bench, config.Model, best, ["-dev", "none", "-ngl", "0", "-t", threads], ct));
+        var cpu = await BenchAsync(bench, config.Model, best, ["-dev", "none", "-ngl", "0", "-t", threads], "0", ct);
+        results.AddRange(cpu);
+        var bestThreads = cpu.Count > 0 ? cpu.MinBy(r => r.Item2).Item1.Threads : best.Threads;
+        ui.Metadata($"Measuring flash attention at {bestThreads} threads.");
+        results.AddRange(await BenchAsync(bench, config.Model, best, ["-dev", "none", "-ngl", "0", "-t", bestThreads.ToString()], "1", ct));
 
+        // Each GPU gets the whole model when it fits, else as many layers as fit: the T480's 2 GB MX150 reads prompts
+        // about 38% faster with 24 of 40 layers, at the same answer speed.
         var modelMiB = (int)((_fileSize(config.Model) ?? 0) >> 20);
-        var cacheMiB = best.ContextTokens * 80 / 1024; // 80 KiB a token on Granite 4.1 3B
-        foreach (var gpu in gpus.Where(g => g.FreeMiB >= modelMiB + cacheMiB + 512))
+        foreach (var gpu in gpus)
         {
-            ui.Metadata($"Measuring the GPU {gpu.Name}.");
-            results.AddRange(await BenchAsync(bench, config.Model, best with { Device = gpu.Id, GpuLayers = 99 },
-                ["-dev", gpu.Id, "-ngl", "99", "-t", best.Threads.ToString()], ct));
+            var layers = LayersThatFit(gpu.FreeMiB, modelMiB, best.ContextTokens);
+            if (layers < MinUsefulLayers) continue;
+            ui.Metadata($"Measuring the GPU {gpu.Name}{(layers < ModelLayers ? $" with {layers} of {ModelLayers} layers" : "")}.");
+            var ngl = layers >= ModelLayers ? 99 : layers;
+            results.AddRange(await BenchAsync(bench, config.Model, best with { Device = gpu.Id, GpuLayers = ngl },
+                ["-dev", gpu.Id, "-ngl", ngl.ToString(), "-t", bestThreads.ToString()], "0,1", ct));
         }
 
         if (results.Count == 0) { ui.Metadata("Nothing could be measured, so Jazari uses safe CPU settings."); return best; }
@@ -76,15 +85,31 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
     }
 
     public static string Describe(Tuning t) =>
-        (t.Device == "none" ? $"CPU, {t.Threads} threads" : $"GPU {t.Device}") + (t.FlashAttention ? ", flash attention" : "");
+        (t.Device == "none" ? $"CPU, {t.Threads} threads" : t.GpuLayers < ModelLayers ? $"GPU {t.Device}, {t.GpuLayers} layers" : $"GPU {t.Device}")
+        + (t.FlashAttention ? ", flash attention" : "");
+
+    const int ModelLayers = 40; // Granite 4.1 3B
+    const int MinUsefulLayers = 8; // fewer moves too little work to the GPU to pay for the copying
+
+    /// <summary>
+    /// How many of the model's layers fit in a GPU's free memory, each with its share of the context cache, after
+    /// 400 MiB for llama.cpp's working buffers. All of them when the whole model fits.
+    /// </summary>
+    public static int LayersThatFit(int freeMiB, int modelMiB, int contextTokens)
+    {
+        var cacheMiB = contextTokens * 80 / 1024; // 80 KiB a token on Granite 4.1 3B
+        if (freeMiB >= modelMiB + cacheMiB + 512) return ModelLayers;
+        var perLayer = (double)(modelMiB + cacheMiB) / ModelLayers;
+        return Math.Clamp((int)((freeMiB - 400) / perLayer), 0, ModelLayers);
+    }
 
     /// <summary>Half, three quarters and all of the logical cores: memory speed, not core count, usually sets the pace.</summary>
     public static IEnumerable<int> ThreadCounts(int logicalCores) =>
         new[] { logicalCores / 2, logicalCores * 3 / 4, logicalCores }.Where(t => t > 0).Distinct();
 
-    async Task<List<(Tuning, double)>> BenchAsync(string bench, string model, Tuning template, string[] device, CancellationToken ct)
+    async Task<List<(Tuning, double)>> BenchAsync(string bench, string model, Tuning template, string[] device, string flashAttention, CancellationToken ct)
     {
-        string[] args = ["-m", model, .. device, "-fa", "0,1", "-p", "512", "-n", "64", "-r", "2", "-o", "json"];
+        string[] args = ["-m", model, .. device, "-fa", flashAttention, "-p", "512", "-n", "64", "-r", "2", "-o", "json"];
         var (exit, output) = await runner.RunAsync(bench, args, ct);
         return exit == 0 ? Results(output, template) : [];
     }
