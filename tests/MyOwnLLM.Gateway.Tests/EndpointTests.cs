@@ -42,6 +42,9 @@ public sealed class FakeLlama : ILlamaClient
         yield return new(null, Stats: new(100, 40, 30.5, 2, 6.25));
     }
 
+    public int? ContextTokens { get; set; }
+    public Task<int?> ContextTokensAsync(CancellationToken ct) => Task.FromResult(ContextTokens);
+
     public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct)
     {
         Calls.Enqueue(new("infill", [new("user", prefix + "|" + suffix)], maxTokens));

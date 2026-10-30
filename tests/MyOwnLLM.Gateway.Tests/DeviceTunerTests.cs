@@ -1,0 +1,116 @@
+using MyOwnLLM.Cli;
+using MyOwnLLM.Cli.Terminal;
+
+namespace MyOwnLLM.Gateway.Tests;
+
+public class DeviceTunerTests : IDisposable
+{
+    readonly string _dir = Directory.CreateTempSubdirectory("jazari tune").FullName;
+    readonly StringWriter _output = new();
+    static readonly Machine Laptop = new("Intel(R) Core(TM) i5-1135G7 @ 2.40GHz", 8, 32L << 30);
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
+    [Fact]
+    public void Devices_are_read_from_list_devices()
+    {
+        var gpus = DeviceTuner.ParseDevices("""
+            Available devices:
+              Vulkan0: Intel(R) Iris(R) Xe Graphics (16211 MiB, 15443 MiB free)
+              Vulkan1: NVIDIA GeForce MX150 (2048 MiB, 1900 MiB free)
+            """);
+
+        Assert.Equal([new("Vulkan0", "Intel(R) Iris(R) Xe Graphics", 15443), new("Vulkan1", "NVIDIA GeForce MX150", 1900)], gpus);
+        Assert.Empty(DeviceTuner.ParseDevices("Available devices:\n  (none)\n"));
+    }
+
+    [Theory]
+    [InlineData(8, new[] { 4, 6, 8 })]
+    [InlineData(4, new[] { 2, 3, 4 })]
+    [InlineData(2, new[] { 1, 2 })]
+    [InlineData(1, new[] { 1 })]
+    public void Threads_tried_are_half_three_quarters_and_all(int cores, int[] expected) =>
+        Assert.Equal(expected, DeviceTuner.ThreadCounts(cores));
+
+    [Fact]
+    public void Default_settings_fit_the_ram()
+    {
+        Assert.Equal((6, 16384, 2048), (Tuning.Default("x", 8, 16L << 30) is var big ? (big.Threads, big.ContextTokens, big.CacheRamMiB) : default));
+        Assert.Equal((3, 8192, 1024), (Tuning.Default("x", 4, 8L << 30) is var small ? (small.Threads, small.ContextTokens, small.CacheRamMiB) : default));
+    }
+
+    [Fact]
+    public void Server_args_carry_the_tuned_settings()
+    {
+        var args = new Tuning("f", "Vulkan0", 4, 99, true, 16384, 2048).ServerArgs("m.gguf");
+
+        Assert.Equal("Vulkan0", args[Array.IndexOf(args, "-dev") + 1]);
+        Assert.Equal("99", args[Array.IndexOf(args, "-ngl") + 1]);
+        Assert.Equal("on", args[Array.IndexOf(args, "-fa") + 1]);
+        Assert.Equal("16384", args[Array.IndexOf(args, "-c") + 1]);
+    }
+
+    [Fact]
+    public async Task Saved_settings_are_reused_until_the_pc_changes()
+    {
+        var runner = new FakeRunner();
+        var config = Config();
+        var path = Path.Combine(_dir, "tuning.json");
+        var tuner = Tuner(runner);
+
+        var first = await tuner.EnsureAsync(config, Laptop, path, CancellationToken.None);
+        var afterFirst = runner.Benches;
+        var again = await tuner.EnsureAsync(config, Laptop, path, CancellationToken.None);
+        var afterAgain = runner.Benches;
+        var otherPc = await tuner.EnsureAsync(config, Laptop with { RamBytes = 16L << 30 }, path, CancellationToken.None);
+
+        Assert.Equal(("none", 6, true), (first.Device, first.Threads, first.FlashAttention));
+        Assert.Equal(first, again);
+        Assert.Equal(afterFirst, afterAgain); // reused, nothing measured
+        Assert.True(runner.Benches > afterAgain); // more RAM or less: measured again
+        Assert.NotEqual(first.Fingerprint, otherPc.Fingerprint);
+    }
+
+    [Fact]
+    public async Task Nothing_measurable_keeps_the_safe_default()
+    {
+        var runner = new FakeRunner { BenchExit = -1 }; // e.g. blocked by Windows Application Control
+        var tuning = await Tuner(runner)
+            .EnsureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
+
+        Assert.Equal(("none", 6), (tuning.Device, tuning.Threads));
+        Assert.Contains("safe CPU settings", _output.ToString());
+    }
+
+    static JazariConfig Config() => new(@"C:\J", @"C:\J\gateway.exe", @"C:\J\llama\llama-server.exe", @"C:\J\m.gguf");
+
+    /// <summary>Pretends the server, llama-bench and a 2 GB model are installed, without writing any files.</summary>
+    static long? Installed(string path) => path.EndsWith(".gguf") ? 2L << 30 : 1024;
+
+    DeviceTuner Tuner(IProcessRunner runner) => new(runner, new Ui(_output, new Theme(ColorMode.None, true), 100), Installed);
+
+    sealed class FakeRunner : IProcessRunner
+    {
+        public int Benches { get; private set; }
+        public int BenchExit { get; init; }
+
+        public Task<(int ExitCode, string Output)> RunAsync(string exe, string[] args, CancellationToken ct)
+        {
+            if (args is ["--list-devices"]) return Task.FromResult((0, "Available devices:\n  (none)\n"));
+            Benches++;
+            return Task.FromResult((BenchExit, BenchJson));
+        }
+
+        public void StartDetached(string exe, string[] args, string logFile) { }
+    }
+
+    /// <summary>CPU at 4 and 6 threads; 6 threads with flash attention finishes a typical turn soonest.</summary>
+    internal const string BenchJson = """
+        [
+          {"n_threads":4,"flash_attn":false,"n_prompt":512,"n_gen":0,"avg_ts":40.0},
+          {"n_threads":4,"flash_attn":false,"n_prompt":0,"n_gen":64,"avg_ts":9.0},
+          {"n_threads":6,"flash_attn":true,"n_prompt":512,"n_gen":0,"avg_ts":55.0},
+          {"n_threads":6,"flash_attn":true,"n_prompt":0,"n_gen":64,"avg_ts":10.0}
+        ]
+        """;
+}

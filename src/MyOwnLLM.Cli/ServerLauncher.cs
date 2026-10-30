@@ -9,7 +9,8 @@ namespace MyOwnLLM.Cli;
 /// </summary>
 public sealed class ServerLauncher(
     IProcessRunner runner, IGatewayClient gateway, Func<CancellationToken, Task<bool>> llamaReady, Ui ui, string logDir,
-    Func<TimeSpan, CancellationToken, Task> delay, int maxWaits = 180, Func<string, bool>? fileExists = null)
+    Func<TimeSpan, CancellationToken, Task> delay, int maxWaits = 180, Func<string, bool>? fileExists = null,
+    Func<JazariConfig, CancellationToken, Task<string[]>>? llamaArgs = null)
 {
     static readonly TimeSpan PollEvery = TimeSpan.FromMilliseconds(500);
 
@@ -31,11 +32,14 @@ public sealed class ServerLauncher(
 
         ui.Label("starting");
         if (!llamaUp)
-            runner.StartDetached(config.LlamaServer,
-            [
-                "-m", config.Model, "-dev", "none", "-t", "6", "--poll", "0", "-c", "16384", "--cache-ram", "2048",
-                "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", "8080",
-            ], Path.Combine(logDir, "llama-server.log"));
+            // The settings measured best on this PC (see DeviceTuner), or the T480's measured CPU setup.
+            runner.StartDetached(config.LlamaServer, llamaArgs is null
+                ?
+                [
+                    "-m", config.Model, "-dev", "none", "-t", "6", "--poll", "0", "-c", "16384", "--cache-ram", "2048",
+                    "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", "8080",
+                ]
+                : await llamaArgs(config, ct), Path.Combine(logDir, "llama-server.log"));
         if (gatewayState is ConnectionState.GatewayNotRunning)
             runner.StartDetached(config.GatewayExe, [], Path.Combine(logDir, "gateway.log"));
 

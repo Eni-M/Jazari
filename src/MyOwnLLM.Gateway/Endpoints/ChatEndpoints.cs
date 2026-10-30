@@ -37,12 +37,12 @@ public static class ChatEndpoints
         return group;
     }
 
-    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, GatewayOptions Options);
+    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, ModelLimits Limits);
 
     static Services Resolve(HttpContext http) => new(
         http.RequestServices.GetRequiredService<ILlamaClient>(), http.RequestServices.GetRequiredService<RequestQueue>(),
         http.RequestServices.GetRequiredService<ProjectStateStore>(), http.RequestServices.GetRequiredService<InteractionLog>(),
-        http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<GatewayOptions>());
+        http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<ModelLimits>());
 
     static Task Chat(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
@@ -50,7 +50,7 @@ public static class ChatEndpoints
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultChatTokens, 1, MaxChatTokens);
         var question = request.Messages.LastOrDefault()?.Content ?? "";
         var note = project is null ? null : await s.State.GetAsync(project);
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages.SkipLast(1).ToList(), question), s.Options.ContextTokens, maxTokens);
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages.SkipLast(1).ToList(), question), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens);
         var watch = Stopwatch.StartNew();
 
         string answer;
@@ -112,7 +112,7 @@ public static class ChatEndpoints
     {
         var project = http.Request.Headers["X-Project-Path"].FirstOrDefault();
         var note = project is null ? null : await s.State.GetAsync(project);
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, ""), s.Options.ContextTokens, DefaultChatTokens);
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, ""), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
         await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, 1, t), http.RequestAborted);
         http.Response.StatusCode = StatusCodes.Status204NoContent;
     });
@@ -121,7 +121,8 @@ public static class ChatEndpoints
     {
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultInfillTokens, 1, MaxChatTokens);
         var estimated = PromptBuilder.EstimateTokens(request.Prefix) + PromptBuilder.EstimateTokens(request.Suffix);
-        if (estimated > s.Options.ContextTokens - maxTokens) throw new InputTooLargeException(estimated, s.Options.ContextTokens - maxTokens);
+        var context = await s.Limits.ContextTokensAsync(http.RequestAborted);
+        if (estimated > context - maxTokens) throw new InputTooLargeException(estimated, context - maxTokens);
         var watch = Stopwatch.StartNew();
         var content = await s.Cache.GetOrCreateAsync(CacheKey("infill", null, null, request.Prefix, request.Suffix, maxTokens),
             ct => new ValueTask<string>(s.Queue.EnqueueAsync(WorkKind.Completion, t => s.Llama.InfillAsync(request.Prefix, request.Suffix, maxTokens, t), ct)),
@@ -134,7 +135,7 @@ public static class ChatEndpoints
     {
         var note = await s.State.GetAsync(request.ProjectPath);
         var git = await GitSummary.GetAsync(request.ProjectPath, http.RequestAborted);
-        var prompt = PromptBuilder.Build(new PromptParts(note ?? "(no notes yet)", git, [], StatusQuestion), s.Options.ContextTokens, StatusTokens);
+        var prompt = PromptBuilder.Build(new PromptParts(note ?? "(no notes yet)", git, [], StatusQuestion), await s.Limits.ContextTokensAsync(http.RequestAborted), StatusTokens);
         var watch = Stopwatch.StartNew();
         var summary = await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, StatusTokens, t), http.RequestAborted);
         var id = await s.Log.AddAsync(new Interaction(request.ProjectPath, "status", StatusQuestion, summary, watch.ElapsedMilliseconds));

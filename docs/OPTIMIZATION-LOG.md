@@ -39,6 +39,13 @@ Plan and status (update as each step finishes):
 
 **Found 2026-10-30, session 2: this session runs on a different PC from the one measured above.** All measurements in this file come from the T480 (user `enim`). This PC (user `techcom`) is a Lenovo 20X3 with an **i5-1135G7** (Tiger Lake, 4 cores, 8 threads, AVX-512 and VNNI), **32 GB DDR4-2667 in two channels** (about 42 GB/s theoretical, twice the T480), Intel Iris Xe (96 EU, shared memory), 377 GB free on C:, Balanced power plan. Jazari, llama-server and the model are not installed here. The research report targets the T480. Its hardware advice (MX150, single channel, quant choice) does not carry over; its bridge and usability advice does. On this PC, answers should be roughly twice as fast (bandwidth), Iris Xe is a real option through llama.cpp Vulkan/SYCL or OpenVINO, and the AVX-512 path in llama.cpp applies.
 
+**Eni-M's direction (2026-10-30, session 2):** "make jazari use the optimum on every device, not only this or the T480". So Jazari now measures each PC itself (`jazari tune`, `DeviceTuner.cs`, `Tuning.cs`) instead of using settings hard-coded from one laptop. Eni-M allowed downloading llama.cpp b11982 (CPU and Vulkan zips) and Granite 4.1 3B Q4_K_M into `spike/` for measuring on this PC.
+
+**Found on this PC:**
+- Smart App Control is enforcing (`VerifiedAndReputablePolicyState` 1). It blocked `llama-fit-params.exe` but allowed `llama-server`, `llama-bench`, `llama-cli` and `llama-tokenize`. So any tool Jazari runs can be blocked on some PC: the tuner treats a blocked tool as "can't measure" and keeps safe settings.
+- First quick look, i5-1135G7, CPU only, 4 threads, 1 run: prompt 74 tok/s, answer 12.9 tok/s (T480: 28.8 / 6.2).
+- The test config written for `jazari tune` lives in this session's AppData (`Jazari\config.json` and `tuning.json`, pointing at `spike/`). Delete both before a real install on this PC.
+
 ### Decisions waiting for Eni-M
 
 - **Which PC hosts Jazari:** the T480 or this i5-1135G7 PC? Measuring here needs llama.cpp and the model downloaded into `spike/` (git-ignored, not an install), which needs Eni-M's OK

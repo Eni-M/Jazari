@@ -62,6 +62,20 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
         return doc.RootElement.GetProperty("content").GetString() ?? "";
     }
 
+    public async Task<int?> ContextTokensAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var response = await http.GetAsync("/props", ct);
+            if (!response.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            var root = doc.RootElement;
+            var settings = root.TryGetProperty("default_generation_settings", out var s) ? s : root;
+            return settings.TryGetProperty("n_ctx", out var n) && n.TryGetInt32(out var tokens) && tokens > 0 ? tokens : null;
+        }
+        catch (Exception e) when (e is HttpRequestException or JsonException or InvalidOperationException) { return null; }
+    }
+
     static object ChatBody(IReadOnlyList<ChatMessage> messages, int maxTokens, bool stream) =>
         new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = stream, Temperature = CodeTemperature };
 

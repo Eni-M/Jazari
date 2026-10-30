@@ -27,6 +27,7 @@ builder.Services.AddSingleton<ProjectStateStore>();
 builder.Services.AddSingleton<InteractionLog>();
 builder.Services.AddSingleton<StateNoteUpdater>();
 builder.Services.AddSingleton<RequestQueue>();
+builder.Services.AddSingleton<ModelLimits>();
 builder.Services.AddHostedService<QueueWorker>();
 builder.Services.AddHybridCache();
 builder.Services.AddHttpClient<ILlamaClient, LlamaClient>(http =>

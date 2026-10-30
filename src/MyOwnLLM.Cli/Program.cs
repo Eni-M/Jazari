@@ -17,6 +17,16 @@ if (cli.Command == "stop")
 // Everything machine-specific comes from the config the installer wrote, so nothing is hard-coded.
 var config = JazariConfig.Load(JazariConfig.DefaultPath);
 var runner = new ProcessRunner();
+
+if (cli.Command == "tune")
+{
+    if (config is null) { Console.Error.WriteLine("Jazari isn't installed: run scripts/install-jazari.ps1"); return 2; }
+    // The model must have the PC to itself while it's measured.
+    if (ServerLauncher.StopServers() > 0) Console.WriteLine("Stopped Jazari's servers; they start again with the new settings.");
+    var tuneUi = new Ui(Console.Out, new Theme(ColorMode.None, unicode: true), 100);
+    await new DeviceTuner(runner, tuneUi).EnsureAsync(config, DeviceTuner.ReadMachine(), Tuning.DefaultPath, CancellationToken.None, force: true);
+    return 0;
+}
 Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0"); // git must never stop to ask for credentials
 var updateAvailable = cli.Command == "session"
     ? Task.Run(() => UpdateCheck.IsUpdateAvailableAsync(runner, config, TimeSpan.FromSeconds(5), CancellationToken.None))
@@ -53,7 +63,11 @@ async Task<bool> LlamaReady(CancellationToken ct)
 }
 var startupUi = new Ui(Console.Out, theme, width);
 if (cli.Command == "session") startupUi.TakeOverScreen();
-var serverState = await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay).EnsureRunningAsync(config, CancellationToken.None);
+var tuner = new DeviceTuner(runner, startupUi);
+async Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) =>
+    (await tuner.EnsureAsync(c, DeviceTuner.ReadMachine(), Tuning.DefaultPath, ct)).ServerArgs(c.Model);
+var serverState = await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay, llamaArgs: TunedArgs)
+    .EnsureRunningAsync(config, CancellationToken.None);
 // A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run.
 if (serverState == ConnectionState.KeyRejected && await provisioner.EnsureKeyAsync(key, config, CancellationToken.None, rejected: true) is { } freshKey)
 {

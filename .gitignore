@@ -10,3 +10,5 @@ bin/
 obj/
 artifacts/
 .idea/
+spike/bin-*/
+spike/dl/
