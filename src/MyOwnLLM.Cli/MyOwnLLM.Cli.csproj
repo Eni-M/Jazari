@@ -6,9 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>jazari</AssemblyName>
-    <PackAsTool>true</PackAsTool>
-    <ToolCommandName>jazari</ToolCommandName>
-    <PackageId>Jazari</PackageId>
     <Version>0.2.0</Version>
     <RootNamespace>MyOwnLLM.Cli</RootNamespace>
   </PropertyGroup>

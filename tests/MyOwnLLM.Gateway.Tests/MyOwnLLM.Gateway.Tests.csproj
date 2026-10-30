@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MyOwnLLM.Gateway\MyOwnLLM.Gateway.csproj" />
     <ProjectReference Include="..\..\src\MyOwnLLM.Cli\MyOwnLLM.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Jazari.Launcher\Jazari.Launcher.csproj" />
   </ItemGroup>
 
 </Project>
