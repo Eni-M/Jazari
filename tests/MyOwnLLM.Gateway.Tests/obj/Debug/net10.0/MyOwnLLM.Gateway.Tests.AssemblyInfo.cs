@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MyOwnLLM.Gateway.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cbe19086b02fdef743fd28056e528716877eb400")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0534b7b4fa18d6cdb9fe2d68696b6fe5df4e37e5")]
 [assembly: System.Reflection.AssemblyProductAttribute("MyOwnLLM.Gateway.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MyOwnLLM.Gateway.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

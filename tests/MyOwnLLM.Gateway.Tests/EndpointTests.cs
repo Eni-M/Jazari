@@ -1,0 +1,230 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using MyOwnLLM.Gateway.Auth;
+using MyOwnLLM.Gateway.Llama;
+
+namespace MyOwnLLM.Gateway.Tests;
+
+public sealed class FakeLlama : ILlamaClient
+{
+    public sealed record Call(string Kind, IReadOnlyList<ChatMessage> Messages, int MaxTokens);
+    public ConcurrentQueue<Call> Calls { get; } = new();
+    public Func<CancellationToken, Task<string>> Chat { get; set; } = _ => Task.FromResult("answer");
+
+    public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct)
+    {
+        Calls.Enqueue(new("chat", messages, maxTokens));
+        return Chat(ct);
+    }
+
+    public async IAsyncEnumerable<string> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
+    {
+        Calls.Enqueue(new("stream", messages, maxTokens));
+        foreach (var part in new[] { "a", "b" }) { await Task.Yield(); yield return part; }
+    }
+
+    public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct)
+    {
+        Calls.Enqueue(new("infill", [new("user", prefix + "|" + suffix)], maxTokens));
+        return Task.FromResult("filled");
+    }
+}
+
+sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    public ConcurrentQueue<string> Lines { get; } = new();
+    public ILogger CreateLogger(string categoryName) => new Logger(Lines);
+    public void Dispose() { }
+
+    sealed class Logger(ConcurrentQueue<string> lines) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            lines.Enqueue(formatter(state, exception) + exception);
+    }
+}
+
+public class EndpointTests : IDisposable
+{
+    readonly string _dir = Directory.CreateTempSubdirectory("mollm-gw").FullName;
+    readonly FakeLlama _llama = new();
+    readonly CapturingLoggerProvider _logs = new();
+    readonly WebApplicationFactory<Program> _factory;
+    readonly HttpClient _client;
+    readonly string _key;
+
+    public EndpointTests()
+    {
+        _key = new ApiKeyStore(Path.Combine(_dir, "keys.json")).AddKey();
+        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Gateway:DataDir", _dir);
+            b.ConfigureLogging(l => l.AddProvider(_logs));
+            b.ConfigureTestServices(s => s.AddSingleton<ILlamaClient>(_llama));
+        });
+        _client = _factory.CreateClient();
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _key);
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Directory.Delete(_dir, recursive: true);
+    }
+
+    static object ChatBody(string question, bool stream = false) =>
+        new { messages = new[] { new { role = "user", content = question } }, stream };
+
+    static async Task<JsonElement> Json(HttpResponseMessage response) =>
+        JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Bearer mollm_wrong")]
+    [InlineData("Basic abc")]
+    public async Task Requests_without_valid_bearer_key_get_401(string? header)
+    {
+        var client = _factory.CreateClient();
+        if (header is not null) client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", header);
+
+        var response = await client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.DoesNotContain(_logs.Lines, l => l.Contains("mollm_wrong") || l.Contains(_key));
+    }
+
+    [Fact]
+    public async Task Chat_buffered_returns_openai_shape_with_ix_id_and_logs_interaction()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi"));
+
+        response.EnsureSuccessStatusCode();
+        var json = await Json(response);
+        Assert.StartsWith("ix-", json.GetProperty("id").GetString());
+        Assert.Equal("answer", json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+        var feedback = await _client.PostAsJsonAsync("/v1/feedback", new { id = json.GetProperty("id").GetString(), accepted = true });
+        Assert.Equal(HttpStatusCode.NoContent, feedback.StatusCode);
+    }
+
+    [Fact]
+    public async Task Chat_stream_returns_sse_and_done()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi", stream: true));
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("text/event-stream", response.Content.Headers.ContentType!.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"content\":\"a\"", body);
+        Assert.Contains("\"content\":\"b\"", body);
+        Assert.Contains("\"id\":\"ix-", body);
+        Assert.EndsWith("data: [DONE]\n\n", body);
+    }
+
+    [Fact]
+    public async Task Identical_chat_request_is_served_from_cache()
+    {
+        await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("same question"));
+        var second = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("same question"));
+
+        second.EnsureSuccessStatusCode();
+        Assert.Single(_llama.Calls);
+    }
+
+    [Fact]
+    public async Task Status_uses_state_note_and_caps_tokens_at_150()
+    {
+        var project = Directory.CreateDirectory(Path.Combine(_dir, "proj")).FullName;
+        await _factory.Services.GetRequiredService<MyOwnLLM.Gateway.State.ProjectStateStore>().SetAsync(project, "NOTE: building the queue");
+
+        var response = await _client.PostAsJsonAsync("/v1/status", new { project_path = project });
+
+        response.EnsureSuccessStatusCode();
+        var json = await Json(response);
+        Assert.Equal("answer", json.GetProperty("summary").GetString());
+        var call = Assert.Single(_llama.Calls);
+        Assert.Equal(150, call.MaxTokens);
+        Assert.Contains("NOTE: building the queue", call.Messages[1].Content);
+    }
+
+    [Fact]
+    public async Task Feedback_known_id_204_unknown_404()
+    {
+        var chat = await Json(await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi")));
+
+        var known = await _client.PostAsJsonAsync("/v1/feedback", new { id = chat.GetProperty("id").GetString(), accepted = false });
+        var unknown = await _client.PostAsJsonAsync("/v1/feedback", new { id = "ix-99999", accepted = true });
+        var garbage = await _client.PostAsJsonAsync("/v1/feedback", new { id = "nope", accepted = true });
+
+        Assert.Equal(HttpStatusCode.NoContent, known.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, garbage.StatusCode);
+    }
+
+    [Fact]
+    public async Task Llama_down_returns_503_and_next_request_succeeds()
+    {
+        _llama.Chat = _ => throw new LlamaUnavailableException("http://127.0.0.1:8080/", new HttpRequestException());
+
+        var down = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("first"));
+        _llama.Chat = _ => Task.FromResult("back");
+        var up = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("second"));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, down.StatusCode);
+        Assert.Equal("model server not reachable at http://127.0.0.1:8080/", (await Json(down)).GetProperty("error").GetString());
+        Assert.Equal(HttpStatusCode.OK, up.StatusCode);
+    }
+
+    [Fact]
+    public async Task Oversized_input_returns_413()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(new string('x', 70_000)));
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.StartsWith("input too large", (await Json(response)).GetProperty("error").GetString());
+        Assert.Empty(_llama.Calls);
+    }
+
+    [Fact]
+    public async Task Infill_returns_content_with_id()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/infill", new { prefix = "int x = ", suffix = ";" });
+
+        response.EnsureSuccessStatusCode();
+        var json = await Json(response);
+        Assert.Equal("filled", json.GetProperty("content").GetString());
+        Assert.Equal(64, Assert.Single(_llama.Calls).MaxTokens);
+    }
+
+    [Fact]
+    public async Task Client_abort_cancels_llama_call()
+    {
+        var started = new TaskCompletionSource();
+        var cancelled = new TaskCompletionSource();
+        _llama.Chat = async ct =>
+        {
+            started.TrySetResult();
+            try { await Task.Delay(Timeout.Infinite, ct); }
+            catch (OperationCanceledException) { cancelled.TrySetResult(); throw; }
+            return "never";
+        };
+        using var cts = new CancellationTokenSource();
+
+        var request = _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("slow"), cts.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+}

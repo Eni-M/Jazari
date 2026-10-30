@@ -55,6 +55,10 @@
             "Microsoft.Data.Sqlite": {
               "target": "Package",
               "version": "[10.0.14, )"
+            },
+            "Microsoft.Extensions.Caching.Hybrid": {
+              "target": "Package",
+              "version": "[10.11.0, )"
             }
           },
           "imports": [

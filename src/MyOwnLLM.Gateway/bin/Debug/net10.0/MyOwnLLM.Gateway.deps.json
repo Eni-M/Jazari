@@ -8,7 +8,8 @@
     ".NETCoreApp,Version=v10.0": {
       "MyOwnLLM.Gateway/1.0.0": {
         "dependencies": {
-          "Microsoft.Data.Sqlite": "10.0.14"
+          "Microsoft.Data.Sqlite": "10.0.14",
+          "Microsoft.Extensions.Caching.Hybrid": "10.11.0"
         },
         "runtime": {
           "MyOwnLLM.Gateway.dll": {}
@@ -29,6 +30,14 @@
           "lib/net8.0/Microsoft.Data.Sqlite.dll": {
             "assemblyVersion": "10.0.14.0",
             "fileVersion": "10.0.1426.52326"
+          }
+        }
+      },
+      "Microsoft.Extensions.Caching.Hybrid/10.11.0": {
+        "runtime": {
+          "lib/net10.0/Microsoft.Extensions.Caching.Hybrid.dll": {
+            "assemblyVersion": "10.11.0.0",
+            "fileVersion": "10.1100.26.51307"
           }
         }
       },
@@ -198,6 +207,13 @@
       "sha512": "sha512-1p9rO3Q2X/L/9YrYog3vaDzi8u+WZfJCOkDYoHqmofqYP0DLPLPyZcS2Rnh/79JXAodgbs1AgsaNwLpIvC3Xew==",
       "path": "microsoft.data.sqlite.core/10.0.14",
       "hashPath": "microsoft.data.sqlite.core.10.0.14.nupkg.sha512"
+    },
+    "Microsoft.Extensions.Caching.Hybrid/10.11.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-F4P+uZgDFnKfmHm0ReWJNSVXAlZmknQgkkrmEDtAdxWvVPCSZL7UPAY7Ewf8zs5qwPCGaYopZiRiPg2YGCfuhA==",
+      "path": "microsoft.extensions.caching.hybrid/10.11.0",
+      "hashPath": "microsoft.extensions.caching.hybrid.10.11.0.nupkg.sha512"
     },
     "SQLitePCLRaw.bundle_e_sqlite3/2.1.13": {
       "type": "package",
