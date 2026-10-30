@@ -91,7 +91,8 @@ function Repair-Build($thing, $project, $folder, $exe) {
     if ((Test-Path (Join-Path $folder $exe)) -and (Test-Path $marker) -and "$(Get-Content -Raw $marker)".Trim() -eq $commit) { Say-Ok $thing; return }
     $new = "$folder.new"
     if (Test-Path $new) { Remove-Item -Recurse -Force $new }
-    dotnet publish (Join-Path $sourceDir "src\$project") -c Release -o $new --nologo -v q
+    # No shared compiler server: one left over from an app with redirected AppData (Claude Desktop) would write the build there.
+    dotnet publish (Join-Path $sourceDir "src\$project") -c Release -o $new --nologo -v q --disable-build-servers
     if ($LASTEXITCODE -ne 0) { if (Test-Path $new) { Remove-Item -Recurse -Force $new }; throw "the build failed" }
     Set-Content -Encoding ASCII (Join-Path $new "build-commit.txt") $commit
     Swap-Folder $new $folder

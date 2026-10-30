@@ -100,7 +100,7 @@ if (-not (Test-Path (Join-Path $InstallDir "app\jazari.exe"))) {
 # 5. the jazari command (the launcher); each run gets a higher package version so the tool update always takes the new build
 $artifacts = Join-Path $source "artifacts"
 $package = "0.3.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
-dotnet pack (Join-Path $source "src\Jazari.Launcher") -c Release -o $artifacts -p:PackageVersion=$package --nologo -v q
+dotnet pack (Join-Path $source "src\Jazari.Launcher") -c Release -o $artifacts -p:PackageVersion=$package --nologo -v q --disable-build-servers
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($customDir) {
