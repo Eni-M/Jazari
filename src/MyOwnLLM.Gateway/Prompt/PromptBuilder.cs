@@ -18,21 +18,31 @@ public sealed class InputTooLargeException(int estimated, int limit)
 public static class PromptBuilder
 {
     public const string SystemPrompt =
-        "You are MyOwnLLM, a concise coding assistant for ASP.NET Core, C#, .NET, networking, system design, " +
+        "You are Jazari, a concise coding assistant for ASP.NET Core, C#, .NET, networking, system design, " +
         "system architecture and cybersecurity. Prefer short answers and diffs over whole files.";
 
     public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens)
     {
-        List<ChatMessage> messages = [new("system", SystemPrompt)];
-        if (parts.StateNote is { Length: > 0 } note) messages.Add(new("system", "Project state:\n" + note));
-        if (parts.RepoContext is { Length: > 0 } context) messages.Add(new("system", "Relevant code:\n" + context));
-        messages.AddRange(parts.History);
-        messages.Add(new("user", parts.Question));
+        List<ChatMessage> fixedStart = [new("system", SystemPrompt)];
+        if (parts.StateNote is { Length: > 0 } note) fixedStart.Add(new("system", "Project state:\n" + note));
+        if (parts.RepoContext is { Length: > 0 } context) fixedStart.Add(new("system", "Relevant code:\n" + context));
+        var question = new ChatMessage("user", parts.Question);
 
-        var estimated = messages.Sum(m => EstimateTokens(m.Content));
         var limit = contextTokens - maxOutputTokens;
-        if (estimated > limit) throw new InputTooLargeException(estimated, limit);
-        return messages;
+        var required = fixedStart.Sum(m => EstimateTokens(m.Content)) + EstimateTokens(question.Content);
+        if (required > limit) throw new InputTooLargeException(required, limit);
+
+        // Long conversations: drop the oldest history (a user/assistant pair at a time) until it fits.
+        var history = parts.History.ToList();
+        var historyTokens = history.Sum(m => EstimateTokens(m.Content));
+        while (history.Count > 0 && required + historyTokens > limit)
+        {
+            var drop = Math.Min(2, history.Count);
+            historyTokens -= history.Take(drop).Sum(m => EstimateTokens(m.Content));
+            history.RemoveRange(0, drop);
+        }
+
+        return [.. fixedStart, .. history, question];
     }
 
     // ponytail: chars/4 heuristic; switch to llama-server /tokenize if limits get tight.

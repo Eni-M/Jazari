@@ -37,6 +37,27 @@ public class PromptBuilderTests
     }
 
     [Fact]
+    public void Build_drops_oldest_history_to_fit()
+    {
+        var history = Enumerable.Range(0, 10).SelectMany(i => new ChatMessage[]
+        {
+            new("user", $"q{i} " + new string('u', 8000)),
+            new("assistant", $"a{i} " + new string('a', 8000)),
+        }).ToList();
+
+        var messages = PromptBuilder.Build(new PromptParts(null, null, history, "QUESTION"), 16384, 512);
+
+        Assert.True(messages.Sum(m => PromptBuilder.EstimateTokens(m.Content)) <= 16384 - 512);
+        Assert.Contains(messages, m => m.Content.StartsWith("q9 "));
+        Assert.Contains(messages, m => m.Content.StartsWith("a9 "));
+        Assert.DoesNotContain(messages, m => m.Content.StartsWith("q0 "));
+        Assert.Equal("QUESTION", messages[^1].Content);
+    }
+
+    [Fact]
+    public void SystemPrompt_names_Jazari() => Assert.StartsWith("You are Jazari", PromptBuilder.SystemPrompt);
+
+    [Fact]
     public void Build_throws_when_over_budget()
     {
         var parts = new PromptParts(null, null, [], new string('x', 70_000));

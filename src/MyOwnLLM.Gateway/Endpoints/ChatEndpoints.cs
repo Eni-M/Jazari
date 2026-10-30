@@ -19,6 +19,7 @@ public sealed record FeedbackRequest(string Id, bool Accepted);
 public static class ChatEndpoints
 {
     const int DefaultChatTokens = 512, MaxChatTokens = 1024, DefaultInfillTokens = 64, StatusTokens = 150;
+    static readonly string Version = typeof(ChatEndpoints).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false) is [System.Reflection.AssemblyInformationalVersionAttribute v, ..] ? v.InformationalVersion.Split('+')[0] : "0.0.0";
     const string StatusQuestion = "Where are we left at? Answer with a short summary.";
     static readonly HybridCacheEntryOptions CacheFor = new() { Expiration = TimeSpan.FromHours(1), LocalCacheExpiration = TimeSpan.FromHours(1) };
     static readonly JsonSerializerOptions SnakeCase = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
@@ -29,6 +30,7 @@ public static class ChatEndpoints
         group.MapPost("/infill", Infill);
         group.MapPost("/status", Status);
         group.MapPost("/feedback", Feedback);
+        group.MapGet("/info", (GatewayOptions o) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version }));
         return group;
     }
 

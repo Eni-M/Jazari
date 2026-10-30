@@ -243,6 +243,26 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task Info_returns_name_model_version()
+    {
+        var response = await _client.GetAsync("/v1/info");
+
+        response.EnsureSuccessStatusCode();
+        var json = await Json(response);
+        Assert.Equal("Jazari", json.GetProperty("name").GetString());
+        Assert.Equal("Granite 4.1 3B", json.GetProperty("model").GetString());
+        Assert.False(string.IsNullOrEmpty(json.GetProperty("version").GetString()));
+    }
+
+    [Fact]
+    public async Task Info_requires_key()
+    {
+        var response = await _factory.CreateClient().GetAsync("/v1/info");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Infill_returns_content_with_id()
     {
         var response = await _client.PostAsJsonAsync("/v1/infill", new { prefix = "int x = ", suffix = ";" });
