@@ -10,7 +10,8 @@ namespace MyOwnLLM.Cli;
 public sealed class ServerLauncher(
     IProcessRunner runner, IGatewayClient gateway, Func<CancellationToken, Task<bool>> llamaReady, Ui ui, string logDir,
     Func<TimeSpan, CancellationToken, Task> delay, int maxWaits = 180, Func<string, bool>? fileExists = null,
-    Func<JazariConfig, CancellationToken, Task<string[]>>? llamaArgs = null)
+    Func<JazariConfig, CancellationToken, Task<string[]>>? llamaArgs = null,
+    Func<JazariConfig, CancellationToken, Task<string[]>>? fallbackArgs = null, Func<bool>? llamaAlive = null)
 {
     static readonly TimeSpan PollEvery = TimeSpan.FromMilliseconds(500);
 
@@ -44,15 +45,33 @@ public sealed class ServerLauncher(
             runner.StartDetached(config.GatewayExe, [], Path.Combine(logDir, "gateway.log"));
 
         var waited = Stopwatch.StartNew(); // checks themselves can take ~2 s while a port refuses, so cap the total wait too
+        var fellBack = false;
         for (var i = 0; i < maxWaits && waited.Elapsed < TimeSpan.FromMinutes(2); i++)
         {
             await delay(PollEvery, ct);
             gatewayState = await GatewayStateAsync(ct);
-            if (gatewayState is not ConnectionState.GatewayNotRunning && await llamaReady(ct)) return gatewayState;
+            var ready = await llamaReady(ct);
+            if (gatewayState is not ConnectionState.GatewayNotRunning && ready) return gatewayState;
+
+            // The tuned settings can stop working (a GPU driver update, say): once llama-server has had a few seconds and
+            // is gone, start it again on safe CPU settings rather than waiting for a server that crashed.
+            if (!llamaUp && !ready && !fellBack && fallbackArgs is not null && i >= 6 && !(llamaAlive ?? LlamaAlive)())
+            {
+                fellBack = true;
+                ui.Metadata("The model server stopped with this PC's tuned settings, so it's starting on safe CPU settings. Run jazari tune to measure again.");
+                runner.StartDetached(config.LlamaServer, await fallbackArgs(config, ct), Path.Combine(logDir, "llama-server.log"));
+            }
         }
 
         ui.Error("Jazari's servers didn't start in time.", $"see the logs in {logDir}", "Run jazari again once the model has loaded, or check the logs.");
         return ConnectionState.GatewayNotRunning;
+    }
+
+    static bool LlamaAlive()
+    {
+        var running = Process.GetProcessesByName("llama-server");
+        foreach (var p in running) p.Dispose();
+        return running.Length > 0;
     }
 
     async Task<ConnectionState> GatewayStateAsync(CancellationToken ct)

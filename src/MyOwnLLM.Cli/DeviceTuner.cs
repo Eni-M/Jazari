@@ -38,6 +38,14 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         return tuning;
     }
 
+    /// <summary>Saves safe CPU settings for this PC after the tuned ones failed, so later starts don't fail again.</summary>
+    public async Task<Tuning> FallBackAsync(JazariConfig config, Machine machine, string path, CancellationToken ct)
+    {
+        var safe = Tuning.Default(Fingerprint(machine, await ListGpusAsync(config.LlamaServer, ct), config, _fileSize), machine.LogicalCores, machine.RamBytes);
+        try { safe.Save(path); } catch (IOException) { } // used for this start either way
+        return safe;
+    }
+
     async Task<Tuning> TuneAsync(JazariConfig config, Machine machine, List<GpuDevice> gpus, string fingerprint, CancellationToken ct)
     {
         var best = Tuning.Default(fingerprint, machine.LogicalCores, machine.RamBytes);

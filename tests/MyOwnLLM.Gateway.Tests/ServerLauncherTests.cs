@@ -46,6 +46,22 @@ public class ServerLauncherTests
     }
 
     [Fact]
+    public async Task A_server_that_dies_on_tuned_settings_is_restarted_on_safe_ones()
+    {
+        _gatewayUp = true;
+        var started = 0;
+        var launcher = new ServerLauncher(_runner, _gateway, _ => Task.FromResult(_runner.Started.Count == 2 && ++started > 1),
+            new Ui(_output, new Theme(ColorMode.None, true), 80), @"C:\logs", (_, _) => Task.CompletedTask, maxWaits: 20, fileExists: _ => true,
+            llamaArgs: (_, _) => Task.FromResult(new[] { "-dev", "Vulkan0" }),
+            fallbackArgs: (_, _) => Task.FromResult(new[] { "-dev", "none" }),
+            llamaAlive: () => _runner.Started.Count == 2); // the GPU start crashed; the safe one runs
+
+        Assert.Equal(ConnectionState.Available, await launcher.EnsureRunningAsync(Config, CancellationToken.None));
+        Assert.Equal([["-dev", "Vulkan0"], ["-dev", "none"]], _runner.Started.Select(s => s.Args));
+        Assert.Contains("safe CPU settings", _output.ToString());
+    }
+
+    [Fact]
     public async Task Only_the_missing_server_is_started()
     {
         _gatewayUp = true;

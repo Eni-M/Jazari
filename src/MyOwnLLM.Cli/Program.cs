@@ -66,7 +66,10 @@ if (cli.Command == "session") startupUi.TakeOverScreen();
 var tuner = new DeviceTuner(runner, startupUi);
 async Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) =>
     (await tuner.EnsureAsync(c, DeviceTuner.ReadMachine(), Tuning.DefaultPath, ct)).ServerArgs(c.Model);
-var serverState = await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay, llamaArgs: TunedArgs)
+async Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) =>
+    (await tuner.FallBackAsync(c, DeviceTuner.ReadMachine(), Tuning.DefaultPath, ct)).ServerArgs(c.Model);
+var serverState = await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay,
+        llamaArgs: TunedArgs, fallbackArgs: SafeArgs)
     .EnsureRunningAsync(config, CancellationToken.None);
 // A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run.
 if (serverState == ConnectionState.KeyRejected && await provisioner.EnsureKeyAsync(key, config, CancellationToken.None, rejected: true) is { } freshKey)
