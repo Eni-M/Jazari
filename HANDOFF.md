@@ -10,7 +10,18 @@ Read this first, then the plan and the spec. This note says where the work stand
 - **Build and tests:** `dotnet test` from the repo root (.NET 10, xUnit, `tests/MyOwnLLM.Gateway.Tests`). Windows only at run time.
 - **Way of working:** test first for every change (write a failing test, see it fail, implement, run the full suite, commit). Keep commit messages in the style of the git log (`feat(cli): ...`, `fix: ...`).
 
-## Status: no code is in the repo yet
+## Status: the code is on the owner's PC, not on GitHub
+
+**First check the owner's Windows clone at `C:\MyOwnLLM`.** The earlier session worked there, and its last command ran in that folder. If the work is still there, commit it there and push it to this branch, then pick up at Task 4 Step 1 instead of rebuilding. The earlier session's last command (Task 4 Step 1: change the two message tests so they expect `jazari update`, then run the suite, which should fail on those two tests):
+
+```bash
+sed -i 's/        Assert.Contains("install-jazari.ps1", _output.ToString());/        Assert.Contains("jazari update", _output.ToString());/' tests/MyOwnLLM.Gateway.Tests/ServerLauncherTests.cs && sed -i 's/    \[InlineData(ConnectionState.GatewayNotRunning, "start-llama.ps1", "MyOwnLLM.Gateway")\]/    [InlineData(ConnectionState.GatewayNotRunning, "jazari update", "start-llama.ps1")]/' tests/MyOwnLLM.Gateway.Tests/WelcomeTests.cs && grep -c "jazari update" tests/MyOwnLLM.Gateway.Tests/ServerLauncherTests.cs tests/MyOwnLLM.Gateway.Tests/WelcomeTests.cs && dotnet test --blame-hang-timeout 60s 2>&1 | grep -E "Passed!|Failed!|\[FAIL\]" | sort -u | head -4
+```
+
+The other file it was working on was `src/MyOwnLLM.Cli/Processes.cs` (the `cmd.exe` fix, decision 4). Both test lines that command changes are still unchanged on GitHub (`ServerLauncherTests.cs:95`, `WelcomeTests.cs:50`).
+
+If the PC copy is gone, everything below applies: start again from Task 1.
+
 
 An earlier session's task list was: 1 Config fields, manifest, rejected-key repair; 2 Launch notice; 3 The launcher; 4 The updater script; 5 Bootstrap installer, docs, end-to-end check; 6 Final review and fixes. It stopped around Task 3 (the launcher), after the hardening below, and reported 227 passing tests. **None of that work was pushed.** It is not on this branch, `main`, or any other remote branch, and the code it describes (`src/Jazari.Launcher`, `scripts/jazari-manifest.json`, `UpdateCheck.cs`) does not exist here. Start again from **Task 1**. The decisions below came out of that session, so apply them as you go.
 
