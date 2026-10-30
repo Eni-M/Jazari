@@ -78,6 +78,8 @@ General-CRM was measured for size only and is otherwise off limits.
 | `/review [path]`, `jazari review` | Reviews a whole project, resumes after a stop, writes a report | Yes, 6 files with 3 planted bugs |
 | `/edit <file> <what>`, `/undo` | Shows the change, writes after yes, can undo | Yes, one rename |
 
+`/edit` falls back to whole-line matching with ends trimmed when the model's search text is off by indentation or trailing spaces, and moves the replacement to the file's indentation. Unit-tested only, not yet with the real model.
+
 Also changed: code lines print without padding so mouse copies stay exact, temperature is 0.2 for code, and the gateway and client timeouts are 30 minutes.
 
 **Not built:** a free-running tool loop where the model picks its own files. Static tools as a first pass. Roslyn. See "Next".
@@ -138,7 +140,6 @@ A **second 16 GB DDR4 SODIMM** (the empty slot) is the one change that should re
 4. Try review on Granite 4.2 with thinking on, and Mellum2.1 (8 GB) as an overnight model.
 5. Add gitleaks, Opengrep and osv-scanner as a first pass, then Roslyn for effective auth. See `repo_review.md`.
 6. Add a tool loop if explicit commands feel limiting. `agent_tools_and_output.md` has the design: four small tools, one call per turn, no shell.
-7. Edit matching could allow a line-trimmed fallback.
 
 Downloaded for testing, in `spike/models` (git-ignored): `granite-4.2-3b-Q4_K_M.gguf` (2.24 GB), `granite-4.0-350m-Q8_0.gguf` (0.38 GB), `granite-4.0-1b-Q4_K_M.gguf` (1.02 GB). Safe to delete.
 

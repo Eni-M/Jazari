@@ -40,13 +40,44 @@ public static class FileEdit
         {
             var search = edit.Search.Replace("\r\n", "\n");
             if (search.Length == 0) return (null, "an edit has nothing to search for");
+            var replace = edit.Replace.Replace("\r\n", "\n");
             var first = text.IndexOf(search, StringComparison.Ordinal);
-            if (first < 0) return (null, $"this text isn't in the file: {Short(search)}");
-            if (text.IndexOf(search, first + 1, StringComparison.Ordinal) >= 0) return (null, $"this text appears more than once: {Short(search)}");
-            text = text[..first] + edit.Replace.Replace("\r\n", "\n") + text[(first + search.Length)..];
+            if (first >= 0)
+            {
+                if (text.IndexOf(search, first + 1, StringComparison.Ordinal) >= 0) return (null, $"this text appears more than once: {Short(search)}");
+                text = text[..first] + replace + text[(first + search.Length)..];
+                continue;
+            }
+            var (lineText, problem) = ApplyByLines(text, search, replace);
+            if (lineText is null) return (null, $"{problem}: {Short(search)}");
+            text = lineText;
         }
         return (crlf ? text.Replace("\n", "\r\n") : text, null);
     }
+
+    /// <summary>
+    /// Fallback for small models that get indentation or trailing spaces wrong: matches whole lines with their ends trimmed,
+    /// then moves the replacement to the file's own indentation.
+    /// </summary>
+    static (string? Text, string? Problem) ApplyByLines(string text, string search, string replace)
+    {
+        var wanted = search.Trim('\n').Split('\n');
+        if (wanted.All(string.IsNullOrWhiteSpace)) return (null, "this text isn't in the file");
+        var lines = text.Split('\n');
+        var starts = Enumerable.Range(0, lines.Length - wanted.Length + 1)
+            .Where(i => wanted.Select((w, j) => lines[i + j].Trim() == w.Trim()).All(same => same)).Take(2).ToList();
+        if (starts.Count == 0) return (null, "this text isn't in the file");
+        if (starts.Count > 1) return (null, "this text appears more than once");
+
+        var at = starts[0];
+        var fileIndent = Indent(lines[at]);
+        var modelIndent = Indent(wanted[0]);
+        var replaced = replace.Trim('\n').Split('\n')
+            .Select(l => l.Length == 0 ? l : l.StartsWith(modelIndent, StringComparison.Ordinal) ? fileIndent + l[modelIndent.Length..] : l);
+        return (string.Join('\n', lines[..at].Concat(replace.Trim('\n').Length == 0 ? [] : replaced).Concat(lines[(at + wanted.Length)..])), null);
+    }
+
+    static string Indent(string line) => line[..(line.Length - line.TrimStart().Length)];
 
     /// <summary>Saves over the file, keeping whether it had a byte-order mark.</summary>
     public static void Write(string path, string text)

@@ -214,4 +214,26 @@ public class ProjectToolsTests : IDisposable
         Assert.Null(text);
         Assert.Contains(problem, why);
     }
+
+    [Fact]
+    public void Edits_with_wrong_indentation_match_whole_lines_and_keep_the_files_indentation()
+    {
+        var reply = """{"edits":[{"search":"if (a)\n{\n    run();  \n}","replace":"if (b)\n{\n    stop();\n}"}]}""";
+
+        var (text, why) = FileEdit.Apply("class C\n{\n    if (a)\n    {\n        run();\n    }\n}\n", FileEdit.Parse(reply)!);
+
+        Assert.Null(why);
+        Assert.Equal("class C\n{\n    if (b)\n    {\n        stop();\n    }\n}\n", text);
+    }
+
+    [Fact]
+    public void Line_matches_that_appear_twice_change_nothing()
+    {
+        var reply = """{"edits":[{"search":"  run();","replace":"stop();"}]}""";
+
+        var (text, why) = FileEdit.Apply("\trun();\n\trun();", FileEdit.Parse(reply)!);
+
+        Assert.Null(text);
+        Assert.Contains("more than once", why);
+    }
 }
