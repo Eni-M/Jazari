@@ -24,6 +24,13 @@ An earlier session's task list was: 1 Config fields, manifest, rejected-key repa
 | 5. Bootstrap installer, docs, manual checks on Windows | To do (manual steps need the Windows PC) |
 | 6. Final review and fixes (review the whole diff against the spec's Review Focus list, fix what it finds) | To do |
 
+## Context from the planning chat ("Project Creation" issue chat)
+
+- **The model checksum is verified.** The `modelSha256` in the plan's Global Constraints was taken from IBM's Hugging Face repository and matches the owner's local model file. Use it as is.
+- **How to carry out the plan: build all the tasks in one session, then have one strong reviewer check everything at the end.** The owner chose this over a reviewer per task, because the tasks depend on each other and most of the risk is in the PowerShell updater, which is tested by hand on the PC.
+- **Known limit:** the launcher can't update itself while it's running an update. That's accepted: it's small and rarely changes, and running the installer again updates it.
+- **The installer reuses the model already downloaded** (from `spike\models`), so the 2 GB download is skipped.
+
 ## Decisions made after the plan was written
 
 These override the plan where they differ.
