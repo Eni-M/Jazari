@@ -10,6 +10,7 @@ public class ServerLauncherTests
     readonly FakeGateway _gateway = new();
     readonly StringWriter _output = new();
     bool _gatewayUp, _llamaUp;
+    Func<string, bool> _fileExists = _ => true;
 
     ServerLauncher NewLauncher(int startsAfterChecks = 0)
     {
@@ -18,7 +19,7 @@ public class ServerLauncherTests
             ? Task.FromResult(new GatewayInfo("Jazari", "Granite 4.1 3B", "0.2.0"))
             : throw new GatewayException("gateway not reachable", null, null);
         return new ServerLauncher(_runner, _gateway, _ => Task.FromResult(_llamaUp || (_runner.Started.Count > 0 && (_llamaUp = true))),
-            new Ui(_output, new Theme(ColorMode.None, true), 80), @"C:\logs", (_, _) => Task.CompletedTask, maxWaits: 5);
+            new Ui(_output, new Theme(ColorMode.None, true), 80), @"C:\logs", (_, _) => Task.CompletedTask, maxWaits: 5, fileExists: _fileExists);
     }
 
     [Fact]
@@ -80,5 +81,17 @@ public class ServerLauncherTests
         Assert.Equal(ConnectionState.GatewayNotRunning, await launcher.EnsureRunningAsync(Config, CancellationToken.None));
         Assert.Contains("ERROR", _output.ToString());
         Assert.Contains(@"C:\logs", _output.ToString());
+    }
+
+    [Fact]
+    public async Task Missing_files_are_reported_right_away_without_starting_anything()
+    {
+        _fileExists = path => path != Config.GatewayExe;
+
+        Assert.Equal(ConnectionState.GatewayNotRunning, await NewLauncher().EnsureRunningAsync(Config, CancellationToken.None));
+        Assert.Empty(_runner.Started);
+        Assert.Contains("ERROR", _output.ToString());
+        Assert.Contains(Config.GatewayExe, _output.ToString());
+        Assert.Contains("install-jazari.ps1", _output.ToString());
     }
 }

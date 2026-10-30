@@ -9,7 +9,7 @@ namespace MyOwnLLM.Cli;
 /// </summary>
 public sealed class ServerLauncher(
     IProcessRunner runner, IGatewayClient gateway, Func<CancellationToken, Task<bool>> llamaReady, Ui ui, string logDir,
-    Func<TimeSpan, CancellationToken, Task> delay, int maxWaits = 180)
+    Func<TimeSpan, CancellationToken, Task> delay, int maxWaits = 180, Func<string, bool>? fileExists = null)
 {
     static readonly TimeSpan PollEvery = TimeSpan.FromMilliseconds(500);
 
@@ -20,6 +20,15 @@ public sealed class ServerLauncher(
         var (gatewayState, llamaUp) = (await GatewayStateAsync(ct), await llamaReady(ct));
         if (gatewayState is not ConnectionState.GatewayNotRunning && llamaUp) return gatewayState;
         if (config is null) return gatewayState;
+
+        // Say what's missing straight away instead of waiting for servers that can never start.
+        var missing = new[] { config.LlamaServer, config.Model, config.GatewayExe }.Where(f => !(fileExists ?? File.Exists)(f)).ToList();
+        if (missing.Count > 0)
+        {
+            ui.Error("Some of Jazari's files are missing.", string.Join(", ", missing),
+                $@"Run .\scripts\install-jazari.ps1 again in {config.Home}.");
+            return ConnectionState.GatewayNotRunning;
+        }
 
         ui.Label("starting");
         if (!llamaUp)
