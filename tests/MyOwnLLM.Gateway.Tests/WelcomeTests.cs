@@ -47,7 +47,7 @@ public class WelcomeTests
 
     [Theory]
     [InlineData(ConnectionState.NoKey, "add-key", "JAZARI_KEY")]
-    [InlineData(ConnectionState.GatewayNotRunning, "start-llama.ps1", "MyOwnLLM.Gateway")]
+    [InlineData(ConnectionState.GatewayNotRunning, "jazari update", "start-llama.ps1")]
     [InlineData(ConnectionState.KeyRejected, "add-key", "JAZARI_KEY")]
     public void Problems_come_with_next_steps(ConnectionState state, string first, string second)
     {

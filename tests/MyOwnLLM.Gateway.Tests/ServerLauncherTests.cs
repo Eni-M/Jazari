@@ -92,6 +92,6 @@ public class ServerLauncherTests
         Assert.Empty(_runner.Started);
         Assert.Contains("ERROR", _output.ToString());
         Assert.Contains(Config.GatewayExe, _output.ToString());
-        Assert.Contains("install-jazari.ps1", _output.ToString());
+        Assert.Contains("jazari update", _output.ToString());
     }
 }
