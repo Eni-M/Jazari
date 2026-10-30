@@ -200,6 +200,14 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
         ui.Metadata($"Read {read} file{(read == 1 ? "" : "s")}, about {_context.Length / 4} tokens{(left > 0 ? $". {left} didn't fit, riskiest went first; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}.");
     }
 
+    /// <summary>Text piped into <c>jazari ask</c> (a diff, a log, an error): goes with the question the way /read does.</summary>
+    public void UsePipedInput(string text)
+    {
+        var limit = MaxReadTokens * 4;
+        _context = $"--- piped input ---\n{(text.Length > limit ? text[..limit] : text)}\n";
+        if (text.Length > limit) ui.Metadata($"Only the first {MaxReadTokens} tokens or so of the piped input were used.");
+    }
+
     async Task EditAsync(string? argument, CancellationToken ct)
     {
         if (argument?.Split(' ', 2) is not [var file, var request]) { ui.Metadata("Usage: /edit <file> <what to change>"); return; }

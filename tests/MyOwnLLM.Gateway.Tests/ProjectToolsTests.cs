@@ -152,6 +152,17 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Piped_input_goes_with_the_question()
+    {
+        var session = Session();
+
+        session.UsePipedInput("+ var sql = \"SELECT \" + id;");
+        await session.AskAsync("review this", CancellationToken.None);
+
+        Assert.Contains("--- piped input ---\n+ var sql", _gateway.LastContext);
+    }
+
+    [Fact]
     public async Task Read_says_what_didnt_fit()
     {
         foreach (var i in Enumerable.Range(0, 3)) Add($"f{i}.cs", new string('x', 9000));

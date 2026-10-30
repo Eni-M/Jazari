@@ -3,7 +3,7 @@ namespace MyOwnLLM.Cli;
 public sealed record CliArgs(string Command, string? Text, string? RepoPath, bool Stream, string? Id, bool? Accepted)
 {
     public const string Usage =
-        "usage: jazari | jazari ask \"<question>\" [--repo <path>] [--no-stream] | jazari status [--repo <path>] | jazari review [path] | jazari feedback <ix-id> up|down | jazari stop | jazari update";
+        "usage: jazari | [... |] jazari ask \"<question>\" [--repo <path>] [--no-stream] | jazari status [--repo <path>] | jazari review [path] | jazari feedback <ix-id> up|down | jazari stop | jazari update";
 
     public static CliArgs Parse(string[] args)
     {

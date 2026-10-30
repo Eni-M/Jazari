@@ -90,6 +90,7 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 switch (cli.Command)
 {
     case "ask":
+        if (Console.IsInputRedirected && await PipedInput.ReadAsync(Console.In, TimeSpan.FromSeconds(3)) is { } piped) session.UsePipedInput(piped);
         await session.AskAsync(cli.Text!, cts.Token);
         break;
     case "status":
