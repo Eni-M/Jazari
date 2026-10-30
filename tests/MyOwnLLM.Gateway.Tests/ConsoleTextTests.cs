@@ -19,6 +19,12 @@ public class ConsoleTextTests
     }
 
     [Fact]
+    public void Sanitize_strips_bidi_overrides()
+    {
+        Assert.Equal("rm -rf ./bin # safe", ConsoleText.Sanitize("rm -rf ./bin ‮# safe⁦⁩"));
+    }
+
+    [Fact]
     public void Sanitize_null_is_empty()
     {
         Assert.Equal("", ConsoleText.Sanitize(null));

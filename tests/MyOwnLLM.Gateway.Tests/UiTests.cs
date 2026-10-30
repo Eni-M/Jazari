@@ -86,6 +86,24 @@ public class UiTests
     }
 
     [Fact]
+    public void Components_strip_control_characters_from_untrusted_text()
+    {
+        var (ui, output) = Plain();
+
+        ui.ActionRequired("Execute", "ls\r\e[2Krm -rf /");
+        ui.Line("a\e]0;title\ab");
+        ui.Rows([("Model", "x\e[31my")]);
+        ui.Error("e‮viltxt", "c\b", null);
+        ui.ToolLines("ok", ["f\e[1Ag"]);
+
+        var text = output.ToString();
+        Assert.DoesNotContain('\e', text);
+        Assert.DoesNotContain('\b', text);
+        Assert.DoesNotContain('‮', text);
+        Assert.Contains("│ ls[2Krm -rf /", text);
+    }
+
+    [Fact]
     public void Redirected_output_has_no_escape_sequences()
     {
         var output = new StringWriter();

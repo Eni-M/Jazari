@@ -1,6 +1,7 @@
 namespace MyOwnLLM.Cli.Terminal;
 
-/// <summary>The Jazari terminal components. Every screen is built from these, never styled ad hoc.</summary>
+/// <summary>The Jazari terminal components. Every screen is built from these, never styled ad hoc.
+/// All text passed in is treated as untrusted and sanitized here, so no caller can forget.</summary>
 public sealed class Ui(TextWriter output, Theme theme, int width)
 {
     public const string Name = "J A Z A R I";
@@ -14,35 +15,35 @@ public sealed class Ui(TextWriter output, Theme theme, int width)
 
     public void Line(string text, Tone tone = Tone.Primary)
     {
-        foreach (var line in Wrap(text, Width)) output.WriteLine(theme.Paint(line, tone));
+        foreach (var line in Wrap(ConsoleText.Sanitize(text), Width)) output.WriteLine(theme.Paint(line, tone));
     }
 
-    public void Wordmark(string version) => output.WriteLine($"{theme.Paint(Name, Tone.Primary)}  {theme.Paint(version, Tone.Muted)}");
+    public void Wordmark(string version) => output.WriteLine($"{theme.Paint(Name, Tone.Primary)}  {theme.Paint(ConsoleText.Sanitize(version), Tone.Muted)}");
 
-    public void Label(string text) => output.WriteLine(theme.Paint(text.ToUpperInvariant(), Tone.Muted));
+    public void Label(string text) => output.WriteLine(theme.Paint(ConsoleText.Sanitize(text).ToUpperInvariant(), Tone.Muted));
 
     public void Rows(IEnumerable<(string Key, string Value)> rows)
     {
         foreach (var (key, value) in rows)
         {
-            var lines = Wrap(value, Width - KeyColumn);
-            output.WriteLine(theme.Paint(key.PadRight(KeyColumn), Tone.Muted) + theme.Paint(lines[0], Tone.Secondary));
+            var lines = Wrap(ConsoleText.Sanitize(value), Width - KeyColumn);
+            output.WriteLine(theme.Paint(ConsoleText.Sanitize(key).PadRight(KeyColumn), Tone.Muted) + theme.Paint(lines[0], Tone.Secondary));
             foreach (var more in lines.Skip(1)) output.WriteLine(new string(' ', KeyColumn) + theme.Paint(more, Tone.Secondary));
         }
     }
 
     public void ToolLines(string label, IEnumerable<string> doneSteps)
     {
-        output.WriteLine(theme.Paint("  " + label.ToUpperInvariant(), Tone.Muted));
-        foreach (var step in doneSteps) output.WriteLine(theme.Paint($"  {theme.Glyph('✓')} {step}", Tone.Muted));
+        output.WriteLine(theme.Paint("  " + ConsoleText.Sanitize(label).ToUpperInvariant(), Tone.Muted));
+        foreach (var step in doneSteps) output.WriteLine(theme.Paint($"  {theme.Glyph('✓')} {ConsoleText.Sanitize(step)}", Tone.Muted));
     }
 
     public void ActionRequired(string what, string command)
     {
         var rule = theme.Paint(theme.Glyph('│').ToString(), Tone.Secondary) + " ";
         output.WriteLine(rule + "ACTION REQUIRED");
-        output.WriteLine(rule + theme.Paint(what + ":", Tone.Secondary));
-        output.WriteLine(rule + command);
+        output.WriteLine(rule + theme.Paint(ConsoleText.Sanitize(what) + ":", Tone.Secondary));
+        output.WriteLine(rule + ConsoleText.Sanitize(command));
         output.WriteLine(rule + theme.Paint("[y] Allow once  [n] Deny  [a] Always allow", Tone.Secondary));
     }
 
@@ -54,7 +55,7 @@ public sealed class Ui(TextWriter output, Theme theme, int width)
         if (next is not null) Line(next, Tone.Muted);
     }
 
-    public void Metadata(string text) => output.WriteLine(theme.Paint(text, Tone.Muted));
+    public void Metadata(string text) => output.WriteLine(theme.Paint(ConsoleText.Sanitize(text), Tone.Muted));
 
     public void Divider() => output.WriteLine(theme.Paint(new string(theme.Glyph('─'), Math.Min(Width, 60)), Tone.Line));
 

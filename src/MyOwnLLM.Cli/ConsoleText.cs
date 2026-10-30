@@ -7,7 +7,7 @@ public static partial class ConsoleText
 {
     public static string Sanitize(string? text) => text is null ? "" : ControlChars().Replace(text, "");
 
-    // C0 (except \t and \n) and C1 controls, plus DEL. \r goes too, so "\r\n" becomes "\n".
-    [GeneratedRegex(@"[\x00-\x08\x0B-\x1F\x7F-\x9F]")]
+    // C0 (except \t and \n) and C1 controls, DEL, and bidi overrides that can disguise text. \r goes too, so "\r\n" becomes "\n".
+    [GeneratedRegex(@"[\x00-\x08\x0B-\x1F\x7F-\x9F‪-‮⁦-⁩]")]
     private static partial Regex ControlChars();
 }
