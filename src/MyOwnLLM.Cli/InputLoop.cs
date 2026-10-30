@@ -74,7 +74,8 @@ public sealed class PromptLineReader : ILineReader
 /// <summary>The interactive session: welcome once, then read → answer until /exit, end of input, or Ctrl+C twice.</summary>
 public static class InputLoop
 {
-    public static async Task RunAsync(Session session, Ui ui, string version, string directory, ILineReader reader, bool hasKey = true)
+    public static async Task RunAsync(Session session, Ui ui, string version, string directory, ILineReader reader, bool hasKey = true,
+        Task<bool>? updateAvailable = null)
     {
         // Like any good CLI, open even when setup is incomplete, and say what's missing instead of exiting.
         var state = hasKey ? await session.ConnectAsync(CancellationToken.None) : ConnectionState.NoKey;
@@ -94,8 +95,15 @@ public static class InputLoop
         {
             // Ctrl+C that clears typed text is just "clear". Exit needs two Ctrl+C in a row on an empty prompt, close together.
             var lastEmptyCancel = (DateTime?)null;
+            var noticeShown = false;
             while (!session.ExitRequested)
             {
+                // Shown once, when the background check has finished; an unfinished check never delays the prompt.
+                if (!noticeShown && updateAvailable is { IsCompletedSuccessfully: true, Result: true })
+                {
+                    ui.Metadata("update available, run jazari update");
+                    noticeShown = true;
+                }
                 var (ok, text) = await reader.ReadAsync();
                 if (!ok)
                 {

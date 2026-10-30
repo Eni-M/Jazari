@@ -17,6 +17,10 @@ if (cli.Command == "stop")
 // Everything machine-specific comes from the config the installer wrote, so nothing is hard-coded.
 var config = JazariConfig.Load(JazariConfig.DefaultPath);
 var runner = new ProcessRunner();
+Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0"); // git must never stop to ask for credentials
+var updateAvailable = cli.Command == "session"
+    ? UpdateCheck.IsUpdateAvailableAsync(runner, config, TimeSpan.FromSeconds(5), CancellationToken.None)
+    : Task.FromResult(false);
 var settings = Settings.FromEnvironment(Environment.GetEnvironmentVariable);
 
 // First run: create a key through the gateway and save it as JAZARI_KEY, so the user never has to.
@@ -66,7 +70,7 @@ if (cli.Command == "session")
     // In a real terminal the typed line becomes the "› question" row; piped input isn't echoed, so Jazari prints it.
     var interactive = new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory) { EchoQuestions = piped };
     await InputLoop.RunAsync(interactive, ui, version, directory, reader,
-        hasKey: key is not null);
+        hasKey: key is not null, updateAvailable: updateAvailable);
     return 0;
 }
 

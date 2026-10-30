@@ -124,4 +124,25 @@ public class InputLoopTests
         Assert.DoesNotContain("unique question text", output.ToString());
         Assert.Contains("Hello", output.ToString());
     }
+
+    [Fact]
+    public async Task Update_notice_shows_once_before_a_prompt()
+    {
+        var (session, ui, output, _) = NewSession();
+
+        await InputLoop.RunAsync(session, ui, "0.2.0", "C:/Repo", new ScriptedReader((true, "/help"), (true, "/model")), updateAvailable: Task.FromResult(true));
+
+        var text = output.ToString();
+        Assert.Equal(1, text.Split("update available, run jazari update").Length - 1);
+    }
+
+    [Fact]
+    public async Task Unfinished_check_never_blocks()
+    {
+        var (session, ui, output, _) = NewSession();
+
+        await InputLoop.RunAsync(session, ui, "0.2.0", "C:/Repo", new ScriptedReader((true, "/help")), updateAvailable: new TaskCompletionSource<bool>().Task);
+
+        Assert.DoesNotContain("update available", output.ToString());
+    }
 }
