@@ -44,6 +44,12 @@ catch (HttpRequestException e) when (e.StatusCode is null)
     Console.Error.WriteLine($"gateway not reachable at {baseUrl}");
     return 1;
 }
+catch (IOException)
+{
+    Console.WriteLine();
+    Console.Error.WriteLine("lost connection to the gateway");
+    return 1;
+}
 
 async Task<int> Ask()
 {
@@ -66,10 +72,15 @@ async Task<int> Ask()
     using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(cts.Token));
     while (await reader.ReadLineAsync(cts.Token) is { } line)
     {
-        if (!line.StartsWith("data: ") || line == "data: [DONE]") continue;
-        using var chunk = JsonDocument.Parse(line["data: ".Length..]);
-        if (chunk.RootElement.TryGetProperty("id", out var idProp)) id = idProp.GetString();
-        if (chunk.RootElement.GetProperty("choices")[0].GetProperty("delta").TryGetProperty("content", out var c)) Console.Write(ConsoleText.Sanitize(c.GetString()));
+        if (SseChunk.Parse(line) is not { } chunk) continue;
+        if (chunk.Error is not null)
+        {
+            Console.WriteLine();
+            Console.Error.WriteLine(ConsoleText.Sanitize(chunk.Error));
+            return 1;
+        }
+        id = chunk.Id ?? id;
+        if (chunk.Content is not null) Console.Write(ConsoleText.Sanitize(chunk.Content));
     }
     Console.WriteLine();
     return Done(id);

@@ -19,6 +19,7 @@ public sealed class FakeLlama : ILlamaClient
     public sealed record Call(string Kind, IReadOnlyList<ChatMessage> Messages, int MaxTokens);
     public ConcurrentQueue<Call> Calls { get; } = new();
     public Func<CancellationToken, Task<string>> Chat { get; set; } = _ => Task.FromResult("answer");
+    public bool StreamDiesAfterFirstPart { get; set; }
 
     public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct)
     {
@@ -29,7 +30,12 @@ public sealed class FakeLlama : ILlamaClient
     public async IAsyncEnumerable<string> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
     {
         Calls.Enqueue(new("stream", messages, maxTokens));
-        foreach (var part in new[] { "a", "b" }) { await Task.Yield(); yield return part; }
+        foreach (var part in new[] { "a", "b" })
+        {
+            await Task.Yield();
+            yield return part;
+            if (StreamDiesAfterFirstPart) throw new HttpIOException(HttpRequestError.ResponseEnded);
+        }
     }
 
     public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct)
@@ -128,6 +134,20 @@ public class EndpointTests : IDisposable
         Assert.Contains("\"content\":\"a\"", body);
         Assert.Contains("\"content\":\"b\"", body);
         Assert.Contains("\"id\":\"ix-", body);
+        Assert.EndsWith("data: [DONE]\n\n", body);
+    }
+
+    [Fact]
+    public async Task Stream_failing_midway_sends_error_event_then_done()
+    {
+        _llama.StreamDiesAfterFirstPart = true;
+
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi", stream: true));
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"content\":\"a\"", body);
+        Assert.DoesNotContain("\"content\":\"b\"", body);
+        Assert.Contains("data: {\"error\":\"lost connection to the model server\"}", body);
         Assert.EndsWith("data: [DONE]\n\n", body);
     }
 

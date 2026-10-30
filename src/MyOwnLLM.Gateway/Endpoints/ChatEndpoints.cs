@@ -53,16 +53,26 @@ public static class ChatEndpoints
         if (request.Stream == true)
         {
             http.Response.ContentType = "text/event-stream";
-            answer = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
+            try
             {
-                var text = new StringBuilder();
-                await foreach (var part in s.Llama.ChatStreamAsync(prompt, maxTokens, ct))
+                answer = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
                 {
-                    text.Append(part);
-                    await WriteEventAsync(http, new { choices = new[] { new { index = 0, delta = new { content = part } } } }, ct);
-                }
-                return text.ToString();
-            }, http.RequestAborted);
+                    var text = new StringBuilder();
+                    await foreach (var part in s.Llama.ChatStreamAsync(prompt, maxTokens, ct))
+                    {
+                        text.Append(part);
+                        await WriteEventAsync(http, new { choices = new[] { new { index = 0, delta = new { content = part } } } }, ct);
+                    }
+                    return text.ToString();
+                }, http.RequestAborted);
+            }
+            catch (Exception e) when (http.Response.HasStarted && e is not OperationCanceledException)
+            {
+                // Too late for a status code: tell the client in-band, then end the stream cleanly.
+                await WriteEventAsync(http, new { error = e is IOException ? "lost connection to the model server" : e.Message }, http.RequestAborted);
+                await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
+                return;
+            }
             id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
             await WriteEventAsync(http, new { id = $"ix-{id}", choices = new[] { new { index = 0, delta = new { }, finish_reason = "stop" } } }, http.RequestAborted);
             await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
