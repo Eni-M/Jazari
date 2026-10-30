@@ -16,6 +16,17 @@ jazari update                  # later: match GitHub main, check everything, rep
 
 Install somewhere else with `.\scripts\install-jazari.ps1 -InstallDir D:\Tools\Jazari`. Jazari tells you when an update is available.
 
+Inside a session:
+
+| Command | What it does |
+|---|---|
+| `/copy [n]` | Copies a code block of the last answer. Blocks are numbered on screen. |
+| `/read <path>` | Reads a file or folder for the next questions, up to about 5,000 tokens. |
+| `/review [path]` | Reviews a whole project, riskiest files first, and writes a report. Also `jazari review [path]`. It can be stopped and carries on; later runs only re-read what changed. |
+| `/edit <file> <what>` | Asks for a change, shows it, and writes it only after you say yes. `/undo` puts it back. |
+
+Reviews come from a small local model, so check each finding. It reads about 30 tokens/s: about 3 to 7 hours for a project with 350,000 tokens of real code.
+
 ```powershell
 jazari stop                    # shut the background servers down
 ```

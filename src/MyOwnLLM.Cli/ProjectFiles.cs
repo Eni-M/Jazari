@@ -41,8 +41,9 @@ public static partial class ProjectFiles
 
     static IEnumerable<string> Walk(string folder)
     {
-        foreach (var file in Directory.EnumerateFiles(folder)) yield return file;
-        foreach (var sub in Directory.EnumerateDirectories(folder))
+        var options = new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 }; // a folder we can't open is no reason to stop
+        foreach (var file in Directory.EnumerateFiles(folder, "*", options)) yield return file;
+        foreach (var sub in Directory.EnumerateDirectories(folder, "*", options))
         {
             if (SkippedFolders.Contains(Path.GetFileName(sub)) || new DirectoryInfo(sub).Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
             foreach (var file in Walk(sub)) yield return file;

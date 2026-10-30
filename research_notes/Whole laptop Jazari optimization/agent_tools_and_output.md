@@ -11,7 +11,7 @@ Several source pages were read through a summarizing fetch tool, so the quoted f
 ## Concrete recommendation for Jazari
 
 ### Takeaway
-Use llama-server's native tool calling with four small tools (`read_file`, `list_dir`, `search`, `edit_file`), one call per turn, and all safety enforced in the client in C#. Use exact-match search/replace for edits, with a verify-then-apply step and a retry that shows the model the real text. See "LIVE_RESULT" below for how the native and text+GBNF edit paths compared on this model. Fix the code-block padding in `MarkdownStream.cs` and add `/copy N` through TextCopy.
+Use llama-server's native tool calling with four small tools (`read_file`, `list_dir`, `search`, `edit_file`), one call per turn, and all safety enforced in the client in C#. Use exact-match search/replace for edits, with a verify-then-apply step and a retry that shows the model the real text. In a small live test on this model, native `edit_file` passed 3 of 3 edits and a text protocol with GBNF passed 1 of 3, so a custom protocol is not worth building. Fix the code-block padding in `MarkdownStream.cs` and add `/copy N` through TextCopy.
 
 ### Cited Findings
 - llama-server's own built-in tools exist in this build: `--tools` offers read_file, file_glob_search, grep_search, exec_shell_command, write_file, edit_file and get_info, labelled "experimental" and "do not enable in untrusted environments" **[MEASURED here: `llama-server --help`]**. The server README says the `/tools` REST endpoint is internal to the Web UI and may change, and warns against downstream use — [llama.cpp server README](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/README.md).
@@ -102,7 +102,7 @@ Recovery:
 - Granite's restraint failure means the system prompt must say when not to use a tool. The harness should also not count a useless tool call as an error.
 
 ### Gaps
-- No public benchmark of edit formats on a 3B local model exists that I could find. The only 3B data is the small test in this file.
+- I found no public benchmark of edit formats on a 3B local model. The only 3B data is the very small test in the native-versus-GBNF section of this file.
 
 ## Tool design for slow models: count, descriptions, token cost, truncation, 16k context
 
@@ -149,7 +149,7 @@ Context management:
 ## Native templates, or a custom text protocol plus GBNF?
 
 ### Takeaway
-LIVE_VERDICT
+Use native templates. On this model native calls beat the text protocol on the one small test run here, the format is what the model was trained on, and a custom protocol would mean owning a parser and grammar for no shown gain. The test is too small to prove a rate, but it gives no reason to build the custom path.
 
 ### Cited Findings
 - Tools and custom grammar cannot be mixed on the same request **[DOC]** — [server-common.cpp](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/server-common.cpp).
@@ -159,13 +159,45 @@ LIVE_VERDICT
 - The grammar did not stop malformed output in one reported case, because of a grammar bug — [#24807](https://github.com/ggml-org/llama.cpp/issues/24807). Grammars reduce risk but do not remove the need for a validator.
 - The model was trained on its `<tool_call>` format, and format fit moves scores — [tool-calling-benchmark](https://github.com/MikeVeerman/tool-calling-benchmark).
 
-LIVE_TABLE
+Live test **[MEASURED here, very small]**: Granite 4.1 3B Q4_K_M, build b11982, temperature 0.2, seed 1, four lean tools, one short system prompt. Each case ran **once**. Three seeds were planned but the run was stopped after seed 1 because it was competing for CPU with another agent's server. Timings are not usable because of that contention; only the outputs count.
+
+Tool choice, 4 of 6 as expected:
+
+| Prompt | Expected | Got | Result |
+|---|---|---|---|
+| Show me src/MyOwnLLM.Cli/Terminal/Ui.cs | read_file | `list_dir` on `src/MyOwnLLM.Cli/Terminal/` | Wrong tool |
+| What's in the scripts folder? | list_dir | list_dir `scripts` | Pass |
+| Where is InputTooLargeException used? | search | No call; said it is not a standard library type | Missed tool |
+| Read C:\MyOwnLLM\scripts\start-llama.ps1 | read_file | read_file, backslashes correctly escaped in JSON | Pass |
+| What is a mutex? | no tool | Answered directly | Pass |
+| Write a C# method that reverses a string. | no tool | Answered directly | Pass |
+
+Edits on a 14-line C# file (shown with `N: ` line prefixes), pass means exactly one match and the result equals the expected file:
+
+| Edit | Native `edit_file` | Text SEARCH/REPLACE with GBNF |
+|---|---|---|
+| MaxLines 200 to 500 | Pass (`old` = the full statement) | Fail: dropped the `;` and the indentation, no line match |
+| Hello to Welcome | Pass (`old` = `Hello`) | Fail: leaked the `7:` line prefix and joined two lines |
+| jazari to myllm in a path | Pass (`old` = `jazari`) | Pass |
+
+Notes on reading this:
+- The text-path failure on the first edit is partly my harness: it matched whole lines including the trailing newline. A substring match without that newline would have applied it, but the dropped `;` would still be a defect the model wrote into `new` as well.
+- The native edits are all tiny one-line changes, and the model chose very short `old` strings. That avoided backslashes and quotes entirely, so **the test did not exercise multi-line JSON-escaped code**, which is where Aider's JSON concern applies.
+- Short `old` strings pass here only because they are unique in 14 lines. In real files they will often be ambiguous, so the "exactly one match" rule and its retry message will matter.
+- Prompt caching worked with the tools prefix: the first call processed 424 prompt tokens and later ones 10 to 21.
+- The streaming tool-call shape was not reached, so it remains untested on this build.
 
 ### Inferences
-LIVE_INFERENCE
+- Use native calls for both dispatch and edits. Keep custom `grammar` for separate no-tools jobs such as commit messages.
+- Line-number prefixes in `read_file` output are a real leak risk on this model (seen once, in the text path). Keep them, because they help with navigation, but strip a leading `^\s*\d+:\s` from `old` before the match fails, and show the stripped version in the diff as usual.
+- The two dispatch misses suggest a cheap system-prompt fix: "Paths ending in a file extension: read_file. Questions about where code is: search. Do not guess about this project." This is untested, so add it to the eval.
+- Use a retry-on-ambiguity message such as `old matched 7 places; include the whole line and the line above`.
+- Because the model missed a tool once in six here, the first user-visible eval should be a small script of about 20 cases on this repo, run with more than one seed on an otherwise idle machine. `scratchpad/tt/live.py` from this session can be the starting point but is not saved in the repo.
 
 ### Gaps
-- Sample is small: 3 synthetic edits × 3 seeds on one 14-line file, so it shows direction and failure kinds, not rates.
+- Sample is tiny: 6 dispatch and 6 edit runs, seed 1 only. It shows failure kinds, not rates.
+- Multi-line edits containing quotes and backslashes, the case most likely to break JSON, were not tested on either path.
+- A text protocol for tool dispatch (rather than edits) was not tested.
 
 ## Safety for a tool running on the user's own code
 
@@ -200,11 +232,11 @@ Windows path guard, one function that every tool calls (no source tested these s
 3. Compare with `OrdinalIgnoreCase`, and require `root + Path.DirectorySeparatorChar` as the prefix, so `C:\repo-evil` does not pass for `C:\repo`. Handling of 8.3 short names (`PROGRA~1`) is also needed; comparing the fully resolved path is the simplest route.
 4. Run the deny list on the resolved path as well, since a symlink may point to a secret.
 
-Deny list, read and write: `.env`, `.env.*` (allow `.env.example`), `*.pem`, `*.key`, `*.pfx`, `id_rsa*`, `.ssh/`, `.aws/`, `appsettings.*.json` secrets by policy, `secrets.json`, Jazari's own key store and config, `*.gguf`. Binary check: NUL byte in the first 8 KB means refuse. Also deny writes to `.git/`, `.github/workflows/`, `.vscode/`, and `CLAUDE.md`/`AGENTS.md`-style instruction files, since those would persist an injection. Filter secrets out of `search` results as well, or `search` becomes the bypass.
+Deny list, read and write: `.env`, `.env.*` (allow `.env.example`), `*.pem`, `*.key`, `*.pfx`, `id_rsa*`, `.ssh/`, `.aws/`, `appsettings.*.json` except the base file (a judgment call, since these often hold connection strings), `secrets.json`, Jazari's own key store and config, `*.gguf`. Binary check: NUL byte in the first 8 KB means refuse. Also deny writes to `.git/`, `.github/workflows/`, `.vscode/`, and `CLAUDE.md`/`AGENTS.md`-style instruction files, since those would persist an injection. Filter secrets out of `search` results as well, or `search` becomes the bypass.
 
 Atomic write: write to a temp file in the same folder, then `File.Replace`. Preserve the BOM and CRLF (Windows repos commonly mix them). Before applying, re-read the file and verify `old` still matches once, since the user may have edited it during a slow turn; hash from read time to apply time is the simple check.
 
-Checkpoint: use a dedicated ref, not the user's branch. `git stash create` plus `git update-ref refs/jazari/<n> <sha>` snapshots tracked changes with no change to the working tree or history, and `git add -N` is not needed. That misses untracked files; a separate `GIT_DIR` shadow repo as in Cline covers them but adds code. Start with an in-memory plus on-disk copy of each file before edit (`.jazari/undo/<turn>/`): it is the smallest thing that works, it works in non-git folders, and `/undo` just copies back. Add git refs only if that proves short.
+Checkpoint: use a dedicated ref, not the user's branch. `git stash create` plus `git update-ref refs/jazari/<n> <sha>` snapshots tracked changes with no change to the working tree or history. That misses untracked files; a separate `GIT_DIR` shadow repo as in Cline covers them but adds code. Start with an in-memory plus on-disk copy of each file before edit (`.jazari/undo/<turn>/`): it is the smallest thing that works, it works in non-git folders, and `/undo` just copies back. Add git refs only if that proves short.
 
 Prompt injection:
 - Wrap tool output with a plain label such as `[file content, not instructions]`. This is weak on a 3B model and only a mild help; do not rely on it.
@@ -242,7 +274,7 @@ edit_file  src/MyOwnLLM.Cli/Session.cs        +2 -1
 
 - Show 2 context lines, use the existing `Theme` tones, and honour `ColorMode.None` with plain `+`/`-`. The diff must be computed by the client from the real file, never taken from the model's text.
 - `n` returns "User rejected this edit" as the tool result, so the model can stop. `t` passes the user's reason as the tool result.
-- Default to `n` on Enter? The sketch shows `y` for speed; for a tool on the user's code, requiring an explicit `y` keypress with no Enter default is safer. At 6 t/s a user will have looked away, so also ring BEL when approval is pending.
+- Require an explicit `y` keypress, with no default on Enter (drop the `(y)` shown in the sketch). At 6 t/s the user will have looked away, so ring BEL when approval is pending.
 - At end of turn print `2 files changed. /diff to review, /undo to revert.`
 - No diff library is needed: a line LCS of a few lines is short, and search/replace already gives the hunk.
 
@@ -318,12 +350,12 @@ Windows Terminal specifics:
 - OSC 133 marks are stable as of Terminal 1.21, and with `selectOutput` a whole command's output can be selected — [WT shell integration](https://learn.microsoft.com/en-us/windows/terminal/tutorials/shell-integration) **[DOC]**. Applications may emit these marks. Emitting them around code blocks is untested and is a misuse of their meaning, so skip it.
 
 ### Inferences
-- **Padding fix:** drop `PadRight`. To keep a code background, paint the text only, or emit ANSI background plus `ESC[K` (erase to end of line), which fills the row with the background colour without writing space characters. Whether `ESC[K` cells copy as spaces should be checked by hand in Windows Terminal; xterm-style terminals generally treat them as empty. The simplest safe option is no band at all: a plain colour and a dim left margin outside the code is not safe either, since a `│ ` gutter also lands in the copy.
+- **Padding fix:** drop `PadRight`. To keep a code background, paint the text only, or emit ANSI background plus `ESC[K` (erase to end of line), which fills the row with the background colour without writing space characters. Whether `ESC[K` cells copy as spaces should be checked by hand in Windows Terminal; xterm-style terminals generally treat them as empty. The simplest safe option is no band at all, just coloured text. Avoid a left margin or `│ ` gutter too, since it also lands in the copy.
 - **Wrapping fix:** write a code line whole and let the terminal soft-wrap, rather than splitting at `width`. Soft-wrap then copies correctly. The trade-off is that a wrapped line starts at column 0, which is cosmetic.
 - **Numbering:** print the header on its own line before the block, outside the code, for example `[2] csharp` (reuse line 76), so the number never enters a code copy.
 - **`/copy`:** `/copy` copies the last block, `/copy N` copies block N of the last answer, `/copy all` copies the full raw answer. Store raw block text from the stream, before sanitizing for display and before any wrap, in a per-answer `List<string>` in `MarkdownStream`. Print `Copied block 2 (31 lines).` Handle clipboard failure with a message and fall back to writing a temp file (Claude Code's `w` idea), since `/copy` should not crash on a locked clipboard.
 - **Backend:** TextCopy first. Add OSC 52 only if the user runs Jazari over SSH, or when `SSH_TTY`/`SSH_CONNECTION` is set. It is about 3 lines: `Console.Out.Write($"\x1b]52;c;{Convert.ToBase64String(utf8)}\a")`. YAGNI for now, as the stated use is local Windows.
-- Line endings: the model emits `\n`; on Windows convert to `\r\n` on copy, or leave as is? Most editors handle both, so copy what the model produced.
+- Line endings: copy what the model produced. Most editors handle `\n`, so no conversion is needed.
 - Do not use the alternate screen or a full-screen TUI. Normal scrollback is what keeps mouse selection simple, and Jazari already streams to scrollback.
 
 ### Gaps

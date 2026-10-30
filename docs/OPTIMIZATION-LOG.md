@@ -67,73 +67,79 @@ General-CRM was measured for size only and is otherwise off limits.
 - **Compiler servers from a Claude session can catch builds from other terminals.** Build with `--disable-build-servers`, or run `dotnet build-server shutdown` when finished.
 - **`llama-server --version` prints `build 11982`, not `b11982`.**
 
-## Research so far (full notes in `research_notes/Whole laptop Jazari optimization/`)
+## Where things stand (2026-10-30, end of first session)
 
-- **Biggest speed gain is a second RAM stick:** estimated 6.2 to about 9 tok/s, roughly $40 to $120. Paid, so optional.
-- **Speculative decoding:** the draft model must have Granite's exact tokenizer. Qwen can't be one. Granite 4.0 350M, 1B or H-Tiny are candidates; Granite 4.2 can't use them.
-- **`--poll` probably does nothing on this OpenMP build.** The real spin control is `KMP_BLOCKTIME`. To test.
-- **Models to try:** Granite 4.2 3B for chat, Mellum2.1 12B-A2.5B for overnight batch. Neither is tested here.
-- **Whole-project review pattern:** tools find, code proves, the model explains. Batch small files into 6k to 10k token units, use grammar-forced JSON with a required quote checked by string match, and resume from a JSONL file keyed on content hash. Small models are weak at this, so their verdict sorts findings and never deletes them.
+**Done on branch `jazari-optimize`, not merged to `main`, so not in the installed Jazari yet.** All automated tests pass.
 
-## Real-task speed test (Granite 4.1 3B, CPU, 1,480-token prompt, 200-token answer)
+| Command | What it does | Tested with the real model |
+|---|---|---|
+| `/copy [n]` | Copies a numbered code block, stripped of hidden characters | Not yet: the clipboard said "access denied" while the laptop was locked, cause unconfirmed |
+| `/read <path>` | Reads a file or folder for the next questions, 5,000 tokens at most | Yes, one small file |
+| `/review [path]`, `jazari review` | Reviews a whole project, resumes after a stop, writes a report | Yes, 6 files with 3 planted bugs |
+| `/edit <file> <what>`, `/undo` | Shows the change, writes after yes, can undo | Yes, one rename |
 
-| Setting | Task | Prompt tok/s | Answer tok/s | Total |
-|---|---|---|---|---|
-| `-t 6` | edit | 34.2 | 3.63 | 98 s |
-| `-t 6` | review | 23.4 | 2.59 | 140 s |
-| `-t 4 -tb 8` | edit | 24.5 | 3.11 | 124 s |
-| `-t 4 -tb 8` | review | 20.8 | 3.36 | 131 s |
-| `ngram-simple` | edit | 21.9 | 2.99 | 134 s |
-| `ngram-simple` | review | 23.7 | 3.68 | 117 s |
-| `ngram-mod` | edit | 20.9 | 3.52 | 127 s |
-| `ngram-mod` | review | 23.3 | 3.69 | 118 s |
-| `ngram-map-k` | edit | 25.1 | 3.22 | 121 s |
+Also changed: code lines print without padding so mouse copies stay exact, temperature is 0.2 for code, and the gateway and client timeouts are 30 minutes.
 
-The later rows were still running or unread when this was written. The MX150 draft row used a Qwen draft model, which research says can't work. Retest with a Granite draft.
+**Not built:** a free-running tool loop where the model picks its own files. Static tools as a first pass. Roslyn. See "Next".
 
-What this shows, with caution because heat and other work moved the numbers:
+## What the measurements say
 
-- **Answers are about half the benchmark speed** (3 to 3.7 tok/s, against 6.2). My guess, not yet tested: `llama-bench` measures answers with an almost empty context, and each answer token gets slower as more prompt sits in context. Test this first by measuring answer speed at 0, 1.5k, 6k and 12k tokens of prompt. The result sets the review batch size. If 6k tokens of prompt means about 1 tok/s, batches must be smaller.
-- **N-gram speculation didn't help.** Few drafts were accepted (31 of 204 at best).
-- `-t 4 -tb 8` wasn't better than `-t 6`.
+All on Granite 4.1 3B Q4_K_M unless stated. Numbers from before 17:16 overlapped with other work and are not used here.
 
-## Code on this branch
+**1. Answer speed falls as the prompt grows.** This is why the benchmark's 6.2 tok/s doesn't hold in real use.
 
-**Written but not yet compiled or tested** (Eni-M asked for it to be pushed before tests run):
+| Prompt tokens | Prompt tok/s | Answer tok/s |
+|---|---|---|
+| 111 | 27.3 | 6.75 |
+| 1,420 | 28.0 | 5.45 |
+| 5,244 | 23.8 | 2.82 |
 
-- `src/MyOwnLLM.Cli/CodeBlocks.cs`: pulls the exact code out of an answer.
-- `/copy [n]` in `Session.cs`, using TextCopy, which PrettyPrompt already brings in. Answers now end with a hint such as `2 code blocks, /copy 1`.
-- `MarkdownStream.cs` numbers each block, for example `[1] csharp`.
-- Two new tests in `SessionTests.cs`.
+So small parts win. Review parts are about 2,000 tokens, and `/read` stops at 5,000.
 
-**Known to fix first:** `MarkdownStreamTests.Code_fence_keeps_code_and_shows_language` still expects `csharp` and must expect `[1] csharp`. Other fence tests may need the `[n]` line too. If `TextCopy` doesn't compile as a transitive reference, add a direct `PackageReference`.
+**2. Settings tried.**
 
-## Plan for the rest
+| Setting | Result | Decision |
+|---|---|---|
+| `KMP_BLOCKTIME=0` | Prompt about 13% faster at small sizes, answers 20 to 28% slower | No |
+| `-t 4` with blocktime 0 | Answers still slower than `-t 6` default | No |
+| `ngram-simple`, `ngram-mod`, `ngram-map-k` | Few drafts accepted, no real gain (measured while other work ran) | No |
+| Draft model, Granite 4.0 350M on MX150 | Rewriting a file: **5.46 to 7.95 tok/s**, 176 of 177 accepted. Reviewing: **5.47 to 2.67 tok/s**, 134 of 512 accepted | Off. It only helps when the answer repeats the input |
+| Draft model, Granite 4.0 1B on MX150 | No gain on rewriting, slower reviewing | No |
+| Draft model, Granite 4.0 H-Tiny | Too big for the MX150 | No |
+| Intel UHD 620 | 12.5 / 4.1 tok/s | No |
 
-My decision: explicit commands first, not a free-running tool loop. At about 3.5 tok/s, a model that explores on its own wastes minutes per step, and a command that does the reading itself is predictable. A tool loop can come later (see `agent_tools_and_output.md`).
+**The current setup was already close to the best this laptop gives without new hardware:** `-t 6`, CPU only.
 
-1. **Fix and test `/copy`**, then commit.
-2. **`/read <file or folder>`** in `Session.cs`: reads text files into the next question, up to what the context allows, skipping generated code, data dumps and secrets (`Migrations`, `*.Designer.cs`, `*.g.cs`, `node_modules`, `bin`, `obj`, `dist`, lock files, `*.sql` dumps, `.env`, keys). It says what was left out. Use `git ls-files` when the folder is a repo, finding git as `UpdateCheck.FindGit` does.
-3. **`jazari review [path]` and `/review [path]`:**
-   - Files in risk order: auth, controllers, payment, upload, SQL, config, middleware first.
-   - Batch into units sized from the context-speed test above.
-   - Add an optional JSON schema to `ChatRequest` and `LlamaClient.ChatBody` so answers are forced into a findings shape: file, quote, problem, severity, fix.
-   - Keep a finding only as "verified" when its quote is really in the file, and take line numbers from that match. Unverified ones stay in the report, marked as such.
-   - Resume from a JSONL file in `%LOCALAPPDATA%\MyOwnLLM\reviews`, keyed on content hash and prompt version, so only changed files are re-read.
-   - Write a Markdown report and print its path. Never write into the reviewed project.
-   - Test on this repo, with a planted bug to confirm it can be found.
-4. **`/edit <file> <instruction>`:** the model answers with search/replace blocks. Jazari shows the diff, asks y/n, and writes only after yes. It refuses paths outside the project and works only on files in git, so a change can be undone.
-5. **Speed checks to run:** context-size test; Granite 4.0 Tiny or 350M as a draft model on the MX150; `--poll 0` on and off; `KMP_BLOCKTIME=0`; Granite 4.2 3B (2.24 GB) as a possible new chat model, checking FIM first, since Granite 4.2 can't use a Granite 4.1 draft model.
-6. **Later:** static tools as a first pass (gitleaks, Opengrep, osv-scanner, NetAnalyzers), and Roslyn for effective auth and data flow.
+**3. Granite 4.2 3B Q4_K_M against 4.1, same 6 files with 3 planted bugs (hardcoded password, SQL injection, refund with no authorization).**
 
-Paid option to report to Eni-M, not needed by anything above: a second 16 GB DDR4 stick for dual channel.
+| | Granite 4.1 3B | Granite 4.2 3B, thinking off |
+|---|---|---|
+| Planted bugs found | 3 of 3 | 3 of 3 |
+| Time | 4 min 9 s | 6 min 37 s |
+| Parts that failed | 0 | 1 of 4 |
+| Findings beyond the planted bugs | Mostly weak, for example 2 "no authorization" guesses on an internal class | Mostly weak, including a duplicate |
+| Benchmark, prompt / answer tok/s | 28.8 / 6.2 | 35.1 / 6.6 |
 
-## Status
+Decision: **keep Granite 4.1.** One small test, so this is direction, not proof. Granite 4.2 is worth another look, since its benchmark was faster. Thinking on was not tried.
 
-- [x] Research: speed, models, whole-project review
-- [ ] Research: file tools and clean output (`agent_tools_and_output.md`, check whether it finished)
-- [ ] Laptop measurements (first pass done, see above)
-- [ ] Clean code output and copy (written, untested)
-- [ ] `/read`
-- [ ] Whole-project review feature
-- [ ] `/edit`
+**Honest quality picture:** the review reliably catches obvious, visible problems, and each finding quotes real code. It also reports weak ones, so read the report as a list to check. It won't do what a cloud AI does on cross-file flows and business logic: it sees one part at a time. Nothing here tests that, and research found even strong cloud models struggle with cross-file authorization.
+
+**Review time:** about 40 s per part in that test, so an EduCore-sized project (350k tokens, about 175 parts) would take about 2 hours at best, more likely 3 to 7 with heat and bigger files. Estimate, not run, as Eni-M asked for no EduCore review.
+
+## The hardware answer
+
+A **second 16 GB DDR4 SODIMM** (the empty slot) is the one change that should really speed answers. Research estimates 6.2 to about 9 tok/s, from a test on similar hardware, and it costs about $40 to $120. It's paid, so it needs Eni-M's decision. Nothing else found comes close. Undervolting is blocked unless Memory Integrity is turned off, a security trade-off, and whether BIOS 1.46 allows it is unknown.
+
+## Next
+
+1. Eni-M decides whether to merge `jazari-optimize` into `main`, then runs `jazari update` from their own terminal.
+2. Try `/copy` with the laptop unlocked.
+3. `GitSummary.cs:22` still runs `git` by bare name. Eni-M's decision is open.
+4. Try review on Granite 4.2 with thinking on, and Mellum2.1 (8 GB) as an overnight model.
+5. Add gitleaks, Opengrep and osv-scanner as a first pass, then Roslyn for effective auth. See `repo_review.md`.
+6. Add a tool loop if explicit commands feel limiting. `agent_tools_and_output.md` has the design: four small tools, one call per turn, no shell.
+7. Edit matching could allow a line-trimmed fallback.
+
+Downloaded for testing, in `spike/models` (git-ignored): `granite-4.2-3b-Q4_K_M.gguf` (2.24 GB), `granite-4.0-350m-Q8_0.gguf` (0.38 GB), `granite-4.0-1b-Q4_K_M.gguf` (1.02 GB). Safe to delete.
+
+Research notes: `research_notes/Whole laptop Jazari optimization/`. The research agents' notes are raw material: check a claim here before trusting one there.
