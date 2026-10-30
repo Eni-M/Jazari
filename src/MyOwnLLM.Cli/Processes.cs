@@ -32,12 +32,11 @@ public sealed class ProcessRunner : IProcessRunner
     public void StartDetached(string exe, string[] args, string logFile)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(logFile)!);
-        // cmd's redirection writes the log without tying the child's output pipes to this process, so it outlives jazari.
+        // cmd does the log redirection. The command line is passed raw: cmd doesn't understand .NET's \" escaping, and
+        // /c "<whole command>" is its own quoting rule. ShellExecute (hidden) keeps the child from inheriting this
+        // terminal's handles, so it outlives jazari and never holds a pipe open.
         var command = $"\"{exe}\" {string.Join(' ', args.Select(Quote))} > \"{logFile}\" 2>&1";
-        var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true };
-        psi.ArgumentList.Add("/c");
-        psi.ArgumentList.Add(command);
-        Process.Start(psi);
+        Process.Start(new ProcessStartInfo("cmd.exe", $"/d /c \"{command}\"") { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
     }
 
     static string Quote(string arg) => arg.Contains(' ') ? $"\"{arg}\"" : arg;

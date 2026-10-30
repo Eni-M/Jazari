@@ -31,7 +31,8 @@ public sealed class ServerLauncher(
         if (gatewayState is ConnectionState.GatewayNotRunning)
             runner.StartDetached(config.GatewayExe, [], Path.Combine(logDir, "gateway.log"));
 
-        for (var i = 0; i < maxWaits; i++)
+        var waited = Stopwatch.StartNew(); // checks themselves can take ~2 s while a port refuses, so cap the total wait too
+        for (var i = 0; i < maxWaits && waited.Elapsed < TimeSpan.FromMinutes(2); i++)
         {
             await delay(PollEvery, ct);
             gatewayState = await GatewayStateAsync(ct);
