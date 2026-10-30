@@ -4,7 +4,7 @@ using MyOwnLLM.Cli.Terminal;
 
 namespace MyOwnLLM.Cli;
 
-public enum ConnectionState { Available, GatewayNotRunning, KeyRejected }
+public enum ConnectionState { Available, GatewayNotRunning, KeyRejected, NoKey }
 
 /// <summary>One Jazari conversation: questions, slash commands, history and stopping an answer.</summary>
 public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> newRenderer, string project)

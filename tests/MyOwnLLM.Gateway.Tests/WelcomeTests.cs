@@ -39,6 +39,7 @@ public class WelcomeTests
     [Theory]
     [InlineData(ConnectionState.GatewayNotRunning, "Connection  Gateway not running")]
     [InlineData(ConnectionState.KeyRejected, "Connection  Key rejected")]
+    [InlineData(ConnectionState.NoKey, "Connection  Key not set")]
     public void Welcome_shows_connection_problems(ConnectionState state, string line) => Assert.Contains(line, Render(state));
 
     [Fact]
@@ -48,4 +49,19 @@ public class WelcomeTests
     public void Welcome_fits_40_columns() =>
         Assert.All(Render(ConnectionState.GatewayNotRunning, width: 40, directory: Path.Combine(Home, "a-very-long-folder-name", "another-long-folder-name")),
             l => Assert.True(l.Length <= 40, $"too long: '{l}'"));
+
+    [Fact]
+    public void Available_has_no_setup_hint() => Assert.DoesNotContain(Render(ConnectionState.Available), l => l.StartsWith("To get started"));
+
+    [Theory]
+    [InlineData(ConnectionState.NoKey, "add-key", "JAZARI_KEY")]
+    [InlineData(ConnectionState.GatewayNotRunning, "start-llama.ps1", "MyOwnLLM.Gateway")]
+    [InlineData(ConnectionState.KeyRejected, "add-key", "JAZARI_KEY")]
+    public void Problems_come_with_next_steps(ConnectionState state, string first, string second)
+    {
+        var text = string.Join("\n", Render(state));
+
+        Assert.Contains(first, text);
+        Assert.Contains(second, text);
+    }
 }

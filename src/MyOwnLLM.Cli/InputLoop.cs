@@ -59,9 +59,10 @@ public sealed class PromptLineReader : ILineReader
 /// <summary>The interactive session: welcome once, then read → answer until /exit, end of input, or Ctrl+C twice.</summary>
 public static class InputLoop
 {
-    public static async Task RunAsync(Session session, Ui ui, string version, string directory, ILineReader reader)
+    public static async Task RunAsync(Session session, Ui ui, string version, string directory, ILineReader reader, bool hasKey = true)
     {
-        var state = await session.ConnectAsync(CancellationToken.None);
+        // Like any good CLI, open even when setup is incomplete, and say what's missing instead of exiting.
+        var state = hasKey ? await session.ConnectAsync(CancellationToken.None) : ConnectionState.NoKey;
         Welcome.Render(ui, version, session.ModelName, directory, state);
         ui.Blank();
 

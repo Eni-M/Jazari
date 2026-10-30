@@ -9,14 +9,15 @@ try { cli = CliArgs.Parse(args); }
 catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
 
 var settings = Settings.FromEnvironment(Environment.GetEnvironmentVariable);
-if (settings.Key is null)
+// The interactive session opens without a key and explains the setup; one-off commands can't do anything without one.
+if (settings.Key is null && cli.Command != "session")
 {
-    Console.Error.WriteLine("set JAZARI_KEY (run: dotnet run --project src/MyOwnLLM.Gateway -- add-key)");
+    Console.Error.WriteLine("set JAZARI_KEY (in your MyOwnLLM folder run: dotnet run --project src/MyOwnLLM.Gateway -- add-key)");
     return 2;
 }
 
 using var http = new HttpClient { BaseAddress = settings.GatewayUrl, Timeout = TimeSpan.FromMinutes(10) };
-http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.Key);
+if (settings.Key is not null) http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.Key);
 var gateway = new GatewayClient(http);
 
 var version = typeof(CliArgs).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
@@ -30,7 +31,8 @@ if (cli.Command == "session")
     var ui = new Ui(Console.Out, theme, width);
     // PrettyPrompt needs a real console; pipes and some IDE terminals get plain line input instead.
     ILineReader reader = Console.IsInputRedirected || Console.IsOutputRedirected ? new TextLineReader(Console.In) : new PromptLineReader(theme);
-    await InputLoop.RunAsync(new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory), ui, version, directory, reader);
+    await InputLoop.RunAsync(new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory), ui, version, directory, reader,
+        hasKey: settings.Key is not null);
     return 0;
 }
 

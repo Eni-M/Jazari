@@ -96,4 +96,18 @@ public class InputLoopTests
 
         Assert.Equal(ConnectionState.GatewayNotRunning, await session.ConnectAsync(cts.Token));
     }
+
+    [Fact]
+    public async Task Without_a_key_the_session_still_opens()
+    {
+        var (session, ui, output, gateway) = NewSession();
+        var infoCalls = 0;
+        gateway.Info = _ => { infoCalls++; return Task.FromResult(new GatewayInfo("Jazari", "Granite 4.1 3B", "0.2.0")); };
+
+        await InputLoop.RunAsync(session, ui, "0.2.0", @"C:\Repo", new ScriptedReader((true, "/help")), hasKey: false);
+
+        Assert.Contains("Connection  Key not set", output.ToString());
+        Assert.Contains("/details", output.ToString());
+        Assert.Equal(0, infoCalls);
+    }
 }
