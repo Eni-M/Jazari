@@ -57,7 +57,7 @@ Speed swings ~10–30 % with laptop temperature. Reading a 4,000-token context t
 - **"Where are we left at?" answered with a short summary in ≤ 2 minutes.**
 - **Colab** for training; private repo code may be uploaded there.
 - **API keys for Eni-M only**, personal use.
-- **Requests are queued and fed to the model one at a time; output is delivered complete** rather than streamed. *(Research note: buffering saves no compute and adds a blank wait — about 50 s for a 300-token answer. The design keeps buffered delivery as the default, with streaming available as an option the client can request.)*
+- **Requests are queued and fed to the model one at a time.** Delivery: the CLI streams answers by default (Eni-M, 2026-10-30, see `2026-10-30-jazari-cli-design.md`); the gateway API stays buffered unless a client asks for streaming.
 - **The PC is tuned when the model is in use** (power, heat, background load).
 - **Skipped after research:** Next-Concept Modeling, Nested Learning, CompreSSM — none can be applied to an already-trained 3B dense model on a T4 or run in llama.cpp. Nested Learning's goal (learning without forgetting) is approximated by LoRA with replay data and periodic LoRA refreshes.
 - Renaming is lowest priority.
