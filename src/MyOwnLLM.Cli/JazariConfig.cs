@@ -1,0 +1,24 @@
+using System.Text.Json;
+
+namespace MyOwnLLM.Cli;
+
+/// <summary>
+/// Where this machine's Jazari pieces live, written by scripts/install-jazari.ps1 so nothing is hard-coded:
+/// the repo folder, the published gateway, llama-server and the model file.
+/// </summary>
+public sealed record JazariConfig(string Home, string GatewayExe, string LlamaServer, string Model)
+{
+    public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "config.json");
+
+    public static JazariConfig? Load(string path)
+    {
+        try { return File.Exists(path) ? JsonSerializer.Deserialize<JazariConfig>(File.ReadAllText(path), JsonSerializerOptions.Web) : null; }
+        catch (JsonException) { return null; }
+    }
+
+    public void Save(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions(JsonSerializerOptions.Web) { WriteIndented = true }));
+    }
+}

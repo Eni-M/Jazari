@@ -3,7 +3,7 @@ namespace MyOwnLLM.Cli;
 public sealed record CliArgs(string Command, string? Text, string? RepoPath, bool Stream, string? Id, bool? Accepted)
 {
     public const string Usage =
-        "usage: jazari | jazari ask \"<question>\" [--repo <path>] [--no-stream] | jazari status [--repo <path>] | jazari feedback <ix-id> up|down";
+        "usage: jazari | jazari ask \"<question>\" [--repo <path>] [--no-stream] | jazari status [--repo <path>] | jazari feedback <ix-id> up|down | jazari stop";
 
     public static CliArgs Parse(string[] args)
     {
@@ -11,6 +11,8 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
         {
             case []:
                 return new("session", null, null, true, null, null);
+            case ["stop"]:
+                return new("stop", null, null, true, null, null);
             case ["ask", var text, .. var rest] when !text.StartsWith("--"):
                 var (repo, stream) = Options(rest, allowStream: true);
                 return new("ask", text, repo, stream, null, null);
