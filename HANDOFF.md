@@ -12,7 +12,7 @@ Read this first, then the plan and the spec. This note says where the work stand
 
 ## Status: no code is in the repo yet
 
-An earlier session worked through Tasks 1 to 3 and part of Task 4 and reported 227 passing tests. **None of that work was pushed.** It is not on this branch, `main`, or any other remote branch, and the code it describes (`src/Jazari.Launcher`, `scripts/jazari-manifest.json`, `UpdateCheck.cs`) does not exist here. Start again from **Task 1**. The decisions below came out of that session, so apply them as you go.
+An earlier session's task list was: 1 Config fields, manifest, rejected-key repair; 2 Launch notice; 3 The launcher; 4 The updater script; 5 Bootstrap installer, docs, end-to-end check; 6 Final review and fixes. It stopped around Task 3 (the launcher), after the hardening below, and reported 227 passing tests. **None of that work was pushed.** It is not on this branch, `main`, or any other remote branch, and the code it describes (`src/Jazari.Launcher`, `scripts/jazari-manifest.json`, `UpdateCheck.cs`) does not exist here. Start again from **Task 1**. The decisions below came out of that session, so apply them as you go.
 
 | Task | State |
 |---|---|
@@ -22,6 +22,7 @@ An earlier session worked through Tasks 1 to 3 and part of Task 4 and reported 2
 | Hardening (decisions 2 to 4) | To do; fold into Tasks 2, 3 and the existing `Processes.cs` |
 | 4. Updater script + "run jazari update" messages | To do |
 | 5. Bootstrap installer, docs, manual checks on Windows | To do (manual steps need the Windows PC) |
+| 6. Final review and fixes (review the whole diff against the spec's Review Focus list, fix what it finds) | To do |
 
 ## Decisions made after the plan was written
 
