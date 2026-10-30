@@ -124,7 +124,7 @@ Decision: **keep Granite 4.1.** One small test, so this is direction, not proof.
 
 **Honest quality picture:** the review reliably catches obvious, visible problems, and each finding quotes real code. It also reports weak ones, so read the report as a list to check. It won't do what a cloud AI does on cross-file flows and business logic: it sees one part at a time. Nothing here tests that, and research found even strong cloud models struggle with cross-file authorization.
 
-**Review time:** about 40 s per part in that test, so an EduCore-sized project (350k tokens, about 175 parts) would take about 2 hours at best, more likely 3 to 7 with heat and bigger files. Estimate, not run, as Eni-M asked for no EduCore review.
+**Review time:** about 1 minute per part in that test, so an EduCore-sized project (350k tokens, about 175 parts) would take about 3 hours at best, and up to about 7 with heat and more parts. Estimate, not run, as Eni-M asked for no EduCore review.
 
 ## The hardware answer
 
