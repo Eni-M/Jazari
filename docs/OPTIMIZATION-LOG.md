@@ -17,6 +17,23 @@ Read this first if you are continuing this work, human or AI. Newest status at t
 
 **Scope of item 2 (Eni-M, 2026-10-30):** the deliverable is the capability. Jazari must be able to read and review a project's files. Nobody wants an EduCore review out of this work, so don't produce one. Build and test the feature on this repo. EduCore's size is only a yardstick for how big a project it must handle.
 
+## Session 2, autonomous (started 2026-10-30, Eni-M away, on mobile only)
+
+Eni-M's request: optimize usability and performance, make Jazari easier to use, use the whole PC efficiently, try alternative runtimes, cut what makes the model heavier, and build the bridge between the model and the gateway properly. "I am leaving the decision entirely up to you". Very important decisions wait for Eni-M. Don't use or post Eni-M's own data.
+
+Plan and status (update as each step finishes):
+
+- [x] `/edit` line-trimmed fallback (commit `04d4ac6`, pushed)
+- [x] Research, 4 parts, notes in `research_notes/Jazari model bridge and efficiency/`: alternative runtimes and backends, cutting weight and memory, the gateway-to-llama-server bridge, usability
+- [x] Report in `reports/Jazari model bridge and efficiency.md`. Its plan (a) is the build list, (b) the measurements, (c) the decisions. Note: Granite 4.1 3B is dense, not hybrid (checked against its config.json); `gateway_bridge.md` is wrong on that point
+- [ ] Measure and build the safe wins on branch `jazari-optimize`, tests passing, one commit each
+- [ ] List what waits for Eni-M under "Decisions waiting"
+
+### Decisions waiting for Eni-M
+
+- Merge `jazari-optimize` into `main` (see "Next")
+- Paid RAM upgrade (see "The hardware answer")
+
 ## Rules that still apply (from the design doc, `docs/superpowers/specs/2026-10-30-myownllm-design.md`)
 
 - **General-CRM and other company repositories are never used for data, evaluation or tuning.** Test only on Eni-M's own code (EduCore, EduCoreFront, WareFlow, LearningRoadmap, this repo).
