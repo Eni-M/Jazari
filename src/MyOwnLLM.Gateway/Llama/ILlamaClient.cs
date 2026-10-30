@@ -9,7 +9,7 @@ public sealed record PromptProgress(int Total, int Cached, int Processed);
 public sealed record AnswerStats(int PromptTokens, int CachedTokens, double PromptPerSecond, int AnswerTokens, double AnswerPerSecond);
 
 /// <summary>One piece of a streamed answer: text, reading progress, or the closing numbers.</summary>
-public sealed record StreamPart(string? Text, PromptProgress? Progress = null, AnswerStats? Stats = null);
+public sealed record StreamPart(string? Text, PromptProgress? Progress = null, AnswerStats? Stats = null, bool CutOff = false);
 
 public interface ILlamaClient
 {

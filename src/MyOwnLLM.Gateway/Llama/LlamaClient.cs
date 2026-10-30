@@ -45,6 +45,9 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
         if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0
             && choices[0].TryGetProperty("delta", out var delta) && delta.TryGetProperty("content", out var c) && c.GetString() is { Length: > 0 } text)
             parts.Add(new(text));
+        if (root.TryGetProperty("choices", out var ends) && ends.ValueKind == JsonValueKind.Array && ends.GetArrayLength() > 0
+            && ends[0].TryGetProperty("finish_reason", out var finish) && finish.ValueKind == JsonValueKind.String && finish.GetString() == "length")
+            parts.Add(new(null, CutOff: true));
         if (root.TryGetProperty("timings", out var t) && t.ValueKind == JsonValueKind.Object)
             parts.Add(new(null, Stats: new(Int(t, "prompt_n") + Int(t, "cache_n"), Int(t, "cache_n"), Number(t, "prompt_per_second"),
                 Int(t, "predicted_n"), Number(t, "predicted_per_second"))));

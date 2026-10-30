@@ -23,6 +23,10 @@ public class SseChunkTests
             """)!.Timings);
 
     [Fact]
+    public void Final_chunk_says_when_the_answer_was_cut_off() =>
+        Assert.True(SseChunk.Parse("""data: {"id":"ix-7","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}""")!.CutOff);
+
+    [Fact]
     public void Progress_chunk() =>
         Assert.Equal(new ReadProgress(100, 40, 60), SseChunk.Parse("""data: {"progress":{"total":100,"cached":40,"processed":60}}""")!.Progress);
 

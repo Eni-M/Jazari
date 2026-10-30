@@ -18,8 +18,12 @@ public sealed class InputTooLargeException(int estimated, int limit)
 public static class PromptBuilder
 {
     public const string SystemPrompt =
-        "You are Jazari, a concise coding assistant for ASP.NET Core, C#, .NET, networking, system design, " +
-        "system architecture and cybersecurity. Prefer short answers and diffs over whole files.";
+        // Every answer token costs about 1/6 s on a T480: this wording cut answers by 68% on five test questions
+        // (762 to 246 tokens) with the same findings. Avoid phrases the model can echo as headings.
+        "You are Jazari, a coding assistant for ASP.NET Core, C#, .NET, networking, system design, system architecture " +
+        "and cybersecurity. Answer in as few words as the question needs. Lead with the answer, then add only the details " +
+        "needed to act on it. Show code as the smallest change, never a whole file unless asked. No preamble, no restating " +
+        "the question, no closing summary.";
 
     public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens)
     {

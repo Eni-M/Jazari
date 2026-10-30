@@ -101,6 +101,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
         var answer = new StringBuilder();
         string? id = null;
         AnswerTimings? timings = null;
+        var cutOff = false;
         var watch = Stopwatch.StartNew();
         try
         {
@@ -108,6 +109,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             {
                 if (chunk.Progress is { } progress) { thinking.Report(progress); continue; }
                 timings = chunk.Timings ?? timings;
+                cutOff |= chunk.CutOff;
                 if (chunk.Error is not null)
                 {
                     StopThinking();
@@ -129,6 +131,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             var blocks = CodeBlocks.Extract(answer.ToString()).Count;
             var copyHint = blocks == 0 ? "" : $" {ui.Theme.Glyph('·')} {blocks} code block{(blocks == 1 ? "" : "s")}, /copy{(blocks == 1 ? "" : " 1")}";
             ui.Metadata($"{id} {ui.Theme.Glyph('·')} {watch.Elapsed.TotalSeconds:0.0} s{Describe(timings)}{copyHint}");
+            if (cutOff) ui.Metadata("The answer reached its length limit. Say \"go on\" for the rest.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -59,6 +59,7 @@ public static class ChatEndpoints
         {
             http.Response.ContentType = "text/event-stream";
             AnswerStats? stats = null;
+            var cutOff = false;
             try
             {
                 answer = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
@@ -67,6 +68,7 @@ public static class ChatEndpoints
                     await foreach (var part in s.Llama.ChatStreamAsync(prompt, maxTokens, ct))
                     {
                         stats = part.Stats ?? stats;
+                        cutOff |= part.CutOff;
                         if (part.Progress is { } p)
                             await WriteEventAsync(http, new { progress = new { total = p.Total, cached = p.Cached, processed = p.Processed } }, ct);
                         if (part.Text is not { } piece) continue;
@@ -84,7 +86,7 @@ public static class ChatEndpoints
                 return;
             }
             id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
-            await WriteEventAsync(http, new { id = $"ix-{id}", choices = new[] { new { index = 0, delta = new { }, finish_reason = "stop" } }, timings = stats }, http.RequestAborted);
+            await WriteEventAsync(http, new { id = $"ix-{id}", choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } }, timings = stats }, http.RequestAborted);
             await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
         }
         else

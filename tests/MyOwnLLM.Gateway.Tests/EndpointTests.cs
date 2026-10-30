@@ -177,6 +177,7 @@ public class EndpointTests : IDisposable
         Assert.Equal(new PromptProgress(5000, 1200, 2400), Assert.Single(progress).Progress);
         Assert.Equal("hi", Assert.Single(text).Text);
         Assert.Equal(new AnswerStats(5000, 1200, 28.1, 90, 6.2), Assert.Single(last).Stats);
+        Assert.True(LlamaClient.ReadChunk("""{"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}""").Single().CutOff);
     }
 
     [Fact]
