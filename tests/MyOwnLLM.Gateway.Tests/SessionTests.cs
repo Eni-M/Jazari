@@ -55,6 +55,35 @@ public class SessionTests
     }
 
     [Fact]
+    public async Task Copy_puts_the_exact_code_on_the_clipboard()
+    {
+        string? copied = null;
+        var theme = new Theme(ColorMode.None, unicode: true);
+        var session = new Session(_gateway, new Ui(_output, theme, 80), () => new MarkdownStream(_output, theme, 80), @"C:\Repo") { SetClipboard = t => copied = t };
+        _gateway.Chat = (_, _, _) => FakeGateway.Chunks("One:\n```csharp\nint a;\n  int b;\n```\nTwo:\n```\nx\n```\n");
+
+        await session.HandleAsync("code please", CancellationToken.None);
+        Assert.Contains("2 code blocks", Text);
+
+        await session.HandleAsync("/copy 1", CancellationToken.None);
+        Assert.Equal("int a;\n  int b;", copied);
+
+        await session.HandleAsync("/copy", CancellationToken.None);
+        Assert.Equal("x", copied); // no number: the last block
+
+        await session.HandleAsync("/copy 9", CancellationToken.None);
+        Assert.Contains("no code block 9", Text);
+    }
+
+    [Fact]
+    public async Task Copy_with_nothing_to_copy_says_so()
+    {
+        await _session.HandleAsync("/copy", CancellationToken.None);
+
+        Assert.Contains("Nothing to copy", Text);
+    }
+
+    [Fact]
     public async Task History_is_sent_with_next_question()
     {
         await _session.HandleAsync("first", CancellationToken.None);

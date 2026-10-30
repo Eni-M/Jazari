@@ -15,6 +15,7 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
     readonly List<string[]> _table = [];
     State _state;
     int _shown; // characters of the current line already echoed raw (color mode)
+    int _blocks; // code blocks so far in this answer
     bool Live => theme.Mode != ColorMode.None;
 
     public void Write(string token)
@@ -61,7 +62,7 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
         if (!restyle)
         {
             // The raw echo stays as printed; keep the fence state right for the lines that follow.
-            if (line.TrimStart().StartsWith("```")) _state = State.InFence;
+            if (line.TrimStart().StartsWith("```")) { _state = State.InFence; _blocks++; }
             output.WriteLine();
             return;
         }
@@ -72,8 +73,8 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
         if (line.TrimStart().StartsWith("```"))
         {
             _state = State.InFence;
-            var language = line.Trim()[3..].Trim();
-            if (language.Length > 0) output.WriteLine(theme.Paint(language, Tone.Muted));
+            // Numbered so /copy n can name it.
+            output.WriteLine(theme.Paint($"[{++_blocks}] {line.Trim()[3..].Trim()}".TrimEnd(), Tone.Muted));
             return;
         }
 

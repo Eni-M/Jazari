@@ -12,6 +12,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     static readonly (string Command, string What)[] Commands =
     [
         ("/help", "Available commands"), ("/status", "Where are we left at?"), ("/model", "Show the model"),
+        ("/copy [n]", "Copy code block n of the last answer (no number: the last block)"),
         ("/clear", "Clear conversation"), ("/retry", "Ask the last question again"), ("/details", "Details of the last error"), ("/exit", "Quit"),
     ];
 
@@ -29,6 +30,8 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     public bool EchoQuestions { get; init; } = true;
     /// <summary>Whether the most recent question or /status ended in an error (one-off commands exit 1).</summary>
     public bool LastFailed { get; private set; }
+    /// <summary>Where /copy sends code. Replaced in tests.</summary>
+    public Action<string> SetClipboard { get; init; } = TextCopy.ClipboardService.SetText;
     bool Live => ui.Theme.Mode != ColorMode.None;
 
     public async Task<ConnectionState> ConnectAsync(CancellationToken ct)
@@ -59,6 +62,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             case "/help": Help(); break;
             case "/status": return StatusAsync(ct);
             case "/model": return ModelAsync(ct);
+            case "/copy": Copy(input.Split(' ', 2) is [_, var number] ? number.Trim() : null); break;
             case "/clear": _history.Clear(); ui.Metadata("Conversation cleared."); break;
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
             case "/details": Details(); break;
@@ -104,7 +108,9 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             StopThinking();
             renderer.Complete();
             Remember(question, answer.ToString());
-            ui.Metadata($"{id} {ui.Theme.Glyph('·')} {watch.Elapsed.TotalSeconds:0.0} s");
+            var blocks = CodeBlocks.Extract(answer.ToString()).Count;
+            var copyHint = blocks == 0 ? "" : $" {ui.Theme.Glyph('·')} {blocks} code block{(blocks == 1 ? "" : "s")}, /copy{(blocks == 1 ? "" : " 1")}";
+            ui.Metadata($"{id} {ui.Theme.Glyph('·')} {watch.Elapsed.TotalSeconds:0.0} s{copyHint}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -149,6 +155,20 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     {
         if (_info is null && await ConnectAsync(ct) != ConnectionState.Available) { Details(); return; }
         ui.Rows([("Model", $"{_info!.Model} {ui.Theme.Glyph('·')} local"), ("Gateway", $"{_info.Name} {_info.Version}")]);
+    }
+
+    void Copy(string? number)
+    {
+        var blocks = _history.LastOrDefault(t => t.Role == "assistant") is { } last ? CodeBlocks.Extract(last.Content) : [];
+        if (blocks.Count == 0) { ui.Metadata("Nothing to copy: the last answer has no code block."); return; }
+        var n = number is null ? blocks.Count : int.TryParse(number, out var parsed) ? parsed : 0;
+        if (n < 1 || n > blocks.Count) { ui.Metadata($"There is no code block {number}. The last answer has {blocks.Count}."); return; }
+        try
+        {
+            SetClipboard(blocks[n - 1]);
+            ui.Metadata($"Copied code block {n}.");
+        }
+        catch (Exception e) when (e is not OperationCanceledException) { ui.Error("Couldn't reach the clipboard.", e.Message, null); }
     }
 
     void Help()
