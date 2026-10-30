@@ -50,6 +50,12 @@ Plan and status (update as each step finishes):
 - Smart App Control also blocked Jazari's own fresh builds twice: `jazari.dll` while it read the CPU name from the registry, and the test DLL while tests wrote fake `.exe` files. With both removed, builds load. Keep code that touches the registry or writes executables out of Jazari, or test that the built DLLs still load on a Smart App Control PC.
 - The test config written for `jazari tune` in this session's AppData was deleted afterwards.
 
+### Next, after session 2
+
+- If llama-server doesn't come up with GPU settings (a driver update, for example), fall back to CPU settings and re-tune, instead of timing out. The fingerprint doesn't include the GPU driver version.
+- Try the official OpenVINO build of llama.cpp (`llama-b11982-bin-win-openvino-2026.4.1-x64.zip`, 104 MB) on Intel GPUs. Not downloaded: it wasn't in what Eni-M approved.
+- On PCs that run the 3B fast (this one: 14.7 tok/s), a bigger model such as Granite 4.1 8B might be worth its speed. That's a quality and download decision for Eni-M.
+
 ### Decisions waiting for Eni-M
 
 - ~~Which PC hosts Jazari~~ Answered: every PC, each tuned to itself. Eni-M allowed the downloads and installing here (install from Eni-M's own terminal, see Traps).
