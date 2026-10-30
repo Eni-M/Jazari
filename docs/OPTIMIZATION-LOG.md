@@ -34,7 +34,9 @@ Plan and status (update as each step finishes):
   - `/read` has the model read the files while the question is typed, through the gateway's new `/v1/warm` (`e09d9f8`)
   - llama-server starts with `--no-webui` (`66a0cb6`)
   - Long history is cut 4 pairs at a time, so the prompt's start stays cached between turns (`735985e`)
-  - Still to build, needs a running llama-server to check: exact token counts (`/tokenize`, `n_ctx` from `/props`), confirming cancel stops the server, everything in the report's part (b)
+  - Per-PC tuning: `jazari tune` and the first start on a new PC measure CPU threads, each GPU and flash attention, and save the winner with a hardware fingerprint (`60adc5e`). The gateway reads the context size from `/props`.
+  - **Checked live on this PC (llama-server b11982, Iris Xe, Release gateway):** progress events arrive through the gateway; timings arrive; a follow-up with the same context had 2,431 of 2,447 tokens cached and answered in 2 s instead of 18.4 s; `/v1/warm` then a question: 3,553 of 3,564 cached, 2.1 s instead of 22 s; cancelling stops the server within 2 s; `/props` gives `default_generation_settings.n_ctx`; this repo's C# is 4.46 chars a token, so chars/4 errs about 11% on the safe side and stays.
+  - Not done: exact token counts with `/tokenize` (chars/4 measured safe enough), the report's other part (b) items
 - [ ] List what waits for Eni-M under "Decisions waiting"
 
 **Found 2026-10-30, session 2: this session runs on a different PC from the one measured above.** All measurements in this file come from the T480 (user `enim`). This PC (user `techcom`) is a Lenovo 20X3 with an **i5-1135G7** (Tiger Lake, 4 cores, 8 threads, AVX-512 and VNNI), **32 GB DDR4-2667 in two channels** (about 42 GB/s theoretical, twice the T480), Intel Iris Xe (96 EU, shared memory), 377 GB free on C:, Balanced power plan. Jazari, llama-server and the model are not installed here. The research report targets the T480. Its hardware advice (MX150, single channel, quant choice) does not carry over; its bridge and usability advice does. On this PC, answers should be roughly twice as fast (bandwidth), Iris Xe is a real option through llama.cpp Vulkan/SYCL or OpenVINO, and the AVX-512 path in llama.cpp applies.
@@ -44,11 +46,13 @@ Plan and status (update as each step finishes):
 **Found on this PC:**
 - Smart App Control is enforcing (`VerifiedAndReputablePolicyState` 1). It blocked `llama-fit-params.exe` but allowed `llama-server`, `llama-bench`, `llama-cli` and `llama-tokenize`. So any tool Jazari runs can be blocked on some PC: the tuner treats a blocked tool as "can't measure" and keeps safe settings.
 - First quick look, i5-1135G7, CPU only, 4 threads, 1 run: prompt 74 tok/s, answer 12.9 tok/s (T480: 28.8 / 6.2).
+- `jazari tune` result here, 4 minutes: **Iris Xe through Vulkan, flash attention: 224 tok/s reading, 14.7 tok/s writing**, a typical turn about 29 s. CPU at 4 threads was about 74 / 13.
+- Smart App Control also blocked Jazari's own fresh builds twice: `jazari.dll` while it read the CPU name from the registry, and the test DLL while tests wrote fake `.exe` files. With both removed, builds load. Keep code that touches the registry or writes executables out of Jazari, or test that the built DLLs still load on a Smart App Control PC.
 - The test config written for `jazari tune` lives in this session's AppData (`Jazari\config.json` and `tuning.json`, pointing at `spike/`). Delete both before a real install on this PC.
 
 ### Decisions waiting for Eni-M
 
-- **Which PC hosts Jazari:** the T480 or this i5-1135G7 PC? Measuring here needs llama.cpp and the model downloaded into `spike/` (git-ignored, not an install), which needs Eni-M's OK
+- ~~Which PC hosts Jazari~~ Answered: every PC, each tuned to itself. Eni-M allowed the downloads and installing here (install from Eni-M's own terminal, see Traps).
 
 - Merge `jazari-optimize` into `main` (see "Next")
 - Paid RAM upgrade (see "The hardware answer")
