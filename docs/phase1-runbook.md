@@ -2,26 +2,17 @@
 
 ## Start
 
-1. **Model server** (keep this window open):
-   ```powershell
-   .\scripts\start-llama.ps1
-   ```
-   Wait for `model loaded` (~6 s).
-2. **Gateway** (second window):
-   ```powershell
-   dotnet run --project src/MyOwnLLM.Gateway
-   ```
-   Listens on `http://127.0.0.1:5080` only.
-3. **API key** (once):
-   ```powershell
-   dotnet run --project src/MyOwnLLM.Gateway -- add-key
-   ```
-   Copy the `mollm_...` line and store it as a user environment variable `JAZARI_KEY`. Only its hash is kept in `%LOCALAPPDATA%\MyOwnLLM\keys.json`. (`MYOWNLLM_KEY` still works.)
-4. **Install the `jazari` command** (once, and again after updates):
+Needs Windows and the .NET 10 SDK.
+
+1. **Install** (once per machine, and again after pulling updates), from anywhere in your clone:
    ```powershell
    .\scripts\install-jazari.ps1
    ```
-   Open a new terminal afterwards.
+   It downloads llama.cpp and the Granite model if they're missing, builds the gateway into `%LOCALAPPDATA%\Jazari\gateway`, installs the `jazari` command, and writes `%APPDATA%\Jazari\config.json` with this machine's paths. Nothing needs editing on a new PC.
+2. **Run** `jazari` in any folder. The first run creates an API key through the gateway and saves it as your `JAZARI_KEY` user variable. Every run starts llama-server and the gateway in the background if they aren't running (about 10–25 s while the model loads); after that it opens instantly.
+3. **Stop** the background servers to free their RAM: `jazari stop`. Their logs are in `%LOCALAPPDATA%\MyOwnLLM\logs`.
+
+Manual start (if you'd rather run the servers yourself): `.\scripts\start-llama.ps1`, and in a second window `dotnet run --project src/MyOwnLLM.Gateway`.
 
 ## Use
 
@@ -44,7 +35,7 @@ Jazari can't change your terminal's font or background. For the intended look in
 
 ## Other PCs
 
-The `jazari` command installs anywhere with the script above, but answers need a model server and gateway on that PC too (the 2 GB model file and ~5 GB RAM). Reaching this laptop's gateway over the network isn't supported: keys are personal and the gateway listens on localhost only.
+Clone the repo, run `.\scripts\install-jazari.ps1`, type `jazari`. Each PC runs its own model (2 GB download, ~5 GB RAM while running). Reaching another PC's gateway over the network isn't supported: keys are personal and the gateway listens on localhost only.
 
 ## PC tuning checklist (do these yourself)
 

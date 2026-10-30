@@ -6,13 +6,14 @@ Jazari runs entirely on your own machine: IBM Granite 4.1 3B on llama.cpp, behin
 
 ## Quick start
 
+Needs Windows and the .NET 10 SDK. In your clone of this repo:
+
 ```powershell
-.\scripts\start-llama.ps1                              # model server
-dotnet run --project src/MyOwnLLM.Gateway              # gateway (second window)
-dotnet run --project src/MyOwnLLM.Gateway -- add-key   # once; save it as JAZARI_KEY
-.\scripts\install-jazari.ps1                           # installs the `jazari` command
-jazari
+.\scripts\install-jazari.ps1   # once per machine: downloads what's missing, installs the `jazari` command
+jazari                         # in any folder, from any terminal
 ```
+
+The first `jazari` creates your API key (saved as `JAZARI_KEY`) and starts the model server and gateway in the background. `jazari stop` shuts them down.
 
 Full setup, commands and measured performance: [docs/phase1-runbook.md](docs/phase1-runbook.md).
 Design and plans: [docs/superpowers/](docs/superpowers/).
