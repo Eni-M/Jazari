@@ -1283,6 +1283,16 @@
           "build/net8.0/xunit.runner.visualstudio.props": {}
         }
       },
+      "myllm/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "compile": {
+          "bin/placeholder/myllm.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/myllm.dll": {}
+        }
+      },
       "MyOwnLLM.Gateway/1.0.0": {
         "type": "project",
         "framework": ".NETCoreApp,Version=v10.0",
@@ -2980,6 +2990,11 @@
         "xunit.runner.visualstudio.nuspec"
       ]
     },
+    "myllm/1.0.0": {
+      "type": "project",
+      "path": "../../src/MyOwnLLM.Cli/MyOwnLLM.Cli.csproj",
+      "msbuildProject": "../../src/MyOwnLLM.Cli/MyOwnLLM.Cli.csproj"
+    },
     "MyOwnLLM.Gateway/1.0.0": {
       "type": "project",
       "path": "../../src/MyOwnLLM.Gateway/MyOwnLLM.Gateway.csproj",
@@ -2992,6 +3007,7 @@
       "Microsoft.NET.Test.Sdk >= 17.14.1",
       "MyOwnLLM.Gateway >= 1.0.0",
       "coverlet.collector >= 6.0.4",
+      "myllm >= 1.0.0",
       "xunit >= 2.9.3",
       "xunit.runner.visualstudio >= 3.1.4"
     ]
@@ -3029,6 +3045,9 @@
           "framework": "net10.0",
           "targetAlias": "net10.0",
           "projectReferences": {
+            "C:\\MyOwnLLM\\src\\MyOwnLLM.Cli\\MyOwnLLM.Cli.csproj": {
+              "projectPath": "C:\\MyOwnLLM\\src\\MyOwnLLM.Cli\\MyOwnLLM.Cli.csproj"
+            },
             "C:\\MyOwnLLM\\src\\MyOwnLLM.Gateway\\MyOwnLLM.Gateway.csproj": {
               "projectPath": "C:\\MyOwnLLM\\src\\MyOwnLLM.Gateway\\MyOwnLLM.Gateway.csproj"
             }

@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MyOwnLLM.Gateway\MyOwnLLM.Gateway.csproj" />
+    <ProjectReference Include="..\..\src\MyOwnLLM.Cli\MyOwnLLM.Cli.csproj" />
   </ItemGroup>
 
 </Project>
