@@ -103,6 +103,20 @@ public class RequestQueueTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task New_chat_stops_running_background_work()
+    {
+        var background = Gated(WorkKind.Background, 1);
+        await background.started.Task.WaitAsync(Wait);
+
+        var chat = Gated(WorkKind.Chat, 2);
+
+        await Assert.ThrowsAsync<SupersededException>(() => background.result.WaitAsync(Wait));
+        await chat.started.Task.WaitAsync(Wait);
+        chat.release.SetResult();
+        Assert.Equal(2, await chat.result.WaitAsync(Wait));
+    }
+
+    [Fact]
     public async Task Caller_cancellation_cancels_work_and_queue_continues()
     {
         using var caller = new CancellationTokenSource();

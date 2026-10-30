@@ -10,7 +10,7 @@ public sealed class SupersededException() : OperationCanceledException("replaced
 
 /// <summary>
 /// Feeds the model one request at a time: chat before completion before background,
-/// FIFO within a kind, and a new completion replaces any older one.
+/// FIFO within a kind, a new completion replaces any older one, and a new chat stops running background work.
 /// </summary>
 public sealed class RequestQueue(int capacity = 8)
 {
@@ -48,6 +48,12 @@ public sealed class RequestQueue(int capacity = 8)
         lock (_gate)
         {
             if (kind == WorkKind.Completion) SupersedeCompletions();
+            if (kind == WorkKind.Chat && _running is { Kind: WorkKind.Background } background)
+            {
+                // Someone is waiting on an answer: background work gives way and is redone later.
+                background.Superseded = true;
+                background.Cts.Cancel();
+            }
             if (_pending.Count >= capacity) throw new QueueFullException();
             _pending.Add(item);
         }

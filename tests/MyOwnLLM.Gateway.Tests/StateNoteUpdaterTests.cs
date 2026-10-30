@@ -22,7 +22,7 @@ public class StateNoteUpdaterTests : IAsyncLifetime
     {
         _queue = new RequestQueue(capacity);
         _state = new ProjectStateStore(new LocalDb(Path.Combine(_dir, "t.db")));
-        _updater = new StateNoteUpdater(_queue, _llama, _state, NullLogger<StateNoteUpdater>.Instance);
+        _updater = new StateNoteUpdater(_queue, _llama, _state, NullLogger<StateNoteUpdater>.Instance, TimeSpan.Zero);
         _runner = _queue.RunAsync(_stop.Token);
         return Task.CompletedTask;
     }
@@ -103,11 +103,46 @@ public class StateNoteUpdaterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task No_update_runs_while_the_conversation_goes_on()
+    {
+        var updater = new StateNoteUpdater(_queue, _llama, _state, NullLogger<StateNoteUpdater>.Instance, TimeSpan.FromHours(1));
+
+        updater.Record(Project, "q", "a");
+        await Task.Delay(200);
+
+        Assert.Empty(_llama.Calls);
+    }
+
+    [Fact]
+    public async Task A_chat_stops_a_running_update_and_its_exchanges_are_kept()
+    {
+        var started = new TaskCompletionSource();
+        var calls = 0;
+        _llama.Chat = async ct =>
+        {
+            if (Interlocked.Increment(ref calls) > 1) return "note with both";
+            started.SetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            return "never";
+        };
+        _updater.Record(Project, "first question", "first answer");
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var chat = _queue.EnqueueAsync(WorkKind.Chat, _ => Task.FromResult(0), default);
+        await chat.WaitAsync(TimeSpan.FromSeconds(5));
+        _updater.Record(Project, "second question", "second answer");
+
+        await WaitForNote("note with both");
+        Assert.Contains("first question", _llama.Calls.Last().Messages[^1].Content);
+        Assert.Contains("second question", _llama.Calls.Last().Messages[^1].Content);
+    }
+
+    [Fact]
     public void Full_queue_does_not_throw()
     {
         var full = new RequestQueue(capacity: 1); // never run, so the first item fills it
         _ = full.EnqueueAsync(WorkKind.Chat, _ => Task.FromResult(0), default);
-        var updater = new StateNoteUpdater(full, _llama, _state, NullLogger<StateNoteUpdater>.Instance);
+        var updater = new StateNoteUpdater(full, _llama, _state, NullLogger<StateNoteUpdater>.Instance, TimeSpan.Zero);
 
         updater.Record(Project, "q", "a");
         updater.Record(Project, "q2", "a2"); // a dropped update must not block later ones from being queued
