@@ -11,9 +11,10 @@ Needs Windows and the .NET 10 SDK. In your clone of this repo:
 ```powershell
 .\scripts\install-jazari.ps1   # once per machine: downloads what's missing, installs the `jazari` command
 jazari                         # in any folder, from any terminal
+jazari update                  # later: match GitHub main, check everything, repair what's broken
 ```
 
-Install somewhere else with `.\scripts\install-jazari.ps1 -InstallDir D:\Tools\Jazari`.
+Install somewhere else with `.\scripts\install-jazari.ps1 -InstallDir D:\Tools\Jazari`. Jazari tells you when an update is available.
 
 ```powershell
 jazari stop                    # shut the background servers down

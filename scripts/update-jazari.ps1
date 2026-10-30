@@ -24,7 +24,8 @@ function Say-Error($thing, $reason) { Write-Host "ERROR ${thing}: $reason"; $scr
 function Invoke-Git {
     $ErrorActionPreference = "Continue"
     $lines = & git -C $sourceDir @args 2>&1 | ForEach-Object { "$_" }
-    if ($LASTEXITCODE -ne 0) { throw (($lines | Where-Object { $_ }) -join " ") }
+    # An empty stderr line comes back as the name of PowerShell's wrapper exception.
+    if ($LASTEXITCODE -ne 0) { throw (($lines | Where-Object { $_ -and $_ -notmatch "RemoteException" }) -join " ") }
     $lines
 }
 

@@ -4,12 +4,14 @@
 
 Needs Windows and the .NET 10 SDK.
 
-1. **Install** (once per machine, and again after pulling updates), from anywhere in your clone:
+1. **Install** (once per machine), from anywhere in your clone:
    ```powershell
    .\scripts\install-jazari.ps1
    ```
    To put Jazari's files somewhere else (any drive or folder, spaces are fine): `.\scripts\install-jazari.ps1 -InstallDir D:\Tools\Jazari`. The command then lives in `<InstallDir>\bin`, which is added to your PATH, and later installs remember the folder.
-   It downloads llama.cpp and the Granite model if they're missing, builds the gateway into `%LOCALAPPDATA%\Jazari\gateway`, installs the `jazari` command, and writes `%APPDATA%\Jazari\config.json` with this machine's paths. Nothing needs editing on a new PC.
+   It keeps its own copy of GitHub `main` in `<InstallDir>\source`, copies the model and llama.cpp from your clone's `spike` folder if they're there and downloads them if not, builds the gateway and the app into `<InstallDir>`, installs the `jazari` command, and writes `%APPDATA%\Jazari\config.json` with this machine's paths. Nothing needs editing on a new PC.
+
+   **Update** with `jazari update`, from any folder. It makes the private copy match GitHub `main`, checks every component (`✓` fine, `!` repaired, `ERROR` failed), and reopens Jazari. A component that fails keeps its previous version. Your own clones are never touched. Jazari shows `update available, run jazari update` when GitHub has something newer. To update the `jazari` command itself, run the installer again.
 2. **Run** `jazari` in any folder. The first run creates an API key through the gateway and saves it as your `JAZARI_KEY` user variable. Every run starts llama-server and the gateway in the background if they aren't running (about 10–25 s while the model loads); after that it opens instantly.
 3. **Stop** the background servers to free their RAM: `jazari stop`. Their logs are in `%LOCALAPPDATA%\MyOwnLLM\logs`.
 
