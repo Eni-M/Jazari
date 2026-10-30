@@ -50,6 +50,10 @@ Plan and status (update as each step finishes):
 - Smart App Control also blocked Jazari's own fresh builds twice: `jazari.dll` while it read the CPU name from the registry, and the test DLL while tests wrote fake `.exe` files. With both removed, builds load. Keep code that touches the registry or writes executables out of Jazari, or test that the built DLLs still load on a Smart App Control PC.
 - The test config written for `jazari tune` in this session's AppData was deleted afterwards.
 
+**Tuner v2 re-run here (partial GPU layers, flash attention only at the best thread count): 2.4 min instead of about 4.** Same winner, Iris Xe with flash attention, 222 / 14.9 tok/s, typical turn 29 s. The CPU writes slightly faster (16.9 tok/s at 8 threads with flash attention) but reads 2.5x slower (91 tok/s), so it loses on a whole turn.
+
+**Eni-M, 2026-10-31:** the T480 is the main device. No new models: tune Granite 4.1 3B for every device. The 8B download was stopped and deleted, and so was the OpenVINO build (tried first: reads 249 tok/s but writes only 8.0 on Iris Xe, so Vulkan stays). The review fixture is now in `spike/review-test` (3B on Iris Xe: 45 s, found the password and the SQL injection, missed the refund ownership check).
+
 ### Next, after session 2
 
 - If llama-server doesn't come up with GPU settings (a driver update, for example), fall back to CPU settings and re-tune, instead of timing out. The fingerprint doesn't include the GPU driver version.
