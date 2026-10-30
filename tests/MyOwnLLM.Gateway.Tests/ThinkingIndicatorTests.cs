@@ -23,6 +23,21 @@ public class ThinkingIndicatorTests
     }
 
     [Fact]
+    public async Task Reading_progress_replaces_thinking_and_the_taskbar_is_cleared_after()
+    {
+        var output = new StringWriter();
+        var indicator = ThinkingIndicator.Start(output, new Theme(ColorMode.TrueColor, unicode: true), (_, ct) => Task.Delay(Timeout.Infinite, ct));
+
+        indicator.Report(new MyOwnLLM.Cli.ReadProgress(5000, 1000, 2500));
+        await indicator.StopAsync();
+
+        var text = output.ToString();
+        Assert.Contains("READING 2,500 of 5,000 tokens · 50%", text);
+        Assert.Contains("\e]9;4;1;50\a", text);
+        Assert.EndsWith("\e]9;4;0;0\a", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Plain_mode_writes_nothing()
     {
         var output = new StringWriter();

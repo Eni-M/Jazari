@@ -2,10 +2,19 @@ namespace MyOwnLLM.Gateway.Llama;
 
 public sealed record ChatMessage(string Role, string Content);
 
+/// <summary>How far llama-server has read the prompt. <see cref="Cached"/> tokens came from the prompt cache.</summary>
+public sealed record PromptProgress(int Total, int Cached, int Processed);
+
+/// <summary>llama-server's numbers for a finished answer.</summary>
+public sealed record AnswerStats(int PromptTokens, int CachedTokens, double PromptPerSecond, int AnswerTokens, double AnswerPerSecond);
+
+/// <summary>One piece of a streamed answer: text, reading progress, or the closing numbers.</summary>
+public sealed record StreamPart(string? Text, PromptProgress? Progress = null, AnswerStats? Stats = null);
+
 public interface ILlamaClient
 {
     Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null);
-    IAsyncEnumerable<string> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct);
+    IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct);
     Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct);
 }
 

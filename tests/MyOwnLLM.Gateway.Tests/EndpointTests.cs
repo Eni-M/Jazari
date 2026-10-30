@@ -29,15 +29,17 @@ public sealed class FakeLlama : ILlamaClient
         return Chat(ct);
     }
 
-    public async IAsyncEnumerable<string> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
     {
         Calls.Enqueue(new("stream", messages, maxTokens));
+        yield return new(null, Progress: new(100, 40, 100));
         foreach (var part in new[] { "a", "b" })
         {
             await Task.Yield();
-            yield return part;
+            yield return new(part);
             if (StreamDiesAfterFirstPart) throw new HttpIOException(HttpRequestError.ResponseEnded);
         }
+        yield return new(null, Stats: new(100, 40, 30.5, 2, 6.25));
     }
 
     public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct)
@@ -137,6 +139,28 @@ public class EndpointTests : IDisposable
         Assert.Contains("\"content\":\"b\"", body);
         Assert.Contains("\"id\":\"ix-", body);
         Assert.EndsWith("data: [DONE]\n\n", body);
+    }
+
+    [Fact]
+    public async Task Chat_stream_passes_on_reading_progress_and_the_answers_numbers()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi", stream: true));
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("data: {\"progress\":{\"total\":100,\"cached\":40,\"processed\":100}}", body);
+        Assert.Contains("\"timings\":{\"prompt_tokens\":100,\"cached_tokens\":40,\"prompt_per_second\":30.5,\"answer_tokens\":2,\"answer_per_second\":6.25}", body);
+    }
+
+    [Fact]
+    public void Llama_chunks_with_progress_text_or_timings_are_all_read()
+    {
+        var progress = LlamaClient.ReadChunk("""{"choices":[],"prompt_progress":{"total":5000,"cache":1200,"processed":2400,"time_ms":90000}}""");
+        var text = LlamaClient.ReadChunk("""{"choices":[{"index":0,"delta":{"content":"hi"}}]}""");
+        var last = LlamaClient.ReadChunk("""{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"timings":{"cache_n":1200,"prompt_n":3800,"prompt_per_second":28.1,"predicted_n":90,"predicted_per_second":6.2}}""");
+
+        Assert.Equal(new PromptProgress(5000, 1200, 2400), Assert.Single(progress).Progress);
+        Assert.Equal("hi", Assert.Single(text).Text);
+        Assert.Equal(new AnswerStats(5000, 1200, 28.1, 90, 6.2), Assert.Single(last).Stats);
     }
 
     [Fact]

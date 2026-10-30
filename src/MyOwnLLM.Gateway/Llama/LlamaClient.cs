@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
@@ -19,20 +19,40 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
         return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
     }
 
-    public async IAsyncEnumerable<string> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
     {
-        using var response = await SendAsync("/v1/chat/completions", ChatBody(messages, maxTokens, stream: true), stream: true, ct);
+        // return_progress: llama-server reports how far it has read the prompt, which takes minutes on a CPU.
+        var body = new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = true, Temperature = CodeTemperature, ReturnProgress = true };
+        using var response = await SendAsync("/v1/chat/completions", body, stream: true, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
         while (await reader.ReadLineAsync(ct) is { } line)
         {
             if (!line.StartsWith("data: ")) continue;
             var data = line["data: ".Length..];
             if (data == "[DONE]") yield break;
-            using var doc = JsonDocument.Parse(data);
-            if (doc.RootElement.GetProperty("choices")[0].GetProperty("delta").TryGetProperty("content", out var c) && c.GetString() is { Length: > 0 } text)
-                yield return text;
+            foreach (var part in ReadChunk(data)) yield return part;
         }
     }
+
+    /// <summary>One streamed chunk. Progress and timings are llama-server extras, so anything missing is just skipped.</summary>
+    public static List<StreamPart> ReadChunk(string data)
+    {
+        using var doc = JsonDocument.Parse(data);
+        var root = doc.RootElement;
+        List<StreamPart> parts = [];
+        if (root.TryGetProperty("prompt_progress", out var p) && p.ValueKind == JsonValueKind.Object)
+            parts.Add(new(null, Progress: new(Int(p, "total"), Int(p, "cache"), Int(p, "processed"))));
+        if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0
+            && choices[0].TryGetProperty("delta", out var delta) && delta.TryGetProperty("content", out var c) && c.GetString() is { Length: > 0 } text)
+            parts.Add(new(text));
+        if (root.TryGetProperty("timings", out var t) && t.ValueKind == JsonValueKind.Object)
+            parts.Add(new(null, Stats: new(Int(t, "prompt_n") + Int(t, "cache_n"), Int(t, "cache_n"), Number(t, "prompt_per_second"),
+                Int(t, "predicted_n"), Number(t, "predicted_per_second"))));
+        return parts;
+    }
+
+    static int Int(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.TryGetInt32(out var i) ? i : 0;
+    static double Number(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.TryGetDouble(out var d) ? d : 0;
 
     public async Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct)
     {

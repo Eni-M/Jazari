@@ -100,11 +100,14 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
         var renderer = newRenderer();
         var answer = new StringBuilder();
         string? id = null;
+        AnswerTimings? timings = null;
         var watch = Stopwatch.StartNew();
         try
         {
             await foreach (var chunk in gateway.ChatAsync(_history, question, project, ct, _context).WithCancellation(ct))
             {
+                if (chunk.Progress is { } progress) { thinking.Report(progress); continue; }
+                timings = chunk.Timings ?? timings;
                 if (chunk.Error is not null)
                 {
                     StopThinking();
@@ -125,7 +128,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             Remember(question, answer.ToString());
             var blocks = CodeBlocks.Extract(answer.ToString()).Count;
             var copyHint = blocks == 0 ? "" : $" {ui.Theme.Glyph('·')} {blocks} code block{(blocks == 1 ? "" : "s")}, /copy{(blocks == 1 ? "" : " 1")}";
-            ui.Metadata($"{id} {ui.Theme.Glyph('·')} {watch.Elapsed.TotalSeconds:0.0} s{copyHint}");
+            ui.Metadata($"{id} {ui.Theme.Glyph('·')} {watch.Elapsed.TotalSeconds:0.0} s{Describe(timings)}{copyHint}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -291,6 +294,11 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     }
 
     Task Note(string text) { ui.Metadata(text); return Task.CompletedTask; }
+
+    /// <summary>" · 5,000 tokens read, 1,200 from cache · 6.2 tok/s": shows when the cache missed, which is what makes waits long.</summary>
+    string Describe(AnswerTimings? t) => t is null or { PromptTokens: 0 } ? "" :
+        $" {ui.Theme.Glyph('·')} {t.PromptTokens:N0} tokens read, {t.CachedTokens:N0} from cache" +
+        (t.AnswerPerSecond > 0 ? $" {ui.Theme.Glyph('·')} {t.AnswerPerSecond:0.0} tok/s" : "");
 
     void Remember(string question, string answer)
     {

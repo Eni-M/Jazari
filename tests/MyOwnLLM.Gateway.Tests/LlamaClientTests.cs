@@ -70,16 +70,17 @@ public class LlamaClientTests
         const string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
                            "data: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n" +
                            "data: [DONE]\n\n";
-        var (client, _) = Create((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        var (client, handler) = Create((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(sse, Encoding.UTF8, "text/event-stream")
         }));
 
-        var parts = new List<string>();
+        var parts = new List<string?>();
         await foreach (var part in client.ChatStreamAsync(Hello, 10, CancellationToken.None))
-            parts.Add(part);
+            parts.Add(part.Text);
 
         Assert.Equal(["a", "b"], parts);
+        Assert.True(JsonDocument.Parse(handler.Body!).RootElement.GetProperty("return_progress").GetBoolean());
     }
 
     [Fact]
