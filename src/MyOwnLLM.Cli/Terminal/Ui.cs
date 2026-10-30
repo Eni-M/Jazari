@@ -13,6 +13,15 @@ public sealed class Ui(TextWriter output, Theme theme, int width)
 
     public void Blank() => output.WriteLine();
 
+    /// <summary>
+    /// Opening the interactive session: name the tab "Jazari" and start on a clean screen (no shell banner or prompt
+    /// above). Only in a real terminal; piped output is left alone.
+    /// </summary>
+    public void TakeOverScreen()
+    {
+        if (theme.Mode != ColorMode.None) output.Write("\e]0;Jazari\a\e[H\e[2J\e[3J");
+    }
+
     public void Line(string text, Tone tone = Tone.Primary)
     {
         foreach (var line in Wrap(ConsoleText.Sanitize(text), Width)) output.WriteLine(theme.Paint(line, tone));

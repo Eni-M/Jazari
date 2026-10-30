@@ -104,6 +104,26 @@ public class UiTests
     }
 
     [Fact]
+    public void TakeOverScreen_sets_title_and_clears_in_a_real_terminal()
+    {
+        var output = new StringWriter();
+
+        new Ui(output, new Theme(ColorMode.TrueColor, true), 80).TakeOverScreen();
+
+        Assert.Equal("\e]0;Jazari\a\e[H\e[2J\e[3J", output.ToString());
+    }
+
+    [Fact]
+    public void TakeOverScreen_does_nothing_when_piped()
+    {
+        var (ui, output) = Plain();
+
+        ui.TakeOverScreen();
+
+        Assert.Equal("", output.ToString());
+    }
+
+    [Fact]
     public void Redirected_output_has_no_escape_sequences()
     {
         var output = new StringWriter();

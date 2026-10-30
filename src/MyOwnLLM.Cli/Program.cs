@@ -47,6 +47,7 @@ async Task<bool> LlamaReady(CancellationToken ct)
     catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { return false; }
 }
 var startupUi = new Ui(Console.Out, theme, width);
+if (cli.Command == "session") startupUi.TakeOverScreen();
 await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay).EnsureRunningAsync(config, CancellationToken.None);
 
 if (cli.Command == "session")
