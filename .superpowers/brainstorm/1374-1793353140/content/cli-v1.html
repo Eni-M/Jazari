@@ -1,0 +1,73 @@
+<h2>Jazari CLI: first pass from your spec</h2>
+<p class="subtitle">One continuous session: welcome, a question, a tool run, an approval, an error. Pick a wordmark below.</p>
+
+<div style="background:#0B0B0B;color:#F2F2F2;font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace;font-size:14px;line-height:1.6;padding:28px 32px;border-radius:8px;max-width:820px;margin:16px 0 28px">
+<div>jazari/ <span style="color:#777">0.1.0</span></div>
+<div style="color:#BBBBBB;margin:10px 0 18px">Intelligence, precisely applied.</div>
+<div style="display:grid;grid-template-columns:120px 1fr;row-gap:2px;color:#BBBBBB">
+<span style="color:#777">Model</span><span>Granite 4.1 3B · local</span>
+<span style="color:#777">Directory</span><span>~/EduCore</span>
+<span style="color:#777">Connection</span><span>Available</span>
+<span style="color:#777">Session</span><span>New session</span>
+</div>
+<div style="display:grid;grid-template-columns:120px 1fr;row-gap:2px;margin:18px 0 22px">
+<span>/help</span><span style="color:#777">Available commands</span>
+<span>/status</span><span style="color:#777">Where are we left at?</span>
+<span>/model</span><span style="color:#777">Change model</span>
+<span>/clear</span><span style="color:#777">Clear conversation</span>
+</div>
+
+<div style="border-top:1px solid #303030;margin:6px 0 18px"></div>
+
+<div style="color:#777;font-size:12px;letter-spacing:.08em">YOU</div>
+<div style="margin:4px 0 18px">Explain how authentication works in this project.</div>
+
+<div style="font-size:12px;letter-spacing:.04em">jazari/</div>
+<div style="margin:4px 0 8px">I'll inspect the authentication code.</div>
+<div style="color:#777;padding-left:18px;margin-bottom:10px">
+<div style="font-size:12px;letter-spacing:.08em;margin-bottom:2px">INSPECTING</div>
+<div>✓ AuthController.cs</div><div>✓ JwtMiddleware.cs</div><div>✓ TokenService.cs</div>
+</div>
+<div style="margin-bottom:8px">Authentication has three stages: sign-in issues a JWT in <code style="background:#151515;padding:1px 6px;border-radius:3px">TokenService</code>, the middleware validates it on each request, and controllers read the claims.</div>
+<pre style="background:#151515;color:#F2F2F2;padding:12px 14px;border-radius:4px;margin:8px 0 18px;font-family:inherit;font-size:13px;white-space:pre-wrap">services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(o =&gt; o.TokenValidationParameters = tokenParams);</pre>
+
+<div style="color:#777;padding-left:18px;margin-bottom:18px">
+<div style="font-size:12px;letter-spacing:.08em;margin-bottom:2px">RUNNING</div>
+<div style="color:#BBBBBB">dotnet test</div>
+<div>✓ Build succeeded</div><div>✓ 24 tests passed · 0 failures</div>
+<div>Completed in 1.42s</div>
+</div>
+
+<div style="border-left:2px solid #BBBBBB;padding-left:14px;margin-bottom:18px">
+<div style="font-size:12px;letter-spacing:.08em">ACTION REQUIRED</div>
+<div style="color:#BBBBBB;margin-top:4px">Execute:</div>
+<div>rm -rf ./bin</div>
+<div style="color:#BBBBBB;margin-top:6px">[y] Allow once &nbsp; [n] Deny &nbsp; [a] Always allow</div>
+</div>
+
+<div style="margin-bottom:18px">
+<div style="font-size:12px;letter-spacing:.08em">ERROR</div>
+<div style="margin-top:4px">Could not reach the model server.</div>
+<div style="color:#777">Cause: connection refused at 127.0.0.1:8080.</div>
+<div style="color:#777">Start it with scripts\start-llama.ps1, then /retry.</div>
+</div>
+
+<div><span style="color:#BBBBBB">›</span> <span style="color:#555">Ask something...</span></div>
+</div>
+
+<h3>Wordmark</h3>
+<div class="options">
+<div class="option" data-choice="slash" onclick="toggleSelect(this)">
+<div class="letter">A</div>
+<div class="content"><h3 style="font-family:'JetBrains Mono',Consolas,monospace">jazari/</h3><p>Your spec's PRODUCT/ form. Reads like a path, which suits a dev tool.</p></div>
+</div>
+<div class="option" data-choice="caps" onclick="toggleSelect(this)">
+<div class="letter">B</div>
+<div class="content"><h3 style="font-family:'JetBrains Mono',Consolas,monospace;letter-spacing:.3em">JAZARI</h3><p>Spaced capitals. More formal, like an instrument label.</p></div>
+</div>
+<div class="option" data-choice="dot" onclick="toggleSelect(this)">
+<div class="letter">C</div>
+<div class="content"><h3 style="font-family:'JetBrains Mono',Consolas,monospace">jazari ·</h3><p>Lowercase with a quiet dot. Softest of the three.</p></div>
+</div>
+</div>
