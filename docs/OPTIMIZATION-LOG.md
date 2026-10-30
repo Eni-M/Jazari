@@ -46,9 +46,9 @@ Plan and status (update as each step finishes):
 **Found on this PC:**
 - Smart App Control is enforcing (`VerifiedAndReputablePolicyState` 1). It blocked `llama-fit-params.exe` but allowed `llama-server`, `llama-bench`, `llama-cli` and `llama-tokenize`. So any tool Jazari runs can be blocked on some PC: the tuner treats a blocked tool as "can't measure" and keeps safe settings.
 - First quick look, i5-1135G7, CPU only, 4 threads, 1 run: prompt 74 tok/s, answer 12.9 tok/s (T480: 28.8 / 6.2).
-- `jazari tune` result here, 4 minutes: **Iris Xe through Vulkan, flash attention: 224 tok/s reading, 14.7 tok/s writing**, a typical turn about 29 s. CPU at 4 threads was about 74 / 13.
+- `jazari tune` result here, 4 minutes: **Iris Xe through Vulkan, flash attention: 224 tok/s reading, 14.7 tok/s writing**, a typical turn about 29 s. CPU at 4 threads was about 74 / 13. At 4,096 tokens of context the GPU leads by more: 116 / 12.4 against the CPU's 35 / 9.7 (6 threads), or 45 / 7.1 with flash attention, which on the CPU speeds reading but slows writing. So measuring at an empty context picks the same winner here.
 - Smart App Control also blocked Jazari's own fresh builds twice: `jazari.dll` while it read the CPU name from the registry, and the test DLL while tests wrote fake `.exe` files. With both removed, builds load. Keep code that touches the registry or writes executables out of Jazari, or test that the built DLLs still load on a Smart App Control PC.
-- The test config written for `jazari tune` lives in this session's AppData (`Jazari\config.json` and `tuning.json`, pointing at `spike/`). Delete both before a real install on this PC.
+- The test config written for `jazari tune` in this session's AppData was deleted afterwards.
 
 ### Decisions waiting for Eni-M
 
