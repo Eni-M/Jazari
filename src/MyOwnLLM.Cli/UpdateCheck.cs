@@ -10,7 +10,7 @@ public static partial class UpdateCheck
     {
         if (config is not { RepoUrl: { Length: > 0 } repo, InstalledCommit: { Length: > 0 } installed }) return false;
         // jazari runs inside arbitrary (possibly cloned, untrusted) folders: only https, git from PATH (never the current
-        // folder), run from Jazari's own folder so no repo config there can change how it connects.
+        // folder), run from Jazari's own folder so no repo config there can change how it connects. An expired login stays silent too.
         if (!repo.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return false;
         if ((findGit ?? (() => FindGit(Environment.GetEnvironmentVariable("PATH"))))() is not { } git) return false;
         var trustedDir = config.InstallDir ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -20,7 +20,7 @@ public static partial class UpdateCheck
         try
         {
             var (exitCode, output) = await runner.RunAsync(git,
-                ["-C", trustedDir, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "ls-remote", repo, "refs/heads/main"],
+                ["-C", trustedDir, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "credential.interactive=false", "ls-remote", repo, "refs/heads/main"],
                 cts.Token).WaitAsync(cts.Token);
             var latest = output.Split('\t', '\n', ' ').FirstOrDefault()?.Trim() ?? "";
             return exitCode == 0 && Commit().IsMatch(latest) && !string.Equals(latest, installed, StringComparison.OrdinalIgnoreCase);

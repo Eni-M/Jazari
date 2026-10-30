@@ -43,6 +43,6 @@ public sealed record LaunchPlan(string Kind, string Exe, string[] Args, string? 
                 ? (installDir, sourceDir)
                 : null;
         }
-        catch (JsonException) { return null; }
+        catch (Exception e) when (e is JsonException or InvalidOperationException) { return null; } // not JSON, or not this shape
     }
 }

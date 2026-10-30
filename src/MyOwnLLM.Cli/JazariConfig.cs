@@ -3,8 +3,8 @@ using System.Text.Json;
 namespace MyOwnLLM.Cli;
 
 /// <summary>
-/// Where this machine's Jazari pieces live, written by scripts/install-jazari.ps1 so nothing is hard-coded:
-/// the repo folder, the published gateway, llama-server and the model file.
+/// Where this machine's Jazari pieces live, written by scripts/install-jazari.ps1 and scripts/update-jazari.ps1 so
+/// nothing is hard-coded: the published gateway, llama-server, the model file and what the updater needs.
 /// </summary>
 public sealed record JazariConfig(
     string Home, string GatewayExe, string LlamaServer, string Model,

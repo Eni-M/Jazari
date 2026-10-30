@@ -6,7 +6,7 @@ Jazari runs entirely on your own machine: IBM Granite 4.1 3B on llama.cpp, behin
 
 ## Quick start
 
-Needs Windows and the .NET 10 SDK. In your clone of this repo:
+Needs Windows, git and the .NET 10 SDK. In your clone of this repo:
 
 ```powershell
 .\scripts\install-jazari.ps1   # once per machine: downloads what's missing, installs the `jazari` command

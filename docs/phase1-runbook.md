@@ -2,7 +2,7 @@
 
 ## Start
 
-Needs Windows and the .NET 10 SDK.
+Needs Windows, git and the .NET 10 SDK.
 
 1. **Install** (once per machine), from anywhere in your clone:
    ```powershell

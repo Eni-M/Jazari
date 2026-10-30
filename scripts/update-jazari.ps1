@@ -54,7 +54,8 @@ function Test-Llama($folder) {
     $exe = Join-Path $folder "llama-server.exe"
     if (-not (Test-Path $exe)) { return $false }
     $ErrorActionPreference = "Continue"
-    $version = (& $exe --version 2>&1 | ForEach-Object { "$_" }) -join " "
+    try { $version = (& $exe --version 2>&1 | ForEach-Object { "$_" }) -join " " }
+    catch { return $false } # a damaged exe won't even start
     $version -match "\bbuild $($manifest.llamaRelease.TrimStart('b'))\b"
 }
 
@@ -87,7 +88,7 @@ function Repair-Llama {
 # A build is current when its exe is there and its marker names the source commit.
 function Repair-Build($thing, $project, $folder, $exe) {
     $marker = Join-Path $folder "build-commit.txt"
-    if ((Test-Path (Join-Path $folder $exe)) -and (Test-Path $marker) -and (Get-Content -Raw $marker).Trim() -eq $commit) { Say-Ok $thing; return }
+    if ((Test-Path (Join-Path $folder $exe)) -and (Test-Path $marker) -and "$(Get-Content -Raw $marker)".Trim() -eq $commit) { Say-Ok $thing; return }
     $new = "$folder.new"
     if (Test-Path $new) { Remove-Item -Recurse -Force $new }
     dotnet publish (Join-Path $sourceDir "src\$project") -c Release -o $new --nologo -v q
@@ -110,29 +111,38 @@ $installDir = $config.installDir
 $sourceDir = $config.sourceDir
 
 if (-not $Reexec) {
-    # 2. nothing of Jazari's may be running while it is replaced. Launchers aren't in app\ and keep waiting.
-    $appDir = (Join-Path $installDir "app") + "\"
-    $open = @(Get-Process "jazari" -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($appDir, [StringComparison]::OrdinalIgnoreCase) })
+    # 2. other Jazari windows hold files that get replaced. Launchers aren't in app\ and keep waiting.
+    $ownFiles = { $_.Path -and $_.Path.StartsWith("$installDir\", [StringComparison]::OrdinalIgnoreCase) }
+    $open = @(Get-Process "jazari" -ErrorAction SilentlyContinue | Where-Object $ownFiles | Where-Object { $_.Path -like "*\app\jazari.exe" })
     if ($open.Count -gt 0) {
         Write-Host "Jazari is open in $($open.Count) other window(s):"
         $open | ForEach-Object { Write-Host "  process $($_.Id), started $($_.StartTime)" }
         if ((Read-Host "Close them and continue? [y/n]") -ne "y") { exit 2 }
     }
-    $running = $open + @(Get-Process "llama-server", "MyOwnLLM.Gateway" -ErrorAction SilentlyContinue)
+
+    # 3. the source copy; nobody edits it, so it can simply be made to match main. Fetch first: offline, nothing gets closed.
+    try {
+        Invoke-Git remote set-url origin $config.repoUrl | Out-Null
+        Invoke-Git fetch origin main | Out-Null
+    }
+    catch {
+        Write-Host "ERROR source: could not reach GitHub ($_)"
+        exit 1
+    }
+
+    # Only this install's servers: a llama-server from anywhere else locks nothing here and isn't ours to stop.
+    $running = $open + @(Get-Process "llama-server", "MyOwnLLM.Gateway" -ErrorAction SilentlyContinue | Where-Object $ownFiles)
     if ($running.Count -gt 0) {
         $running | Stop-Process -Force
         $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue # stopped processes hold file locks for a moment
     }
 
-    # 3. the source copy; nobody edits it, so it can simply be made to match main
     try {
-        Invoke-Git remote set-url origin $config.repoUrl | Out-Null
-        Invoke-Git fetch origin main | Out-Null
         Invoke-Git reset --hard origin/main | Out-Null
         Invoke-Git clean -fd | Out-Null
     }
     catch {
-        Write-Host "ERROR source: could not reach GitHub ($_)"
+        Write-Host "ERROR source: could not update Jazari's copy ($_)"
         exit 1
     }
     Say-Ok "source"
@@ -154,6 +164,10 @@ $paths = @{
     gatewayExe  = Join-Path $installDir "gateway\MyOwnLLM.Gateway.exe"
     llamaServer = Join-Path $installDir "llama\llama-server.exe"
     model       = Join-Path $installDir "models\$($manifest.modelFile)"
+}
+# A component that couldn't be put in place (say, a new model whose download failed) keeps the path that still works.
+foreach ($key in @($paths.Keys)) {
+    if ($config.$key -and -not (Test-Path $paths[$key])) { $paths[$key] = $config.$key }
 }
 $stale = @($paths.Keys | Where-Object { $config.$_ -ne $paths[$_] }).Count -gt 0
 try {

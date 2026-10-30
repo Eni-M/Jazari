@@ -19,7 +19,7 @@ var config = JazariConfig.Load(JazariConfig.DefaultPath);
 var runner = new ProcessRunner();
 Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0"); // git must never stop to ask for credentials
 var updateAvailable = cli.Command == "session"
-    ? UpdateCheck.IsUpdateAvailableAsync(runner, config, TimeSpan.FromSeconds(5), CancellationToken.None)
+    ? Task.Run(() => UpdateCheck.IsUpdateAvailableAsync(runner, config, TimeSpan.FromSeconds(5), CancellationToken.None))
     : Task.FromResult(false);
 var settings = Settings.FromEnvironment(Environment.GetEnvironmentVariable);
 

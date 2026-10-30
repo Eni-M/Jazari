@@ -16,11 +16,17 @@ public sealed class ProcessRunner : IProcessRunner
 {
     public async Task<(int ExitCode, string Output)> RunAsync(string exe, string[] args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        // Own folder, like StartDetached: the gateway's add-key must not read an appsettings.json from the folder jazari runs in.
+        var psi = new ProcessStartInfo(exe)
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(exe)!,
+        };
         foreach (var a in args) psi.ArgumentList.Add(a);
         try
         {
             using var p = Process.Start(psi)!;
+            await using var killOnCancel = ct.Register(() => { try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } }); // a timed-out git mustn't linger
             var output = p.StandardOutput.ReadToEndAsync(ct);
             _ = p.StandardError.ReadToEndAsync(ct);
             await p.WaitForExitAsync(ct);

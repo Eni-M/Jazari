@@ -48,6 +48,17 @@ public class ProcessRunnerTests : IDisposable
         Assert.Contains("hi", output);
     }
 
+    [Fact]
+    public async Task RunAsync_runs_from_the_programs_own_folder_not_the_current_one()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var comspec = Environment.GetEnvironmentVariable("ComSpec")!;
+
+        var (_, output) = await new ProcessRunner().RunAsync(comspec, ["/c", "cd"], CancellationToken.None);
+
+        Assert.Equal(Path.GetDirectoryName(comspec)!.TrimEnd('\\'), output.Trim().TrimEnd('\\'), ignoreCase: true);
+    }
+
     static async Task<string> ReadShared(string path)
     {
         if (!File.Exists(path)) return "";

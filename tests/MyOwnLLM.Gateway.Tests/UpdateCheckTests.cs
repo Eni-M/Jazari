@@ -21,7 +21,7 @@ public class UpdateCheckTests
         Assert.True(await Check(Config));
         var ran = _runner.Ran.Single();
         Assert.Equal(Git, ran.Exe);
-        Assert.Equal(["-C", Config.InstallDir!, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+        Assert.Equal(["-C", Config.InstallDir!, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "credential.interactive=false",
             "ls-remote", Config.RepoUrl!, "refs/heads/main"], ran.Args);
     }
 

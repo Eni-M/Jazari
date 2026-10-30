@@ -6,9 +6,10 @@
 #
 #  1. clones GitHub main into <InstallDir>\source, Jazari's private copy that nobody edits,
 #  2. reuses the Granite model and llama.cpp from this clone's spike folder when it has them (skips a 2 GB download),
-#  3. installs the `jazari` command (a global .NET tool by default, <InstallDir>\bin on PATH for a custom folder),
-#  4. writes %APPDATA%\Jazari\config.json so jazari knows where all of this is,
-#  5. runs the updater from the private copy, which downloads, builds and checks the rest.
+#  3. writes %APPDATA%\Jazari\config.json so jazari knows where all of this is,
+#  4. runs the updater from the private copy, which downloads, builds and checks the rest,
+#  5. installs the `jazari` command (a global .NET tool by default, <InstallDir>\bin on PATH for a custom folder).
+# The command is replaced last, so an install that fails half-way leaves the Jazari you had still working.
 # The API key is created by jazari itself on first launch.
 param([string]$InstallDir)
 
@@ -22,18 +23,21 @@ $configPath = Join-Path $env:APPDATA "Jazari\config.json"
 $defaultDir = Join-Path $env:LOCALAPPDATA "Jazari"
 
 # Where to install: the -InstallDir you pass, else the folder from the last install, else the default.
-if (-not $InstallDir -and (Test-Path $configPath)) {
-    $previous = (Get-Content -Raw -Encoding UTF8 $configPath | ConvertFrom-Json).installDir
-    if ($previous) { $InstallDir = $previous }
+$previous = $null
+if (Test-Path $configPath) {
+    try { $previous = Get-Content -Raw -Encoding UTF8 $configPath | ConvertFrom-Json }
+    catch { Write-Host "Ignoring the unreadable $configPath" }
 }
+if (-not $InstallDir) { $InstallDir = $previous.installDir }
 if (-not $InstallDir) { $InstallDir = $defaultDir }
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 $InstallDir = (Resolve-Path $InstallDir).Path
 $customDir = $InstallDir -ne $defaultDir
 Write-Host "Installing Jazari into $InstallDir"
 
-# Running servers would lock their files; jazari restarts them on demand.
-$servers = @(Get-Process "llama-server", "MyOwnLLM.Gateway" -ErrorAction SilentlyContinue)
+# This install's running servers would lock their files; jazari restarts them on demand.
+$servers = @(Get-Process "llama-server", "MyOwnLLM.Gateway" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith("$InstallDir\", [StringComparison]::OrdinalIgnoreCase) })
 if ($servers.Count -gt 0) {
     Write-Host "Stopping the running servers"
     $servers | Stop-Process -Force
@@ -70,7 +74,30 @@ if ((Test-Path (Join-Path $localLlama "llama-server.exe")) -and -not (Test-Path 
     Copy-Item -Recurse $localLlama $llama
 }
 
-# 3. the jazari command (the launcher); each run gets a higher package version so the tool update always takes the new build
+# 3. config; the previous values stay until the updater has built their replacements
+New-Item -ItemType Directory -Force (Split-Path $configPath) | Out-Null
+[ordered]@{
+    home            = $root
+    repoUrl         = $repoUrl
+    installDir      = $InstallDir
+    sourceDir       = $source
+    installedCommit = $previous.installedCommit
+    gatewayExe      = $previous.gatewayExe
+    llamaServer     = $previous.llamaServer
+    model           = $previous.model
+} | ConvertTo-Json | Set-Content -Encoding UTF8 "$configPath.new"
+Move-Item -Force "$configPath.new" $configPath
+
+# 4. everything else
+& (Join-Path $source "scripts\update-jazari.ps1") -Reexec
+$updated = $LASTEXITCODE
+if (-not (Test-Path (Join-Path $InstallDir "app\jazari.exe"))) {
+    Write-Host ""
+    Write-Host "Jazari couldn't be built. Fix what failed above, then run this installer again."
+    exit 1
+}
+
+# 5. the jazari command (the launcher); each run gets a higher package version so the tool update always takes the new build
 $artifacts = Join-Path $source "artifacts"
 $package = "0.3.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
 dotnet pack (Join-Path $source "src\Jazari.Launcher") -c Release -o $artifacts -p:PackageVersion=$package --nologo -v q
@@ -92,21 +119,10 @@ if ($customDir) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-# 4. config; the updater fills in the component paths and installedCommit
-New-Item -ItemType Directory -Force (Split-Path $configPath) | Out-Null
-[ordered]@{
-    home       = $root
-    repoUrl    = $repoUrl
-    installDir = $InstallDir
-    sourceDir  = $source
-} | ConvertTo-Json | Set-Content -Encoding UTF8 $configPath
-
-# 5. everything else
-& (Join-Path $source "scripts\update-jazari.ps1") -Reexec
-if ($LASTEXITCODE -ne 0) {
+if ($updated -ne 0) {
     Write-Host ""
     Write-Host "Jazari is installed, but something above failed. Fix it, then run: jazari update"
-    exit $LASTEXITCODE
+    exit $updated
 }
 
 Write-Host ""

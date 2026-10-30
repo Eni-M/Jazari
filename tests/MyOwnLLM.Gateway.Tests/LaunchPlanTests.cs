@@ -50,6 +50,9 @@ public class LaunchPlanTests
     [InlineData(null)]
     [InlineData("{not json")]
     [InlineData("""{"home":"C:\\R"}""")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("""{"installDir":1,"sourceDir":"C:\\S"}""")]
     public void Missing_or_old_config_says_to_install(string? config)
     {
         var plan = LaunchPlan.Decide([], config, All);
