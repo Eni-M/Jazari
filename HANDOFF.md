@@ -1,64 +1,57 @@
 # Handoff: `jazari update` work
 
-Read this first, then the plan and the spec. This note says where the work stands and what was decided after the plan was written.
+Read this first, then the plan and the spec.
 
 ## Where to start
 
+- **Code branch: `jazari-update-wip`.** All the work is here. Continue on it.
 - **Plan (task list, follow it in order):** `docs/superpowers/plans/2026-10-30-jazari-update.md`
 - **Spec:** `docs/superpowers/specs/2026-10-30-jazari-update-design.md`
-- **Branch:** `claude/tender-babbage-2mmupp` (same as `main` at `7a1cebc`, plus this note)
-- **Build and tests:** `dotnet test` from the repo root (.NET 10, xUnit, `tests/MyOwnLLM.Gateway.Tests`). Windows only at run time.
+- **Owner's local clone:** `C:\MyOwnLLM` on Windows (where the earlier work was done; it is on `jazari-update-wip`).
+- **Build and tests:** `dotnet test` from the repo root (.NET 10, xUnit, `tests/MyOwnLLM.Gateway.Tests`). Windows only at run time. The last full run passed 227 of 227 tests, before the two Task 4 test edits.
 - **Way of working:** test first for every change (write a failing test, see it fail, implement, run the full suite, commit). Keep commit messages in the style of the git log (`feat(cli): ...`, `fix: ...`).
+- **How to carry out the plan (owner's choice):** build the remaining tasks in one session, then have one strong reviewer check everything at the end, instead of a reviewer per task.
 
-## Status: the code is on the owner's PC, not on GitHub
+## Status
 
-**First check the owner's Windows clone at `C:\MyOwnLLM`.** The earlier session worked there, and its last command ran in that folder. If the work is still there, commit it there and push it to this branch, then pick up at Task 4 Step 1 instead of rebuilding. The earlier session's last command (Task 4 Step 1: change the two message tests so they expect `jazari update`, then run the suite, which should fail on those two tests):
+| Task | State | Commit on `jazari-update-wip` |
+|---|---|---|
+| 1. Config fields, manifest, rejected-key repair | Done | `3c6b5ab` |
+| 2. Launch notice (`update available, run jazari update`) | Done | `8b9f73c` |
+| 3. The launcher (`src/Jazari.Launcher`) | Done | `04df573` |
+| Hardening (decisions 2 to 4 below) | Done | `fa7a99a` |
+| 4. Updater script + "run jazari update" messages | **In progress: Step 1 started** | `cb410da` (WIP) |
+| 5. Bootstrap installer, docs, manual checks on Windows | To do (manual steps need the Windows PC) | |
+| 6. Final review and fixes (review the whole diff against the spec's Review Focus list, fix what it finds) | To do | |
 
-```bash
-sed -i 's/        Assert.Contains("install-jazari.ps1", _output.ToString());/        Assert.Contains("jazari update", _output.ToString());/' tests/MyOwnLLM.Gateway.Tests/ServerLauncherTests.cs && sed -i 's/    \[InlineData(ConnectionState.GatewayNotRunning, "start-llama.ps1", "MyOwnLLM.Gateway")\]/    [InlineData(ConnectionState.GatewayNotRunning, "jazari update", "start-llama.ps1")]/' tests/MyOwnLLM.Gateway.Tests/WelcomeTests.cs && grep -c "jazari update" tests/MyOwnLLM.Gateway.Tests/ServerLauncherTests.cs tests/MyOwnLLM.Gateway.Tests/WelcomeTests.cs && dotnet test --blame-hang-timeout 60s 2>&1 | grep -E "Passed!|Failed!|\[FAIL\]" | sort -u | head -4
-```
+### Exactly where Task 4 stopped
 
-The other file it was working on was `src/MyOwnLLM.Cli/Processes.cs` (the `cmd.exe` fix, decision 4). Both test lines that command changes are still unchanged on GitHub (`ServerLauncherTests.cs:95`, `WelcomeTests.cs:50`).
+- **Done (Step 1, first half):** the two message tests now expect `jazari update`:
+  - `tests/MyOwnLLM.Gateway.Tests/ServerLauncherTests.cs`: `Missing_files_are_reported_right_away_without_starting_anything`
+  - `tests/MyOwnLLM.Gateway.Tests/WelcomeTests.cs`: the `GatewayNotRunning` `InlineData` is now `"jazari update", "start-llama.ps1"`
+- **Next:** run `dotnet test` and confirm that exactly these two tests fail. This step hasn't been run yet.
+- **Then Step 2:** change the messages in `src/MyOwnLLM.Cli/ServerLauncher.cs` (missing files → `Run: jazari update`) and `src/MyOwnLLM.Cli/Welcome.cs` (first line of the GatewayNotRunning hint → `Jazari starts its servers itself; if it can't, run: jazari update`). Write `scripts/update-jazari.ps1` as the plan describes. Then Steps 3 and 4.
 
-If the PC copy is gone, everything below applies: start again from Task 1.
+### Clean-up needed on `jazari-update-wip`
 
+- The WIP commit `cb410da` accidentally added IDE files under `.idea/` (JetBrains Rider). Remove them from git (`git rm -r --cached .idea`) and add `.idea/` to `.gitignore`.
+- The WIP commit message is a placeholder. When Task 4 is finished, the work can go into a proper commit (`feat: update-jazari.ps1 syncs, checks and repairs Jazari`).
 
-An earlier session's task list was: 1 Config fields, manifest, rejected-key repair; 2 Launch notice; 3 The launcher; 4 The updater script; 5 Bootstrap installer, docs, end-to-end check; 6 Final review and fixes. It stopped around Task 3 (the launcher), after the hardening below, and reported 227 passing tests. **None of that work was pushed.** It is not on this branch, `main`, or any other remote branch, and the code it describes (`src/Jazari.Launcher`, `scripts/jazari-manifest.json`, `UpdateCheck.cs`) does not exist here. Start again from **Task 1**. The decisions below came out of that session, so apply them as you go.
-
-| Task | State |
-|---|---|
-| 1. Config fields, manifest, rejected-key repair | To do |
-| 2. Launch notice (`update available, run jazari update`) | To do |
-| 3. The launcher (`src/Jazari.Launcher`) | To do, with the change in decision 1 |
-| Hardening (decisions 2 to 4) | To do; fold into Tasks 2, 3 and the existing `Processes.cs` |
-| 4. Updater script + "run jazari update" messages | To do |
-| 5. Bootstrap installer, docs, manual checks on Windows | To do (manual steps need the Windows PC) |
-| 6. Final review and fixes (review the whole diff against the spec's Review Focus list, fix what it finds) | To do |
-
-## Context from the planning chat ("Project Creation" issue chat)
-
-- **The model checksum is verified.** The `modelSha256` in the plan's Global Constraints was taken from IBM's Hugging Face repository and matches the owner's local model file. Use it as is.
-- **How to carry out the plan: build all the tasks in one session, then have one strong reviewer check everything at the end.** The owner chose this over a reviewer per task, because the tasks depend on each other and most of the risk is in the PowerShell updater, which is tested by hand on the PC.
-- **Known limit:** the launcher can't update itself while it's running an update. That's accepted: it's small and rarely changes, and running the installer again updates it.
-- **The installer reuses the model already downloaded** (from `spike\models`), so the 2 GB download is skipped.
-
-## Decisions made after the plan was written
+## Decisions made after the plan was written (all already in the code)
 
 These override the plan where they differ.
 
-1. **The launcher's assembly is named `Jazari.Launcher`, not `jazari`.** The app (`src/MyOwnLLM.Cli`) already builds as `jazari.dll`. If the launcher also did, the test project, which references both, would get two `jazari.dll` files. In `Jazari.Launcher.csproj` set `AssemblyName` to `Jazari.Launcher` and keep `ToolCommandName` as `jazari`, so the command people type is still `jazari`. Everything else in Task 3 stays as written.
+1. **The launcher's assembly is named `Jazari.Launcher`, not `jazari`.** The app already builds as `jazari.dll`, so a launcher named `jazari` would clash in the test project, which references both. `ToolCommandName` stays `jazari`, so the command people type is unchanged.
+2. **The update check never runs `git` by bare name.** `UpdateCheck` finds `git.exe` only in absolute `PATH` entries (it skips `.` and relative entries), runs it from Jazari's own folder, accepts only `https://` repo addresses, and allows only the https protocol (`-c protocol.allow=never -c protocol.https.allow=always`).
+3. **The launcher runs PowerShell by its full system path** (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`) and starts from Jazari's folder.
+4. **Background servers start through `cmd.exe` by its full system path,** with the working directory set to the server's own folder (`src/MyOwnLLM.Cli/Processes.cs`).
 
-2. **Update check: don't run `git` by bare name** (security review). On Windows, a bare `git` can resolve to a `git.exe` planted in the current folder. In `UpdateCheck`:
-   - find `git` by searching the `PATH` directories only, never the current folder; if it isn't found, report no update;
-   - set the working directory to Jazari's own folder (the app's base directory), not the user's current folder;
-   - accept only `https://` values for `repoUrl`; anything else (`file://`, `ssh`, `ext::`, local paths, values that start with `-`) means no update and git is never run.
-   Write tests for each of these first.
+## Other context from the planning chat ("Project Creation" issue chat)
 
-3. **Launcher: don't run `powershell.exe` by bare name.** Use the full system path (`Environment.SystemDirectory` + `\WindowsPowerShell\v1.0\powershell.exe`) and set the child process's working directory to Jazari's folder. Change the Task 3 `LaunchPlanTests` to expect the full path. Test first.
-
-4. **Background server start: don't run `cmd.exe` by bare name.** `src/MyOwnLLM.Cli/Processes.cs:39` currently starts `cmd.exe` by name, which runs in the current folder, so a planted `cmd.exe` or `git.exe` there could run. Use the full path (`Environment.SystemDirectory\cmd.exe`) and set the working directory to the folder of the server being started. Test first.
+- **The model checksum is verified.** The `modelSha256` in the plan and in `scripts/jazari-manifest.json` came from IBM's Hugging Face repository and matches the owner's local model file.
+- **Known, accepted limit:** the launcher can't update itself while it's running an update. Running the installer again updates it.
+- **The installer reuses the model already downloaded** (from `spike\models`), so the 2 GB download is skipped.
 
 ## Not yet decided
 
-- `src/MyOwnLLM.Gateway/State/GitSummary.cs:22` also runs `git` by bare name. The earlier session didn't cover it. It probably needs the same fix as decision 2; check with the owner.
-- Task 5 steps 2 to 4 are manual checks that have to run on the owner's Windows PC.
+- `src/MyOwnLLM.Gateway/State/GitSummary.cs:22` still runs `git` by bare name. The hardening didn't cover it. It probably needs the same fix as decision 2; check with the owner.
