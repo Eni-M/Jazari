@@ -1,13 +1,17 @@
+using System.Globalization;
+
 namespace MyOwnLLM.Cli;
 
-/// <summary>The fenced code blocks of an answer, exactly as the model wrote them, for /copy.</summary>
+/// <summary>The fenced code blocks of an answer, as shown on screen, for /copy.</summary>
 public static class CodeBlocks
 {
     public static IReadOnlyList<string> Extract(string answer)
     {
         List<string> blocks = [];
         List<string>? current = null;
-        foreach (var line in answer.Replace("\r\n", "\n").Split('\n'))
+        // Same sanitizing as the screen, and invisible format characters too: what gets pasted must be what was shown.
+        var visible = new string(ConsoleText.Sanitize(answer).Where(c => char.GetUnicodeCategory(c) != UnicodeCategory.Format).ToArray());
+        foreach (var line in visible.Split('\n'))
         {
             if (!line.TrimStart().StartsWith("```"))
             {

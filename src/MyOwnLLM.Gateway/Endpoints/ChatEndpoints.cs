@@ -11,7 +11,9 @@ using MyOwnLLM.Gateway.Storage;
 
 namespace MyOwnLLM.Gateway.Endpoints;
 
-public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream);
+/// <param name="Context">Code the client read for this question; goes before the conversation so it stays in the prompt cache.</param>
+/// <param name="JsonSchema">Forces the answer into this JSON shape.</param>
+public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream, string? Context = null, string? JsonSchema = null);
 public sealed record InfillRequest(string Prefix, string Suffix, int? MaxTokens);
 public sealed record StatusRequest(string ProjectPath);
 public sealed record FeedbackRequest(string Id, bool Accepted);
@@ -47,7 +49,7 @@ public static class ChatEndpoints
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultChatTokens, 1, MaxChatTokens);
         var question = request.Messages.LastOrDefault()?.Content ?? "";
         var note = project is null ? null : await s.State.GetAsync(project);
-        var prompt = PromptBuilder.Build(new PromptParts(note, null, request.Messages.SkipLast(1).ToList(), question), s.Options.ContextTokens, maxTokens);
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages.SkipLast(1).ToList(), question), s.Options.ContextTokens, maxTokens);
         var watch = Stopwatch.StartNew();
 
         string answer;
@@ -81,8 +83,8 @@ public static class ChatEndpoints
         }
         else
         {
-            answer = await s.Cache.GetOrCreateAsync(CacheKey("chat", project, note, prompt, maxTokens),
-                ct => new ValueTask<string>(s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, maxTokens, t), ct)),
+            answer = await s.Cache.GetOrCreateAsync(CacheKey("chat", project, note, prompt, maxTokens, request.JsonSchema),
+                ct => new ValueTask<string>(s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, maxTokens, t, request.JsonSchema), ct)),
                 CacheFor, cancellationToken: http.RequestAborted);
             id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
             await http.Response.WriteAsJsonAsync(new

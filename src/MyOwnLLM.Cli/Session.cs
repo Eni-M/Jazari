@@ -13,7 +13,9 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     [
         ("/help", "Available commands"), ("/status", "Where are we left at?"), ("/model", "Show the model"),
         ("/copy [n]", "Copy code block n of the last answer (no number: the last block)"),
-        ("/clear", "Clear conversation"), ("/retry", "Ask the last question again"), ("/details", "Details of the last error"), ("/exit", "Quit"),
+        ("/read <path>", "Read a file or folder for the next questions"), ("/review [path]", "Review a whole project and write a report"),
+        ("/edit <file> <what>", "Change a file, after showing you the change"), ("/undo", "Undo the last /edit"),
+        ("/clear", "Clear conversation and files read"), ("/retry", "Ask the last question again"), ("/details", "Details of the last error"), ("/exit", "Quit"),
     ];
 
     readonly List<ChatTurn> _history = [];
@@ -32,6 +34,15 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     public bool LastFailed { get; private set; }
     /// <summary>Where /copy sends code. Replaced in tests.</summary>
     public Action<string> SetClipboard { get; init; } = TextCopy.ClipboardService.SetText;
+    /// <summary>Asks the user a yes/no question. Without one, /edit never writes.</summary>
+    public Func<string, bool> Confirm { get; init; } = _ => false;
+    /// <summary>Where reviews keep their progress and reports.</summary>
+    public string ReviewDir { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "reviews");
+
+    const int MaxReadTokens = 9000; // of the 16k context: leaves room for the conversation and the answer
+    const int EditAnswerTokens = 1000;
+    string? _context;
+    (string Path, string Text)? _undo;
     bool Live => ui.Theme.Mode != ColorMode.None;
 
     public async Task<ConnectionState> ConnectAsync(CancellationToken ct)
@@ -63,7 +74,11 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             case "/status": return StatusAsync(ct);
             case "/model": return ModelAsync(ct);
             case "/copy": Copy(input.Split(' ', 2) is [_, var number] ? number.Trim() : null); break;
-            case "/clear": _history.Clear(); ui.Metadata("Conversation cleared."); break;
+            case "/read": Read(Argument(input)); break;
+            case "/review": return new ProjectReview(gateway, ui, ReviewDir).RunAsync(Resolve(Argument(input) ?? project), ct);
+            case "/edit": return EditAsync(Argument(input), ct);
+            case "/undo": Undo(); break;
+            case "/clear": _history.Clear(); _context = null; ui.Metadata("Conversation cleared."); break;
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
             case "/details": Details(); break;
             case "/exit": ExitRequested = true; break;
@@ -88,7 +103,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
         var watch = Stopwatch.StartNew();
         try
         {
-            await foreach (var chunk in gateway.ChatAsync(_history, question, project, ct).WithCancellation(ct))
+            await foreach (var chunk in gateway.ChatAsync(_history, question, project, ct, _context).WithCancellation(ct))
             {
                 if (chunk.Error is not null)
                 {
@@ -155,6 +170,76 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     {
         if (_info is null && await ConnectAsync(ct) != ConnectionState.Available) { Details(); return; }
         ui.Rows([("Model", $"{_info!.Model} {ui.Theme.Glyph('·')} local"), ("Gateway", $"{_info.Name} {_info.Version}")]);
+    }
+
+    static string? Argument(string input) => input.Split(' ', 2) is [_, var rest] && rest.Trim().Trim('"') is { Length: > 0 } text ? text : null;
+    string Resolve(string path) => Path.GetFullPath(path, project);
+
+    void Read(string? path)
+    {
+        if (path is null) { ui.Metadata("Usage: /read <file or folder>"); return; }
+        var target = Resolve(path);
+        if (!File.Exists(target) && !Directory.Exists(target)) { ui.Metadata($"Can't find {target}."); return; }
+
+        var (files, skipped) = ProjectFiles.Load(target);
+        var context = new StringBuilder();
+        var read = 0;
+        foreach (var file in files)
+        {
+            var piece = $"--- {file.Path} ---\n{file.Text}\n";
+            if ((context.Length + piece.Length) / 4 > MaxReadTokens) break;
+            context.Append(piece);
+            read++;
+        }
+        if (read == 0) { ui.Metadata(files.Count == 0 ? "Nothing readable there." : $"{files[0].Path} is too big to read at once. Use /review for large files."); return; }
+        _context = context.ToString();
+        var left = files.Count - read;
+        ui.Metadata($"Read {read} file{(read == 1 ? "" : "s")}, about {_context.Length / 4} tokens{(left > 0 ? $". {left} didn't fit, riskiest went first; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}.");
+    }
+
+    async Task EditAsync(string? argument, CancellationToken ct)
+    {
+        if (argument?.Split(' ', 2) is not [var file, var request]) { ui.Metadata("Usage: /edit <file> <what to change>"); return; }
+        var path = Resolve(file);
+        if (!path.StartsWith(Path.TrimEndingDirectorySeparator(Path.GetFullPath(project)) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            ui.Metadata("Jazari only edits files inside this project.");
+            return;
+        }
+        if (!File.Exists(path)) { ui.Metadata($"Can't find {path}."); return; }
+
+        var original = File.ReadAllText(path);
+        if (original.Length / 4 > MaxReadTokens) { ui.Metadata("That file is too big to edit in one go."); return; }
+
+        var thinking = ThinkingIndicator.Start(ui.Output, ui.Theme);
+        string reply;
+        try { reply = await gateway.CompleteAsync(FileEdit.Instructions + request, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { await thinking.StopAsync(); ui.Metadata("stopped"); return; }
+        catch (GatewayException e) { await thinking.StopAsync(); Fail(e); return; }
+        await thinking.StopAsync();
+
+        if (FileEdit.Parse(reply) is not { } edits) { ui.Metadata("The model's answer couldn't be read. Nothing changed."); return; }
+        var (text, problem) = FileEdit.Apply(original, edits);
+        if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return; }
+
+        foreach (var edit in edits)
+        {
+            foreach (var line in edit.Search.Split('\n')) ui.Line("- " + ConsoleText.Sanitize(line.TrimEnd('\r')), Tone.Muted);
+            foreach (var line in edit.Replace.Split('\n')) ui.Line("+ " + ConsoleText.Sanitize(line.TrimEnd('\r')), Tone.Primary);
+            ui.Blank();
+        }
+        if (!Confirm($"Apply this change to {file}?")) { ui.Metadata("Nothing changed."); return; }
+        FileEdit.Write(path, text);
+        _undo = (path, original);
+        ui.Metadata("Changed. /undo puts it back.");
+    }
+
+    void Undo()
+    {
+        if (_undo is not var (path, text)) { ui.Metadata("Nothing to undo."); return; }
+        FileEdit.Write(path, text);
+        _undo = null;
+        ui.Metadata($"Put back {path}.");
     }
 
     void Copy(string? number)

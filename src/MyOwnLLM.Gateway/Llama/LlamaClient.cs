@@ -7,10 +7,14 @@ namespace MyOwnLLM.Gateway.Llama;
 public sealed class LlamaClient(HttpClient http) : ILlamaClient
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+    const double CodeTemperature = 0.2; // llama-server's default of 0.8 is meant for prose; code wants the likeliest answer
 
-    public async Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct)
+    public async Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null)
     {
-        using var response = await SendAsync("/v1/chat/completions", ChatBody(messages, maxTokens, stream: false), stream: false, ct);
+        var body = jsonSchema is null
+            ? ChatBody(messages, maxTokens, stream: false)
+            : new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = false, Temperature = CodeTemperature, JsonSchema = JsonDocument.Parse(jsonSchema).RootElement };
+        using var response = await SendAsync("/v1/chat/completions", body, stream: false, ct);
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
     }
@@ -39,7 +43,7 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
     }
 
     static object ChatBody(IReadOnlyList<ChatMessage> messages, int maxTokens, bool stream) =>
-        new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = stream };
+        new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = stream, Temperature = CodeTemperature };
 
     async Task<HttpResponseMessage> SendAsync(string path, object body, bool stream, CancellationToken ct)
     {

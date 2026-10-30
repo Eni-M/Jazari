@@ -34,7 +34,7 @@ if (key is null && cli.Command != "session")
     return 2;
 }
 
-using var http = new HttpClient { BaseAddress = settings.GatewayUrl, Timeout = TimeSpan.FromMinutes(10) };
+using var http = new HttpClient { BaseAddress = settings.GatewayUrl, Timeout = TimeSpan.FromMinutes(30) };
 if (key is not null) http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
 var gateway = new GatewayClient(http);
 
@@ -68,7 +68,11 @@ if (cli.Command == "session")
     var piped = Console.IsInputRedirected || Console.IsOutputRedirected;
     ILineReader reader = piped ? new TextLineReader(Console.In) : new PromptLineReader(ui);
     // In a real terminal the typed line becomes the "› question" row; piped input isn't echoed, so Jazari prints it.
-    var interactive = new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory) { EchoQuestions = piped };
+    var interactive = new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory)
+    {
+        EchoQuestions = piped,
+        Confirm = question => { Console.Write($"{question} [y/n] "); return Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes"; },
+    };
     await InputLoop.RunAsync(interactive, ui, version, directory, reader,
         hasKey: key is not null, updateAvailable: updateAvailable);
     return 0;
@@ -90,6 +94,9 @@ switch (cli.Command)
         break;
     case "status":
         await session.HandleAsync("/status", cts.Token);
+        break;
+    case "review":
+        await session.HandleAsync($"/review {cli.Text}", cts.Token);
         break;
     default:
         try

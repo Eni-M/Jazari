@@ -35,7 +35,7 @@ public class MarkdownStreamTests
     [Fact]
     public void Code_fence_keeps_code_and_shows_language()
     {
-        Assert.Equal(["csharp", "var x = 1;", "after"], PlainLines("```csharp\nvar x = 1;\n```\nafter\n"));
+        Assert.Equal(["[1] csharp", "var x = 1;", "after"], PlainLines("```csharp\nvar x = 1;\n```\nafter\n"));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class MarkdownStreamTests
 
     [Fact]
     public void Code_fence_keeps_indentation() =>
-        Assert.Equal(["if (x)", "    return x;", "        nested();"], PlainLines("```\nif (x)\n    return x;\n        nested();\n```\n"));
+        Assert.Equal(["[1]", "if (x)", "    return x;", "        nested();"], PlainLines("```\nif (x)\n    return x;\n        nested();\n```\n"));
 
     [Fact]
     public void Long_code_lines_are_not_word_wrapped_at_spaces()
@@ -99,7 +99,7 @@ public class MarkdownStreamTests
         var line = "var result = items.Where(i => i.IsActive).Select(i => i.Name).ToList();";
         var lines = PlainLines("```\n" + line + "\n```\n", width: 40);
 
-        Assert.Equal(line, string.Concat(lines));
+        Assert.Equal(line, string.Concat(lines.Skip(1)));
     }
 
     [Fact]

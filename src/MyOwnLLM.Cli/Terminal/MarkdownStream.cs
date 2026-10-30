@@ -50,12 +50,8 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
         {
             if (line.TrimStart().StartsWith("```")) { _state = State.Text; if (!restyle) output.WriteLine(); return; }
             if (!restyle) { output.WriteLine(); return; }
-            // Code keeps its indentation: split by columns, never word-wrap.
-            for (var i = 0; i == 0 || i < line.Length; i += width)
-            {
-                var part = line.Substring(i, Math.Min(width, line.Length - i));
-                output.WriteLine(theme.Code(Live ? part.PadRight(width) : part));
-            }
+            // Printed untouched, no padding and no splitting: a mouse copy must give back exactly the code.
+            output.WriteLine(theme.Code(line));
             return;
         }
 

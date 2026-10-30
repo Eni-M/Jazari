@@ -20,10 +20,12 @@ public sealed class FakeLlama : ILlamaClient
     public ConcurrentQueue<Call> Calls { get; } = new();
     public Func<CancellationToken, Task<string>> Chat { get; set; } = _ => Task.FromResult("answer");
     public bool StreamDiesAfterFirstPart { get; set; }
+    public string? LastSchema { get; private set; }
 
-    public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct)
+    public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null)
     {
         Calls.Enqueue(new("chat", messages, maxTokens));
+        LastSchema = jsonSchema;
         return Chat(ct);
     }
 

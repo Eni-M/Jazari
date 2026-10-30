@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="PrettyPrompt" Version="6.0.5" />
+    <PackageReference Include="TextCopy" Version="6.2.1" />
   </ItemGroup>
 
 </Project>

@@ -18,10 +18,20 @@ sealed class FakeGateway : IGatewayClient
 
     public Task<GatewayInfo> InfoAsync(CancellationToken ct) => Info(ct);
 
-    public IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct)
+    public IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null)
     {
         Asked.Add((history.ToList(), question));
+        LastContext = context;
         return Chat(history, question, ct);
+    }
+
+    public string? LastContext { get; private set; }
+    public Func<string, string, Task<string>> Complete { get; set; } = (_, _) => Task.FromResult("""{"findings":[]}""");
+    public int Completions { get; private set; }
+    public Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct)
+    {
+        Completions++;
+        return Complete(question, context);
     }
 
     public Task<(string Id, string Summary)> StatusAsync(string project, CancellationToken ct) => Task.FromResult(("ix-9", "We are building the CLI."));
@@ -74,6 +84,10 @@ public class SessionTests
         await session.HandleAsync("/copy 9", CancellationToken.None);
         Assert.Contains("no code block 9", Text);
     }
+
+    [Fact]
+    public void Copied_code_has_no_hidden_characters() =>
+        Assert.Equal(["int a;\nint b;"], CodeBlocks.Extract("```\r\nint​ a;\u001b\r\n‮int b;\r\n```\r\n"));
 
     [Fact]
     public async Task Copy_with_nothing_to_copy_says_so()

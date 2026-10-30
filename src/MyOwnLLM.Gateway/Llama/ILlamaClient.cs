@@ -4,7 +4,7 @@ public sealed record ChatMessage(string Role, string Content);
 
 public interface ILlamaClient
 {
-    Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct);
+    Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null);
     IAsyncEnumerable<string> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct);
     Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct);
 }
