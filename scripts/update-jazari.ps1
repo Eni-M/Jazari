@@ -92,8 +92,15 @@ function Repair-Build($thing, $project, $folder, $exe) {
     $new = "$folder.new"
     if (Test-Path $new) { Remove-Item -Recurse -Force $new }
     # No shared compiler server: one left over from an app with redirected AppData (Claude Desktop) would write the build there.
-    dotnet publish (Join-Path $sourceDir "src\$project") -c Release -o $new --nologo -v q --disable-build-servers
-    if ($LASTEXITCODE -ne 0) { if (Test-Path $new) { Remove-Item -Recurse -Force $new }; throw "the build failed" }
+    # Its output stays hidden unless it fails. Own scope: "Continue" must not reach the swap below, which relies on throwing.
+    Write-Host "Building $thing..."
+    $output = & { $ErrorActionPreference = "Continue"; dotnet publish (Join-Path $sourceDir "src\$project") -c Release -o $new --nologo -v q --disable-build-servers 2>&1 | ForEach-Object { "$_" } }
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $new) { Remove-Item -Recurse -Force $new }
+        $errors = @($output | Where-Object { $_ -match ": error " } | Select-Object -Unique -First 3)
+        if ($errors.Count -eq 0) { $errors = @($output | Where-Object { $_ -and $_ -notmatch "RemoteException" }) }
+        throw "the build failed`n$($errors -join "`n")"
+    }
     Set-Content -Encoding ASCII (Join-Path $new "build-commit.txt") $commit
     Swap-Folder $new $folder
     Say-Repaired $thing
