@@ -30,8 +30,8 @@ public static class Welcome
     {
         ConnectionState.GatewayNotRunning =>
         [
-            @"Jazari starts its servers itself once .\scripts\install-jazari.ps1 has run in your MyOwnLLM folder.",
-            @"To start them by hand there: .\scripts\start-llama.ps1, and in a second window dotnet run --project src/MyOwnLLM.Gateway",
+            "Jazari starts its servers itself; if it can't, run: jazari update",
+            @"To start them by hand in your MyOwnLLM folder: .\scripts\start-llama.ps1, and in a second window dotnet run --project src/MyOwnLLM.Gateway",
             "Then type /model here to check the connection.",
         ],
         ConnectionState.KeyRejected =>
@@ -42,7 +42,7 @@ public static class Welcome
         ],
         _ =>
         [
-            @"In your MyOwnLLM folder run .\scripts\install-jazari.ps1: it sets everything up, including the key.",
+            "Run jazari update: it repairs everything, then Jazari creates the key itself.",
             "By hand: dotnet run --project src/MyOwnLLM.Gateway -- add-key, then setx JAZARI_KEY <the key>.",
         ],
     };

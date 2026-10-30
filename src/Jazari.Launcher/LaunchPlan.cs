@@ -27,6 +27,9 @@ public sealed record LaunchPlan(string Kind, string Exe, string[] Args, string? 
         return fileExists(app) ? new("run", app, args, null) : Fail("Jazari isn't fully installed. Run: jazari update");
     }
 
+    /// <summary>A failed update leaves the previous version working, so Jazari reopens; "n" (exit 2) or Ctrl+C means stop here.</summary>
+    public static bool ReopensAfterUpdate(int updaterExit) => updaterExit is 0 or 1;
+
     static LaunchPlan Fail(string message) => new("fail", "", [], message);
 
     static (string InstallDir, string SourceDir)? Read(string? json)

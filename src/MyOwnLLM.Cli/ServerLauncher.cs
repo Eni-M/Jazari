@@ -25,8 +25,7 @@ public sealed class ServerLauncher(
         var missing = new[] { config.LlamaServer, config.Model, config.GatewayExe }.Where(f => !(fileExists ?? File.Exists)(f)).ToList();
         if (missing.Count > 0)
         {
-            ui.Error("Some of Jazari's files are missing.", string.Join(", ", missing),
-                $@"Run .\scripts\install-jazari.ps1 again in {config.Home}.");
+            ui.Error("Some of Jazari's files are missing.", string.Join(", ", missing), "Run: jazari update");
             return ConnectionState.GatewayNotRunning;
         }
 

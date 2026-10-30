@@ -16,7 +16,13 @@ switch (plan.Kind)
         return 1;
     case "update":
         var code = Run(plan.Exe, plan.Args, plan.WorkingDirectory);
-        if (code != 0) return code;
+        if (!LaunchPlan.ReopensAfterUpdate(code)) return code;
+        if (code != 0)
+        {
+            // The app clears the screen when it opens, which would take the ERROR lines with it.
+            Console.Write("Press Enter to open Jazari on the previous version.");
+            Console.ReadLine();
+        }
         // Reopen Jazari on the fresh version, read from the config the updater just wrote.
         var reopen = LaunchPlan.Decide([], File.Exists(configPath) ? File.ReadAllText(configPath) : null, File.Exists);
         if (reopen.Kind == "fail") { Console.Error.WriteLine(reopen.Message); return 1; }

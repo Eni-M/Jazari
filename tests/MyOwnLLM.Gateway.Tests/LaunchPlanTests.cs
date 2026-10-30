@@ -39,6 +39,14 @@ public class LaunchPlanTests
     }
 
     [Theory]
+    [InlineData(0, true)]  // updated
+    [InlineData(1, true)]  // failed: the previous version is still there
+    [InlineData(2, false)] // the user answered "n"
+    [InlineData(-1073741510, false)] // Ctrl+C
+    public void Jazari_reopens_unless_the_update_was_stopped(int updaterExit, bool reopens) =>
+        Assert.Equal(reopens, LaunchPlan.ReopensAfterUpdate(updaterExit));
+
+    [Theory]
     [InlineData(null)]
     [InlineData("{not json")]
     [InlineData("""{"home":"C:\\R"}""")]

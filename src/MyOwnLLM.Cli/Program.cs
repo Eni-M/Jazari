@@ -30,7 +30,7 @@ var key = await provisioner.EnsureKeyAsync(settings.Key, config, CancellationTok
 // The interactive session opens without a key and explains the setup; one-off commands can't do anything without one.
 if (key is null && cli.Command != "session")
 {
-    Console.Error.WriteLine("no API key: run scripts\\install-jazari.ps1 in your MyOwnLLM folder (or set JAZARI_KEY)");
+    Console.Error.WriteLine("no API key: run jazari update (or set JAZARI_KEY)");
     return 2;
 }
 

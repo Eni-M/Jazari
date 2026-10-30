@@ -9,3 +9,4 @@ spike/*.log
 bin/
 obj/
 artifacts/
+.idea/
