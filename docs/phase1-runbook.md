@@ -1,4 +1,4 @@
-# Phase 1 runbook
+# Jazari runbook
 
 ## Start
 
@@ -9,24 +9,42 @@
    Wait for `model loaded` (~6 s).
 2. **Gateway** (second window):
    ```powershell
-   dotnet run --project src/MyOwnLLM.Gateway --no-launch-profile
+   dotnet run --project src/MyOwnLLM.Gateway
    ```
    Listens on `http://127.0.0.1:5080` only.
 3. **API key** (once):
    ```powershell
-   dotnet run --project src/MyOwnLLM.Gateway --no-launch-profile -- add-key
+   dotnet run --project src/MyOwnLLM.Gateway -- add-key
    ```
-   Copy the `mollm_...` line and store it as a user environment variable `MYOWNLLM_KEY`. Only its hash is kept in `%LOCALAPPDATA%\MyOwnLLM\keys.json`.
-4. **CLI** (build once, then put `src\MyOwnLLM.Cli\bin\Debug\net10.0` on your PATH or call it directly):
+   Copy the `mollm_...` line and store it as a user environment variable `JAZARI_KEY`. Only its hash is kept in `%LOCALAPPDATA%\MyOwnLLM\keys.json`. (`MYOWNLLM_KEY` still works.)
+4. **Install the `jazari` command** (once, and again after updates):
    ```powershell
-   myllm ask "How do I register a scoped service?"
-   myllm ask "What should I fix next?" --repo C:\Users\enim\EduCore
-   myllm status --repo C:\Users\enim\EduCore     # "Where are we left at?"
-   myllm feedback ix-4 up
+   .\scripts\install-jazari.ps1
    ```
-   Add `--stream` to `ask` to see the answer as it's written. Ctrl+C stops the model mid-answer.
+   Open a new terminal afterwards.
 
-Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with project notes and the feedback log). Nothing leaves the laptop.
+## Use
+
+```powershell
+jazari                       # interactive session in the current folder
+jazari ask "How do I register a scoped service?"
+jazari status                # "Where are we left at?" for the current folder
+jazari feedback ix-4 up
+```
+
+In the session: `/help`, `/status`, `/model`, `/clear`, `/retry`, `/details`, `/exit`. Enter sends; Shift+Enter, Alt+Enter or Ctrl+J add a new line; ↑/↓ browse history; Tab completes `/` commands; Ctrl+C stops an answer (twice at the prompt exits).
+
+Answers stream by default. `jazari ask "…" --no-stream` prints the answer when it's complete. Piped output (`jazari ask "…" > out.txt`) and `NO_COLOR=1` give plain text with no color codes.
+
+Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with project notes and the feedback log) and `%APPDATA%\Jazari\history`. Nothing leaves the laptop.
+
+## Terminal setup (recommended)
+
+Jazari can't change your terminal's font or background. For the intended look in Windows Terminal: font **JetBrains Mono** (or Cascadia Code), background **#0B0B0B**.
+
+## Other PCs
+
+The `jazari` command installs anywhere with the script above, but answers need a model server and gateway on that PC too (the 2 GB model file and ~5 GB RAM). Reaching this laptop's gateway over the network isn't supported: keys are personal and the gateway listens on localhost only.
 
 ## PC tuning checklist (do these yourself)
 
@@ -42,14 +60,13 @@ Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with projec
 |---|---|
 | RAM, llama-server + gateway | 4.72 GB + 0.07 GB (cap: 7 GB) |
 | Short C# question, cold | 8.0 s |
-| `myllm status` on EduCore (after 2 questions) | **30.9 s** (target ≤ 120 s) |
-| Question queued behind a background state-note update | 75.9 s (waits for the update to finish) |
+| `jazari status` on EduCore | 31–69 s (target ≤ 120 s; longer when a background note update runs first) |
+| 2-item list answer, streamed | 14.3 s |
 | Client gives up mid-answer | llama-server logs `cancel task`; next request answered in 0.7 s |
-| llama-server stopped | CLI prints `model server not reachable at http://127.0.0.1:8080/`, exit 1 |
-| Feedback on a known / unknown id | `feedback saved` / `404 Not Found`, exit 1 |
+| llama-server stopped | `ERROR` block: `model server not reachable at http://127.0.0.1:8080/` |
 
 ## Known limits
 
-- A chat question that arrives while the background state-note update is running waits for it (up to ~60 s). The update can't be paused mid-generation.
-- `ask` without `--repo` has no project knowledge; with `--repo` it uses the state note only (no code search yet; that comes in a later plan).
+- A question that arrives while the background state-note update is running waits for it (up to ~60 s).
+- Jazari knows the project through its state note and recent git history only; it doesn't search your code yet.
 - Answers can be generic or outdated (one used the old `ConfigureServices` style). Specialization is Phase 3.
