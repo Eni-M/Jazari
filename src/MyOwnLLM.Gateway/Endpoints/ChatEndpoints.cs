@@ -31,6 +31,7 @@ public static class ChatEndpoints
         group.MapPost("/chat/completions", Chat);
         group.MapPost("/infill", Infill);
         group.MapPost("/status", Status);
+        group.MapPost("/warm", Warm);
         group.MapPost("/feedback", Feedback);
         group.MapGet("/info", (GatewayOptions o) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version }));
         return group;
@@ -101,6 +102,19 @@ public static class ChatEndpoints
         }
 
         if (project is not null) http.RequestServices.GetRequiredService<StateNoteUpdater>().Record(project, question, answer);
+    });
+
+    /// <summary>
+    /// Reads the conversation so far into the prompt cache, built exactly as <see cref="Chat"/> builds it, so the next
+    /// question only adds itself. Queued as chat: the question waits behind it and then finds everything cached.
+    /// </summary>
+    static Task Warm(HttpContext http, ChatRequest request) => Guard(http, async s =>
+    {
+        var project = http.Request.Headers["X-Project-Path"].FirstOrDefault();
+        var note = project is null ? null : await s.State.GetAsync(project);
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, ""), s.Options.ContextTokens, DefaultChatTokens);
+        await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, 1, t), http.RequestAborted);
+        http.Response.StatusCode = StatusCodes.Status204NoContent;
     });
 
     static Task Infill(HttpContext http, InfillRequest request) => Guard(http, async s =>

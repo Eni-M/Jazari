@@ -22,6 +22,8 @@ public interface IGatewayClient
     Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct);
     Task<(string Id, string Summary)> StatusAsync(string project, CancellationToken ct);
     Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct);
+    /// <summary>Has the model read the conversation and context now, so the next question only adds itself.</summary>
+    Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct);
 }
 
 public sealed class GatewayClient(HttpClient http) : IGatewayClient
@@ -63,6 +65,14 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
         using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Post, "/v1/status") { Content = JsonContent.Create(new { project_path = project }) }, ct);
         var json = await ReadJson(response, ct);
         return Unexpected(() => (json.GetProperty("id").GetString() ?? "", json.GetProperty("summary").GetString() ?? ""));
+    }
+
+    public async Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct)
+    {
+        var messages = history.Select(t => new { role = t.Role, content = t.Content });
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/warm") { Content = JsonContent.Create(new { messages, context }) };
+        request.Headers.Add("X-Project-Path", project);
+        using var _ = await SendAsync(request, ct);
     }
 
     public async Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct)

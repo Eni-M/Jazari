@@ -196,6 +196,8 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
         }
         if (read == 0) { ui.Metadata(files.Count == 0 ? "Nothing readable there." : $"{files[0].Path} is too big to read at once. Use /review for large files."); return; }
         _context = context.ToString();
+        // Reading takes minutes on a CPU: start now, while the question is typed, and the answer comes from the prompt cache.
+        _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None).ContinueWith(t => _ = t.Exception, TaskScheduler.Default); // only a head start: failures don't matter
         var left = files.Count - read;
         ui.Metadata($"Read {read} file{(read == 1 ? "" : "s")}, about {_context.Length / 4} tokens{(left > 0 ? $". {left} didn't fit, riskiest went first; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}.");
     }

@@ -152,6 +152,19 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task Warm_reads_the_conversation_and_context_without_answering()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/warm", new { messages = new[] { new { role = "user", content = "earlier" } }, context = "class A;" });
+
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, response.StatusCode);
+        var call = Assert.Single(_llama.Calls);
+        Assert.Equal(1, call.MaxTokens);
+        Assert.Contains(call.Messages, m => m.Content.Contains("class A;"));
+        Assert.Equal(new ChatMessage("user", "earlier"), call.Messages[^2]);
+        Assert.Equal(new ChatMessage("user", ""), call.Messages[^1]);
+    }
+
+    [Fact]
     public void Llama_chunks_with_progress_text_or_timings_are_all_read()
     {
         var progress = LlamaClient.ReadChunk("""{"choices":[],"prompt_progress":{"total":5000,"cache":1200,"processed":2400,"time_ms":90000}}""");

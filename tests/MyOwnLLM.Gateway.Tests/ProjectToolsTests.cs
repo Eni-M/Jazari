@@ -152,6 +152,17 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Read_starts_the_model_reading_before_the_question()
+    {
+        Add("Program.cs", "class Program;");
+
+        await Session().HandleAsync("/read Program.cs", CancellationToken.None);
+
+        Assert.Contains("class Program;", Assert.Single(_gateway.Warmed));
+        Assert.Equal(0, _gateway.Completions);
+    }
+
+    [Fact]
     public async Task Piped_input_goes_with_the_question()
     {
         var session = Session();

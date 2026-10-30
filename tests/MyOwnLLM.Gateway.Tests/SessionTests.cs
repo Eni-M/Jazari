@@ -36,6 +36,13 @@ sealed class FakeGateway : IGatewayClient
 
     public Task<(string Id, string Summary)> StatusAsync(string project, CancellationToken ct) => Task.FromResult(("ix-9", "We are building the CLI."));
     public Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct) => Task.FromResult(true);
+
+    public List<string?> Warmed { get; } = [];
+    public Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct)
+    {
+        Warmed.Add(context);
+        return Task.CompletedTask;
+    }
 }
 
 public class SessionTests
