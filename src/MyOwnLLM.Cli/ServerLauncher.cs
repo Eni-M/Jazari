@@ -34,7 +34,7 @@ public sealed class ServerLauncher(
             runner.StartDetached(config.LlamaServer,
             [
                 "-m", config.Model, "-dev", "none", "-t", "6", "--poll", "0", "-c", "16384", "--cache-ram", "2048",
-                "-np", "1", "--cache-reuse", "256", "--host", "127.0.0.1", "--port", "8080",
+                "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", "8080",
             ], Path.Combine(logDir, "llama-server.log"));
         if (gatewayState is ConnectionState.GatewayNotRunning)
             runner.StartDetached(config.GatewayExe, [], Path.Combine(logDir, "gateway.log"));
