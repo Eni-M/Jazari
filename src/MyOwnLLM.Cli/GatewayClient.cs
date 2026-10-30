@@ -28,7 +28,7 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
     {
         using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Get, "/v1/info"), ct);
         var json = await ReadJson(response, ct);
-        return new(json.GetProperty("name").GetString() ?? "Jazari", json.GetProperty("model").GetString() ?? "?", json.GetProperty("version").GetString() ?? "?");
+        return Unexpected(() => new GatewayInfo(json.GetProperty("name").GetString() ?? "Jazari", json.GetProperty("model").GetString() ?? "?", json.GetProperty("version").GetString() ?? "?"));
     }
 
     public async IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, [EnumeratorCancellation] CancellationToken ct)
@@ -44,7 +44,7 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
             try { line = await reader.ReadLineAsync(ct); }
             catch (IOException e) { throw new GatewayException("lost connection to the gateway", e.Message, null, e); }
             if (line is null) yield break;
-            if (SseChunk.Parse(line) is { } chunk) yield return chunk;
+            if (Unexpected(() => SseChunk.Parse(line)) is { } chunk) yield return chunk;
         }
     }
 
@@ -52,7 +52,7 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
     {
         using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Post, "/v1/status") { Content = JsonContent.Create(new { project_path = project }) }, ct);
         var json = await ReadJson(response, ct);
-        return (json.GetProperty("id").GetString() ?? "", json.GetProperty("summary").GetString() ?? "");
+        return Unexpected(() => (json.GetProperty("id").GetString() ?? "", json.GetProperty("summary").GetString() ?? ""));
     }
 
     public async Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct)
@@ -76,6 +76,10 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
         {
             throw new GatewayException($"gateway not reachable at {http.BaseAddress}", e.Message, null, e);
         }
+        catch (TaskCanceledException e) when (!ct.IsCancellationRequested) // HttpClient.Timeout, not the user
+        {
+            throw new GatewayException("the gateway took too long to answer", e.Message, null, e);
+        }
         if (response.IsSuccessStatusCode) return response;
 
         using (response)
@@ -92,6 +96,19 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
         catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException) { return null; }
     }
 
-    static async Task<JsonElement> ReadJson(HttpResponseMessage response, CancellationToken ct) =>
-        JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct)).RootElement;
+    static async Task<JsonElement> ReadJson(HttpResponseMessage response, CancellationToken ct)
+    {
+        var body = await response.Content.ReadAsStringAsync(ct);
+        return Unexpected(() => JsonDocument.Parse(body).RootElement);
+    }
+
+    /// <summary>A reply that isn't what Jazari's gateway sends (e.g. another service on the port) becomes a readable error.</summary>
+    static T Unexpected<T>(Func<T> read)
+    {
+        try { return read(); }
+        catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new GatewayException("unexpected response from the gateway", e.Message, null, e);
+        }
+    }
 }

@@ -38,6 +38,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             _lastError = e;
             return e.Status == 401 ? ConnectionState.KeyRejected : ConnectionState.GatewayNotRunning;
         }
+        catch (OperationCanceledException) { return ConnectionState.GatewayNotRunning; }
     }
 
     public string ModelName => _info?.Model ?? "unknown";
@@ -116,6 +117,12 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             renderer.Complete();
             Fail(e);
         }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            StopThinking();
+            renderer.Complete();
+            Unexpected(e);
+        }
         finally { ui.Blank(); }
     }
 
@@ -164,6 +171,14 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
             _ => "/retry",
         };
         ui.Error(e.Message, e.Cause, next);
+    }
+
+    /// <summary>Anything not anticipated: show it like any other error and keep the session alive.</summary>
+    public void Unexpected(Exception e)
+    {
+        _lastError = e;
+        LastFailed = true;
+        ui.Error("Something went wrong.", e.Message, "/details for more, /retry to try again.");
     }
 
     Task Note(string text) { ui.Metadata(text); return Task.CompletedTask; }

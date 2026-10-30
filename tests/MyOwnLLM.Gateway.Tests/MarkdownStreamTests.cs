@@ -88,4 +88,38 @@ public class MarkdownStreamTests
 
         Assert.Contains("Hel", Regex.Replace(output.ToString(), "\e\\[[0-9;]*[A-Za-z]", ""));
     }
+
+    [Fact]
+    public void Code_fence_keeps_indentation() =>
+        Assert.Equal(["if (x)", "    return x;", "        nested();"], PlainLines("```\nif (x)\n    return x;\n        nested();\n```\n"));
+
+    [Fact]
+    public void Long_code_lines_are_not_word_wrapped_at_spaces()
+    {
+        var line = "var result = items.Where(i => i.IsActive).Select(i => i.Name).ToList();";
+        var lines = PlainLines("```\n" + line + "\n```\n", width: 40);
+
+        Assert.Equal(line, string.Concat(lines));
+    }
+
+    [Fact]
+    public void Separator_only_table_does_not_crash() => Assert.Empty(PlainLines("|---|---|\n").Where(l => l.Length > 0));
+
+    [Fact]
+    public void Long_lines_are_never_redrawn_across_rows()
+    {
+        var output = Render(string.Join(" ", Enumerable.Repeat("word", 60)) + "\n\nnext\n", ColorMode.TrueColor, width: 40);
+
+        Assert.DoesNotMatch(@"\e\[\d+F", output);
+    }
+
+    [Fact]
+    public void Lines_with_tabs_or_wide_characters_are_not_redrawn()
+    {
+        Assert.DoesNotContain("\r\e[2K", Render("a\tb\n", ColorMode.TrueColor), StringComparison.Ordinal);
+        Assert.DoesNotContain("\r\e[2K", Render("你好 `x`\n", ColorMode.TrueColor), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Short_styled_line_is_redrawn_in_place() => Assert.Contains("\r\e[2K", Render("- item\n", ColorMode.TrueColor), StringComparison.Ordinal);
 }

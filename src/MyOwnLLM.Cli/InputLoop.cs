@@ -76,22 +76,25 @@ public static class InputLoop
         Console.CancelKeyPress += onCancel;
         try
         {
-            var cancelledOnce = false;
+            // Ctrl+C that clears typed text is just "clear". Exit needs two Ctrl+C in a row on an empty prompt, close together.
+            var lastEmptyCancel = (DateTime?)null;
             while (!session.ExitRequested)
             {
                 var (ok, text) = await reader.ReadAsync();
                 if (!ok)
                 {
-                    if (cancelledOnce) break;
-                    cancelledOnce = true;
+                    if (!string.IsNullOrEmpty(text)) { lastEmptyCancel = null; continue; }
+                    if (lastEmptyCancel is { } first && DateTime.UtcNow - first < TimeSpan.FromSeconds(3)) break;
+                    lastEmptyCancel = DateTime.UtcNow;
                     ui.Metadata("Press Ctrl+C again to exit.");
                     continue;
                 }
                 if (text is null) break;
-                cancelledOnce = false;
+                lastEmptyCancel = null;
 
                 generating = new CancellationTokenSource();
                 try { await session.HandleAsync(text, generating.Token); }
+                catch (Exception e) when (e is not OperationCanceledException) { session.Unexpected(e); }
                 finally
                 {
                     generating.Dispose();

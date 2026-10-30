@@ -21,7 +21,8 @@ var gateway = new GatewayClient(http);
 
 var version = typeof(CliArgs).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
 var theme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001);
-var width = Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 40);
+// One less than the terminal's columns, so a full line never makes the terminal wrap (the renderer relies on this).
+var width = Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20);
 var directory = Path.GetFullPath(cli.RepoPath ?? Directory.GetCurrentDirectory());
 
 if (cli.Command == "session")

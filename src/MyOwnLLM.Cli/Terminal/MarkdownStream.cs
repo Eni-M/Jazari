@@ -41,14 +41,28 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
     void FinishLine()
     {
         var line = _line.ToString();
-        EraseEcho();
+        var restyle = EraseEcho(line);
         _line.Clear();
         _shown = 0;
 
         if (_state == State.InFence)
         {
-            if (line.TrimStart().StartsWith("```")) { _state = State.Text; return; }
-            foreach (var part in Ui.Wrap(line, width)) output.WriteLine(theme.Code(Live ? part.PadRight(width) : part));
+            if (line.TrimStart().StartsWith("```")) { _state = State.Text; if (!restyle) output.WriteLine(); return; }
+            if (!restyle) { output.WriteLine(); return; }
+            // Code keeps its indentation: split by columns, never word-wrap.
+            for (var i = 0; i == 0 || i < line.Length; i += width)
+            {
+                var part = line.Substring(i, Math.Min(width, line.Length - i));
+                output.WriteLine(theme.Code(Live ? part.PadRight(width) : part));
+            }
+            return;
+        }
+
+        if (!restyle)
+        {
+            // The raw echo stays as printed; keep the fence state right for the lines that follow.
+            if (line.TrimStart().StartsWith("```")) _state = State.InFence;
+            output.WriteLine();
             return;
         }
 
@@ -74,13 +88,23 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
             output.WriteLine((i == 0 ? prefix : new string(' ', prefix.Length)) + Inline(lines[i]));
     }
 
-    /// <summary>Removes the raw echo of the current line so the styled version can replace it (one redraw).</summary>
-    void EraseEcho()
+    /// <summary>
+    /// Removes the raw echo so the styled line can replace it (one redraw). Only when that's safe: the echo fits on one
+    /// terminal row (width is one less than the terminal's columns) and has no tabs or wide characters whose columns we
+    /// can't count. Otherwise returns false and the raw echo stays. Plain mode never echoes, so it always restyles.
+    /// </summary>
+    bool EraseEcho(string line)
     {
-        if (!Live || _shown == 0) return;
-        var rows = (_shown - 1) / Math.Max(width, 1);
-        output.Write(rows > 0 ? $"\e[{rows}F\e[J" : "\r\e[J");
+        if (!Live || _shown == 0) return true;
+        if (_shown > width || line.Any(c => c == '\t' || IsWide(c))) return false;
+        output.Write("\r\e[2K");
+        return true;
     }
+
+    static bool IsWide(char c) =>
+        c is >= 'ᄀ' and <= 'ᅟ' or >= '⺀' and <= '꓏' or >= '가' and <= '힣'
+            or >= '豈' and <= '﫿' or >= '︰' and <= '﹏' or >= '＀' and <= '｠' or >= '￠' and <= '￦'
+        || char.IsSurrogate(c);
 
     string Inline(string text) => InlineCode().Replace(text, m => theme.Code(m.Groups[1].Value)) is var styled && Live
         ? theme.Paint(styled, Tone.Primary)
@@ -90,6 +114,7 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
     {
         if (_table.Count == 0) return;
         var rows = _table.Where(r => !r.All(c => SeparatorCell().IsMatch(c))).ToList();
+        if (rows.Count == 0) { _table.Clear(); return; }
         var widths = Enumerable.Range(0, rows.Max(r => r.Length)).Select(i => rows.Max(r => i < r.Length ? r[i].Length : 0)).ToArray();
         for (var r = 0; r < rows.Count; r++)
         {

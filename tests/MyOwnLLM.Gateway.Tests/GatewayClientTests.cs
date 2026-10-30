@@ -76,4 +76,35 @@ public class GatewayClientTests
         Assert.Null(ex.Status);
         Assert.Equal("gateway not reachable at http://127.0.0.1:5080/", ex.Message);
     }
+
+    [Fact]
+    public async Task Non_json_success_response_becomes_GatewayException()
+    {
+        var (client, _) = Create(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>not jazari</html>") });
+
+        var ex = await Assert.ThrowsAsync<GatewayException>(() => client.InfoAsync(CancellationToken.None));
+
+        Assert.Equal("unexpected response from the gateway", ex.Message);
+    }
+
+    [Fact]
+    public async Task Malformed_stream_line_becomes_GatewayException()
+    {
+        var (client, _) = Create(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("data: {broken\n\n") });
+
+        await Assert.ThrowsAsync<GatewayException>(async () =>
+        {
+            await foreach (var _ in client.ChatAsync([], "q", @"C:\Repo", CancellationToken.None)) { }
+        });
+    }
+
+    [Fact]
+    public async Task Timeout_becomes_GatewayException()
+    {
+        var (client, _) = Create(_ => throw new TaskCanceledException("timeout", new TimeoutException()));
+
+        var ex = await Assert.ThrowsAsync<GatewayException>(() => client.InfoAsync(CancellationToken.None));
+
+        Assert.Equal("the gateway took too long to answer", ex.Message);
+    }
 }
