@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <Version>0.2.0</Version>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- One user, one request at a time: workstation GC keeps one small heap, leaving RAM and cores to the model. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>

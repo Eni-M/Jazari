@@ -29,7 +29,11 @@ Plan and status (update as each step finishes):
 - [ ] Measure and build the safe wins on branch `jazari-optimize`, tests passing, one commit each
 - [ ] List what waits for Eni-M under "Decisions waiting"
 
+**Found 2026-10-30, session 2: this session runs on a different PC from the one measured above.** All measurements in this file come from the T480 (user `enim`). This PC (user `techcom`) is a Lenovo 20X3 with an **i5-1135G7** (Tiger Lake, 4 cores, 8 threads, AVX-512 and VNNI), **32 GB DDR4-2667 in two channels** (about 42 GB/s theoretical, twice the T480), Intel Iris Xe (96 EU, shared memory), 377 GB free on C:, Balanced power plan. Jazari, llama-server and the model are not installed here. The research report targets the T480. Its hardware advice (MX150, single channel, quant choice) does not carry over; its bridge and usability advice does. On this PC, answers should be roughly twice as fast (bandwidth), Iris Xe is a real option through llama.cpp Vulkan/SYCL or OpenVINO, and the AVX-512 path in llama.cpp applies.
+
 ### Decisions waiting for Eni-M
+
+- **Which PC hosts Jazari:** the T480 or this i5-1135G7 PC? Measuring here needs llama.cpp and the model downloaded into `spike/` (git-ignored, not an install), which needs Eni-M's OK
 
 - Merge `jazari-optimize` into `main` (see "Next")
 - Paid RAM upgrade (see "The hardware answer")

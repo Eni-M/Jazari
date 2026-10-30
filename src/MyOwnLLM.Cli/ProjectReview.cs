@@ -17,12 +17,12 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
 {
     public const int DefaultUnitTokens = 2000;
     const int AnswerTokens = 500;
-    const string PromptVersion = "2"; // change it when the prompt changes, so old answers aren't reused
+    const string PromptVersion = "3"; // change it when the prompt changes, so old answers aren't reused
 
     const string Schema = """
-        {"type":"object","required":["findings"],"properties":{"findings":{"type":"array","maxItems":5,"items":{"type":"object",
-        "required":["file","quote","problem","severity","fix"],"properties":{"file":{"type":"string"},"quote":{"type":"string"},
-        "problem":{"type":"string"},"severity":{"enum":["high","medium","low"]},"fix":{"type":"string"}}}}}}
+        {"type":"object","required":["findings"],"properties":{"findings":{"type":"array","maxItems":5,"items":{"type":"object","additionalProperties":false,
+        "required":["file","quote","problem","severity","fix"],"properties":{"file":{"type":"string","maxLength":200},"quote":{"type":"string","maxLength":300},
+        "problem":{"type":"string","maxLength":300},"severity":{"enum":["high","medium","low"]},"fix":{"type":"string","maxLength":400}}}}}}
         """;
 
     const string Instructions =
