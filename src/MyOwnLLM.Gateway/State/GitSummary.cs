@@ -20,6 +20,7 @@ public static class GitSummary
     static async Task<string?> GitAsync(string repoPath, CancellationToken ct, params string[] args)
     {
         var psi = new ProcessStartInfo("git") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        psi.ArgumentList.Add("--no-optional-locks"); // never take .git/index.lock while the user may be committing
         psi.ArgumentList.Add("-C");
         psi.ArgumentList.Add(repoPath);
         foreach (var a in args) psi.ArgumentList.Add(a);
