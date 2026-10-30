@@ -6,3 +6,5 @@ spike/server.log
 __pycache__/
 .superpowers/
 spike/*.log
+bin/
+obj/
