@@ -9,7 +9,9 @@ public class UpdateCheckTests
     static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
     readonly FakeRunner _runner = new();
 
-    Task<bool> Check(JazariConfig? config) => UpdateCheck.IsUpdateAvailableAsync(_runner, config, Timeout, CancellationToken.None);
+    const string Git = @"C:\Program Files\Git\cmd\git.exe";
+
+    Task<bool> Check(JazariConfig? config) => UpdateCheck.IsUpdateAvailableAsync(_runner, config, Timeout, CancellationToken.None, () => Git);
 
     [Fact]
     public async Task Newer_commit_means_update()
@@ -17,7 +19,10 @@ public class UpdateCheckTests
         _runner.Result = (_, _) => (0, $"{A}\trefs/heads/main\n");
 
         Assert.True(await Check(Config));
-        Assert.Equal(["ls-remote", Config.RepoUrl!, "refs/heads/main"], _runner.Ran.Single().Args);
+        var ran = _runner.Ran.Single();
+        Assert.Equal(Git, ran.Exe);
+        Assert.Equal(["-C", Config.InstallDir!, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+            "ls-remote", Config.RepoUrl!, "refs/heads/main"], ran.Args);
     }
 
     [Fact]
@@ -62,7 +67,7 @@ public class UpdateCheckTests
         var slow = new SlowRunner();
 
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var result = await UpdateCheck.IsUpdateAvailableAsync(slow, Config, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+        var result = await UpdateCheck.IsUpdateAvailableAsync(slow, Config, TimeSpan.FromMilliseconds(50), CancellationToken.None, () => Git);
 
         Assert.False(result);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(1));
@@ -77,5 +82,36 @@ public class UpdateCheckTests
         }
 
         public void StartDetached(string exe, string[] args, string logFile) { }
+    }
+
+    [Theory]
+    [InlineData("--upload-pack=calc.exe")]
+    [InlineData("ssh://evil/repo")]
+    [InlineData("file:///C:/x")]
+    [InlineData(@"C:\some\folder")]
+    public async Task Only_https_repo_addresses_are_used(string repo)
+    {
+        Assert.False(await Check(Config with { RepoUrl = repo }));
+        Assert.Empty(_runner.Ran);
+    }
+
+    [Fact]
+    public async Task No_git_on_PATH_means_no_update()
+    {
+        Assert.False(await UpdateCheck.IsUpdateAvailableAsync(_runner, Config, Timeout, CancellationToken.None, () => null));
+        Assert.Empty(_runner.Ran);
+    }
+
+    [Fact]
+    public void FindGit_ignores_relative_PATH_entries_and_the_current_folder()
+    {
+        var dir = Directory.CreateTempSubdirectory("jazari-git").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "git.exe"), "");
+            Assert.Equal(Path.Combine(dir, "git.exe"), UpdateCheck.FindGit($@".;relative\bin;{dir}"));
+            Assert.Null(UpdateCheck.FindGit(@".;relative\bin"));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 }

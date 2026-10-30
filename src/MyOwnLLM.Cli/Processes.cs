@@ -35,8 +35,14 @@ public sealed class ProcessRunner : IProcessRunner
         // cmd does the log redirection. The command line is passed raw: cmd doesn't understand .NET's \" escaping, and
         // /c "<whole command>" is its own quoting rule. ShellExecute (hidden) keeps the child from inheriting this
         // terminal's handles, so it outlives jazari and never holds a pipe open.
+        // Full path for cmd, and the server starts in its own folder: jazari runs inside arbitrary (maybe cloned, untrusted)
+        // folders, and a bare name or that folder as working directory could pick up a planted cmd.exe or git.exe.
         var command = $"\"{exe}\" {string.Join(' ', args.Select(Quote))} > \"{logFile}\" 2>&1";
-        Process.Start(new ProcessStartInfo("cmd.exe", $"/d /c \"{command}\"") { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
+        var cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+        Process.Start(new ProcessStartInfo(cmd, $"/d /c \"{command}\"")
+        {
+            UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = Path.GetDirectoryName(exe)!,
+        });
     }
 
     static string Quote(string arg) => arg.Contains(' ') ? $"\"{arg}\"" : arg;

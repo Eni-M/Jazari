@@ -25,6 +25,19 @@ public class ProcessRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task StartDetached_runs_from_the_programs_own_folder_not_the_current_one()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var log = Path.Combine(_dir, "cwd.log");
+        var comspec = Environment.GetEnvironmentVariable("ComSpec")!;
+
+        new ProcessRunner().StartDetached(comspec, ["/c", "cd"], log);
+
+        for (var i = 0; i < 50 && (await ReadShared(log)).Trim().Length == 0; i++) await Task.Delay(100);
+        Assert.Equal(Path.GetDirectoryName(comspec)!.TrimEnd('\\'), (await ReadShared(log)).Trim().TrimEnd('\\'), ignoreCase: true);
+    }
+
+    [Fact]
     public async Task RunAsync_returns_output_and_exit_code()
     {
         if (!OperatingSystem.IsWindows()) return;

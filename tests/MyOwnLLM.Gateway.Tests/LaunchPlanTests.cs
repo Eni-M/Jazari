@@ -14,6 +14,7 @@ public class LaunchPlanTests
 
         Assert.Equal("run", plan.Kind);
         Assert.Equal(@"C:\J\app\jazari.exe", plan.Exe);
+        Assert.Null(plan.WorkingDirectory); // the app runs in the user's folder: that folder is the project
         Assert.Equal(["ask", "hi", "--repo", @"C:\my repo"], plan.Args);
     }
 
@@ -32,7 +33,8 @@ public class LaunchPlanTests
         var plan = LaunchPlan.Decide(["update"], Config, All);
 
         Assert.Equal("update", plan.Kind);
-        Assert.Equal("powershell.exe", plan.Exe);
+        Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"), plan.Exe);
+        Assert.Equal(@"C:\J\source", plan.WorkingDirectory);
         Assert.Equal(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", @"C:\J\source\scripts\update-jazari.ps1"], plan.Args);
     }
 
