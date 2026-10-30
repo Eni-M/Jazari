@@ -39,7 +39,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     /// <summary>Where reviews keep their progress and reports.</summary>
     public string ReviewDir { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "reviews");
 
-    const int MaxReadTokens = 9000; // of the 16k context: leaves room for the conversation and the answer
+    const int MaxReadTokens = 5000; // answers fall from 5.5 to 2.8 tok/s at this size, and keep falling beyond it
     const int EditAnswerTokens = 1000;
     string? _context;
     (string Path, string Text)? _undo;

@@ -63,6 +63,14 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public void A_risky_file_gets_a_part_of_its_own()
+    {
+        var units = ProjectReview.Units([new("a.cs", "a"), new("AuthController.cs", "b"), new("c.cs", "c"), new("d.cs", "d")], 100);
+
+        Assert.Equal([["a.cs"], ["AuthController.cs"], ["c.cs", "d.cs"]], units.Select(u => u.Select(f => f.Path).ToArray()).ToArray());
+    }
+
+    [Fact]
     public void A_finding_is_verified_only_when_its_quote_is_in_the_code()
     {
         List<ProjectFile> unit = [new("a.cs", "first\n  var sql = \"SELECT\" + id;\nlast"), new("b.cs", "other")];
@@ -146,12 +154,12 @@ public class ProjectToolsTests : IDisposable
     [Fact]
     public async Task Read_says_what_didnt_fit()
     {
-        foreach (var i in Enumerable.Range(0, 4)) Add($"f{i}.cs", new string('x', 15000));
+        foreach (var i in Enumerable.Range(0, 3)) Add($"f{i}.cs", new string('x', 9000));
 
         await Session().HandleAsync("/read .", CancellationToken.None);
 
         Assert.Contains("Read 2 files", _output.ToString());
-        Assert.Contains("2 didn't fit", _output.ToString());
+        Assert.Contains("1 didn't fit", _output.ToString());
     }
 
     const string OneEdit = """{"edits":[{"search":"int a;","replace":"int b;"}]}""";

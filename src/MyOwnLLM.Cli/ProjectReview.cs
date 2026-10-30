@@ -17,7 +17,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
 {
     public const int DefaultUnitTokens = 2000;
     const int AnswerTokens = 500;
-    const string PromptVersion = "1"; // change it when the prompt changes, so old answers aren't reused
+    const string PromptVersion = "2"; // change it when the prompt changes, so old answers aren't reused
 
     const string Schema = """
         {"type":"object","required":["findings"],"properties":{"findings":{"type":"array","maxItems":5,"items":{"type":"object",
@@ -26,11 +26,13 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         """;
 
     const string Instructions =
-        "Review the code above as a senior security-minded engineer. Look for: injection, missing authentication or " +
-        "authorization, one user reaching another user's data, exposed secrets, path traversal, unsafe file upload, weak " +
-        "crypto, business rules that can be bypassed, race conditions, swallowed errors and real bugs. Report at most five " +
-        "real problems and no style remarks. If the code is fine, return an empty list. For each problem give the file, " +
-        "one line copied exactly from the code as quote, what can go wrong, severity, and a short fix.";
+        "Review the code above as a senior security-minded engineer. Check every method for: passwords or keys written in " +
+        "the code, text joined into SQL or commands, endpoints that change data without an authorization check, one user " +
+        "reaching another user's data, amounts or ids taken from the client unchecked, path traversal, unsafe file upload, " +
+        "weak crypto, business rules that can be bypassed, swallowed errors and real bugs. Report only what this code itself " +
+        "shows. Never write \"if\" or \"could be compromised\" guesses about code you can't see, and no style remarks. If the " +
+        "code is fine, return an empty list. For each problem give the file, one whole line copied exactly from the code as " +
+        "quote, what can go wrong, severity (high means an attacker gains something), and a short fix.";
 
     /// <summary>Returns the report's path, or null when there was nothing to review or the review stopped early.</summary>
     public async Task<string?> RunAsync(string root, CancellationToken ct)
@@ -95,9 +97,12 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         foreach (var piece in files.SelectMany(f => Pieces(f, unitTokens)))
         {
             var tokens = Tokens(piece.Text);
-            if (used + tokens > unitTokens && current.Count > 0) { units.Add(current); current = []; used = 0; }
+            // A risky file gets a part of its own: sharing one left its real problems unreported in testing.
+            var risky = ProjectFiles.Risk(piece.Path) > 0;
+            if ((risky || used + tokens > unitTokens) && current.Count > 0) { units.Add(current); current = []; used = 0; }
             current.Add(piece);
             used += tokens;
+            if (risky) { units.Add(current); current = []; used = 0; }
         }
         if (current.Count > 0) units.Add(current);
         return units;
