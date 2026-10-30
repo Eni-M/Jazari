@@ -17,6 +17,9 @@ public sealed class LocalDb(string dbPath)
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 CREATE TABLE IF NOT EXISTS project_state(project TEXT PRIMARY KEY, note TEXT NOT NULL, updated_utc TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS interactions(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, created_utc TEXT NOT NULL, project TEXT, kind TEXT NOT NULL,
+                    prompt TEXT NOT NULL, answer TEXT NOT NULL, duration_ms INTEGER NOT NULL, accepted INTEGER NULL);
                 """;
             cmd.ExecuteNonQuery();
             _created = true;
