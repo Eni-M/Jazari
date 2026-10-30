@@ -54,22 +54,22 @@ The config (`%APPDATA%\Jazari\config.json`) gains:
 
 ### What `jazari update` does
 
-1. **Hand-off.** A running `jazari` can't replace its own files. `jazari update` stops the background servers, starts the updater (`<InstallDir>\source\scripts\update-jazari.ps1`, in the same terminal window), and exits. The updater waits for that `jazari` process to end.
+1. **Hand-off through a launcher.** A running program can't replace its own files, so the `jazari` command becomes a tiny **launcher** (the .NET global tool) that runs the real Jazari from `<InstallDir>\app\jazari.exe` in the same console, passing arguments through and ignoring Ctrl+C itself (the app handles it). The launcher rarely changes. On `jazari update` the launcher stops the background servers, runs the updater (`<InstallDir>\source\scripts\update-jazari.ps1`) in the same window **and waits for it**, then starts the app again, so the shell prompt never interleaves. If other Jazari windows are open, the updater lists them and asks `Close them and continue? [y/n]`; "n" stops the update with nothing changed. After the sync (step 2) the updater re-runs itself from the freshly synced copy, so updater changes apply in the same update.
 2. **Sync source.** `git fetch` + `reset --hard origin/main` + `clean -fd` in `<InstallDir>\source`. Failure (offline, credentials) → stop with a clear message; nothing else changes.
 3. **Health check and repair,** each printed as one line (`✓ … OK`, `! … repaired`, `ERROR …`):
 
 | Check | Healthy when | Repair |
 |---|---|---|
 | Source | matches `origin/main` | (done in step 2) |
-| Model file | exists and its SHA-256 matches the pinned value in a repo manifest | delete, re-download |
-| llama.cpp | `llama-server.exe --version` runs and reports the pinned release | delete folder, re-download |
+| Model file | exists and its SHA-256 matches the pinned value in a repo manifest | download to a temp file, verify SHA-256, then replace |
+| llama.cpp | `llama-server.exe --version` runs and reports the pinned release | download and unpack to a temp folder, verify `--version`, then replace |
 | Gateway build | built from the current source commit (marker file) | rebuild |
 | `jazari` command | built from the current source commit | rebuild and reinstall the tool |
 | Config | valid JSON, every path exists | rewrite |
-| API key | the gateway accepts `JAZARI_KEY` | handled by jazari's existing first-run key creation |
+| API key | the gateway accepts `JAZARI_KEY` | new behaviour in jazari: a 401 at startup creates and saves a new key, as on first run |
 
    Pinned values (model SHA-256 and URL, llama.cpp release) live in a manifest file in the repo (`scripts/jazari-manifest.json`), so they update with the code.
-4. **Safe swap.** Gateway and CLI are built into a temporary folder and only replace the old ones when the build succeeds. Any failure keeps the previous version and ends with `ERROR`, naming what failed.
+4. **Safe swap, per component.** Every repaired component (model, llama.cpp, gateway, app) is built or downloaded into a temporary location and replaces the old one only after its check passes. A failure keeps that component's previous version, the update continues with the rest, and it ends with `ERROR` naming what failed. `installedCommit` is only updated when everything succeeded.
 5. **Finish.** Records `installedCommit`, prints `Jazari is up to date (<short commit>)`, and starts `jazari` again in the same window.
 
 ### Update notice on launch
@@ -80,5 +80,6 @@ After the welcome header, the interactive session runs `git ls-remote <repoUrl> 
 
 - Exact PowerShell structure of the updater and how it shares code with the installer.
 - Marker-file format, temp-folder naming, the clean-up of old builds.
-- How the updater relaunches `jazari` and how the CLI waits/handles a stale lock.
+- Launcher details: argument pass-through, exit codes, how it finds `<InstallDir>\app` from the config.
+- `GIT_TERMINAL_PROMPT=0` for the launch check, PowerShell host and execution policy for the updater, `--version` parsing, and updating the "run install-jazari.ps1 again" messages to say `jazari update`.
 - Tests: the C# side (command parsing, the hand-off, the launch notice comparison and its silence when offline) is unit-tested; the PowerShell updater gets a manual checklist run.
