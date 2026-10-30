@@ -32,18 +32,19 @@ public static class PromptBuilder
         var required = fixedStart.Sum(m => EstimateTokens(m.Content)) + EstimateTokens(question.Content);
         if (required > limit) throw new InputTooLargeException(required, limit);
 
-        // Long conversations: drop the oldest history (a user/assistant pair at a time) until it fits.
+        // Long conversations: drop the oldest history until it fits. The cut moves in steps of DropStep messages counted from
+        // the start, so it stays put for several turns: cutting one more pair every turn would change the prompt's start
+        // each time, and the model would read the whole conversation again for every answer.
         var history = parts.History.ToList();
         var historyTokens = history.Sum(m => EstimateTokens(m.Content));
-        while (history.Count > 0 && required + historyTokens > limit)
-        {
-            var drop = Math.Min(2, history.Count);
-            historyTokens -= history.Take(drop).Sum(m => EstimateTokens(m.Content));
-            history.RemoveRange(0, drop);
-        }
+        var drop = 0;
+        while (drop < history.Count && required + historyTokens > limit) historyTokens -= EstimateTokens(history[drop++].Content);
+        if (drop > 0) history.RemoveRange(0, Math.Min(history.Count, (drop + DropStep - 1) / DropStep * DropStep));
 
         return [.. fixedStart, .. history, question];
     }
+
+    const int DropStep = 8; // four question/answer pairs
 
     // ponytail: chars/4 heuristic; switch to llama-server /tokenize if limits get tight.
     public static int EstimateTokens(string text) => (text.Length + 3) / 4;

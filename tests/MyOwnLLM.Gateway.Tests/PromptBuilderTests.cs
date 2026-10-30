@@ -37,6 +37,22 @@ public class PromptBuilderTests
     }
 
     [Fact]
+    public void Trimmed_history_keeps_the_same_start_for_the_next_turn()
+    {
+        static List<ChatMessage> Pairs(int n) => Enumerable.Range(0, n).SelectMany(i => new ChatMessage[]
+        {
+            new("user", $"q{i} " + new string('u', 8000)),
+            new("assistant", $"a{i} " + new string('a', 8000)),
+        }).ToList();
+
+        var turn9 = PromptBuilder.Build(new PromptParts(null, null, Pairs(9), "Q"), 16384, 512);
+        var turn10 = PromptBuilder.Build(new PromptParts(null, null, Pairs(10), "Q"), 16384, 512);
+
+        Assert.StartsWith("q8 ", turn9[1].Content);
+        Assert.StartsWith("q8 ", turn10[1].Content); // same prefix, so the prompt cache still holds
+    }
+
+    [Fact]
     public void Build_drops_oldest_history_to_fit()
     {
         var history = Enumerable.Range(0, 10).SelectMany(i => new ChatMessage[]
