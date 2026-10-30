@@ -45,7 +45,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
 
     public Task HandleAsync(string input, CancellationToken ct)
     {
-        input = input.Trim();
+        input = input.Trim().TrimStart('﻿'); // PowerShell pipes start with a byte-order mark
         if (input.Length == 0) return Task.CompletedTask;
         if (!input.StartsWith('/')) return AskAsync(input, ct);
 

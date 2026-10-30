@@ -8,6 +8,7 @@ Needs Windows and the .NET 10 SDK.
    ```powershell
    .\scripts\install-jazari.ps1
    ```
+   To put Jazari's files somewhere else (any drive or folder, spaces are fine): `.\scripts\install-jazari.ps1 -InstallDir D:\Tools\Jazari`. The command then lives in `<InstallDir>in`, which is added to your PATH, and later installs remember the folder.
    It downloads llama.cpp and the Granite model if they're missing, builds the gateway into `%LOCALAPPDATA%\Jazari\gateway`, installs the `jazari` command, and writes `%APPDATA%\Jazari\config.json` with this machine's paths. Nothing needs editing on a new PC.
 2. **Run** `jazari` in any folder. The first run creates an API key through the gateway and saves it as your `JAZARI_KEY` user variable. Every run starts llama-server and the gateway in the background if they aren't running (about 10–25 s while the model loads); after that it opens instantly.
 3. **Stop** the background servers to free their RAM: `jazari stop`. Their logs are in `%LOCALAPPDATA%\MyOwnLLM\logs`.

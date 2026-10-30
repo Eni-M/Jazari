@@ -13,6 +13,12 @@ Needs Windows and the .NET 10 SDK. In your clone of this repo:
 jazari                         # in any folder, from any terminal
 ```
 
+Install somewhere else with `.\scripts\install-jazari.ps1 -InstallDir D:\Tools\Jazari`.
+
+```powershell
+jazari stop                    # shut the background servers down
+```
+
 The first `jazari` creates your API key (saved as `JAZARI_KEY`) and starts the model server and gateway in the background. `jazari stop` shuts them down.
 
 Full setup, commands and measured performance: [docs/phase1-runbook.md](docs/phase1-runbook.md).

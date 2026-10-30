@@ -177,6 +177,16 @@ public class SessionTests
     }
 
     [Fact]
+    public async Task Byte_order_mark_from_piped_input_is_ignored()
+    {
+        await _session.HandleAsync("﻿hello", CancellationToken.None);
+        await _session.HandleAsync("﻿/exit", CancellationToken.None);
+
+        Assert.Equal("hello", _gateway.Asked.Single().Question);
+        Assert.True(_session.ExitRequested);
+    }
+
+    [Fact]
     public async Task Exit_sets_flag()
     {
         await _session.HandleAsync("/exit", CancellationToken.None);
