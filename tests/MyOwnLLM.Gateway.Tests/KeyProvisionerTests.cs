@@ -46,6 +46,17 @@ public class KeyProvisionerTests
     }
 
     [Fact]
+    public async Task Rejected_key_is_replaced()
+    {
+        _runner.Result = (_, _) => (0, "mollm_fresh\n");
+
+        var key = await Provisioner.EnsureKeyAsync("mollm_old", Config, CancellationToken.None, rejected: true);
+
+        Assert.Equal("mollm_fresh", key);
+        Assert.Equal(["mollm_fresh"], _saved);
+    }
+
+    [Fact]
     public async Task No_config_means_no_key() => Assert.Null(await Provisioner.EnsureKeyAsync(null, null, CancellationToken.None));
 
     [Theory]

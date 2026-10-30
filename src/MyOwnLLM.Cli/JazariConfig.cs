@@ -6,7 +6,9 @@ namespace MyOwnLLM.Cli;
 /// Where this machine's Jazari pieces live, written by scripts/install-jazari.ps1 so nothing is hard-coded:
 /// the repo folder, the published gateway, llama-server and the model file.
 /// </summary>
-public sealed record JazariConfig(string Home, string GatewayExe, string LlamaServer, string Model)
+public sealed record JazariConfig(
+    string Home, string GatewayExe, string LlamaServer, string Model,
+    string? RepoUrl = null, string? InstallDir = null, string? SourceDir = null, string? InstalledCommit = null)
 {
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "config.json");
 

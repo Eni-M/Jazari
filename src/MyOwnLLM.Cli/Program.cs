@@ -20,7 +20,8 @@ var runner = new ProcessRunner();
 var settings = Settings.FromEnvironment(Environment.GetEnvironmentVariable);
 
 // First run: create a key through the gateway and save it as JAZARI_KEY, so the user never has to.
-var key = await new KeyProvisioner(runner, KeyProvisioner.SaveToEnvironment).EnsureKeyAsync(settings.Key, config, CancellationToken.None);
+var provisioner = new KeyProvisioner(runner, KeyProvisioner.SaveToEnvironment);
+var key = await provisioner.EnsureKeyAsync(settings.Key, config, CancellationToken.None);
 
 // The interactive session opens without a key and explains the setup; one-off commands can't do anything without one.
 if (key is null && cli.Command != "session")
@@ -48,7 +49,13 @@ async Task<bool> LlamaReady(CancellationToken ct)
 }
 var startupUi = new Ui(Console.Out, theme, width);
 if (cli.Command == "session") startupUi.TakeOverScreen();
-await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay).EnsureRunningAsync(config, CancellationToken.None);
+var serverState = await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay).EnsureRunningAsync(config, CancellationToken.None);
+// A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run.
+if (serverState == ConnectionState.KeyRejected && await provisioner.EnsureKeyAsync(key, config, CancellationToken.None, rejected: true) is { } freshKey)
+{
+    key = freshKey;
+    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+}
 
 if (cli.Command == "session")
 {

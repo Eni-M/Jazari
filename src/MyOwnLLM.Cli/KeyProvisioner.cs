@@ -5,9 +5,10 @@ namespace MyOwnLLM.Cli;
 /// </summary>
 public sealed class KeyProvisioner(IProcessRunner runner, Action<string> saveKey)
 {
-    public async Task<string?> EnsureKeyAsync(string? currentKey, JazariConfig? config, CancellationToken ct)
+    /// <param name="rejected">The gateway refused <paramref name="currentKey"/> (401): replace it with a new one.</param>
+    public async Task<string?> EnsureKeyAsync(string? currentKey, JazariConfig? config, CancellationToken ct, bool rejected = false)
     {
-        if (currentKey is not null) return currentKey;
+        if (currentKey is not null && !rejected) return currentKey;
         if (config is null) return null;
 
         var (exitCode, output) = await runner.RunAsync(config.GatewayExe, ["add-key"], ct);
