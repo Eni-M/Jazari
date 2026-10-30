@@ -12,6 +12,10 @@
 param([string]$InstallDir)
 
 $ErrorActionPreference = "Stop"
+if (Get-Process "jazari" -ErrorAction SilentlyContinue) {
+    Write-Host "Close every open jazari session first (a running jazari locks its own files), then run this again."
+    exit 1
+}
 $root = (Resolve-Path "$PSScriptRoot\..").Path
 $configPath = Join-Path $env:APPDATA "Jazari\config.json"
 $defaultDir = Join-Path $env:LOCALAPPDATA "Jazari"
