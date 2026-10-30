@@ -16,34 +16,26 @@ public class WelcomeTests
     }
 
     [Fact]
-    public void Welcome_matches_spec_layout()
+    public void Welcome_is_a_compact_header()
     {
         Assert.Equal(
         [
             "J A Z A R I  0.2.0",
+            "Granite 4.1 3B · local · Available",
+            "~/EduCore",
             "",
-            "Intelligence, precisely applied.",
-            "",
-            "Model       Granite 4.1 3B · local",
-            "Directory   ~/EduCore",
-            "Connection  Available",
-            "Session     New session",
-            "",
-            "/help       Available commands",
-            "/status     Where are we left at?",
-            "/model      Show the model",
-            "/clear      Clear conversation",
+            "/help for commands · /status for where we left off",
         ], Render(ConnectionState.Available));
     }
 
     [Theory]
-    [InlineData(ConnectionState.GatewayNotRunning, "Connection  Gateway not running")]
-    [InlineData(ConnectionState.KeyRejected, "Connection  Key rejected")]
-    [InlineData(ConnectionState.NoKey, "Connection  Key not set")]
+    [InlineData(ConnectionState.GatewayNotRunning, "Granite 4.1 3B · local · Gateway not running")]
+    [InlineData(ConnectionState.KeyRejected, "Granite 4.1 3B · local · Key rejected")]
+    [InlineData(ConnectionState.NoKey, "Granite 4.1 3B · local · Key not set")]
     public void Welcome_shows_connection_problems(ConnectionState state, string line) => Assert.Contains(line, Render(state));
 
     [Fact]
-    public void Directory_outside_home_is_shown_as_is() => Assert.Contains(@"Directory   D:/work/api", Render(ConnectionState.Available, directory: @"D:\work\api"));
+    public void Directory_outside_home_is_shown_as_is() => Assert.Contains(@"D:/work/api", Render(ConnectionState.Available, directory: @"D:\work\api"));
 
     [Fact]
     public void Welcome_fits_40_columns() =>

@@ -23,9 +23,12 @@ public sealed class PromptLineReader : ILineReader
 {
     static readonly string[] Commands = ["/help", "/status", "/model", "/clear", "/retry", "/details", "/exit"];
     readonly Prompt _prompt;
+    readonly Ui _ui;
 
-    public PromptLineReader(Theme theme)
+    public PromptLineReader(Ui ui)
     {
+        _ui = ui;
+        var theme = ui.Theme;
         var historyFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "history");
         Directory.CreateDirectory(Path.GetDirectoryName(historyFile)!);
         var keys = new KeyBindings(newLine: new KeyPressPattern[]
@@ -37,9 +40,21 @@ public sealed class PromptLineReader : ILineReader
 
     public async Task<(bool Ok, string? Text)> ReadAsync()
     {
+        _ui.Blank();
+        _ui.Divider();
         var result = await _prompt.ReadLineAsync();
+        if (result.IsSuccess && FitsOneRow(result.Text))
+        {
+            // Turn the line just typed into the highlighted "› question" row. Only for a single line that fits the
+            // terminal, so we know it took exactly one row; anything else stays as typed (never shown twice either way).
+            _ui.Output.Write("\e[1A\r\e[2K");
+            _ui.UserMessage(result.Text);
+        }
         return (result.IsSuccess, result.Text);
     }
+
+    bool FitsOneRow(string text) =>
+        text.Length > 0 && !text.Contains('\n') && text.Length + 2 < _ui.Width && text.All(c => c < 'ᄀ' && c != '\t');
 
     sealed class Callbacks : PromptCallbacks
     {

@@ -119,4 +119,24 @@ public class UiTests
 
         Assert.DoesNotContain('\e', output.ToString());
     }
+
+    [Fact]
+    public void User_message_is_a_prompt_row()
+    {
+        var (ui, output) = Plain();
+
+        ui.UserMessage("how do I add DI?\nand scopes?");
+
+        Assert.Equal(["› how do I add DI?", "  and scopes?"], Lines(output));
+    }
+
+    [Fact]
+    public void User_message_has_raised_background_in_color()
+    {
+        var output = new StringWriter();
+        new Ui(output, new Theme(ColorMode.TrueColor, unicode: true), 40).UserMessage("hi");
+
+        Assert.Contains("\e[48;2;28;28;28m", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("hi" + new string(' ', 36), output.ToString(), StringComparison.Ordinal);
+    }
 }

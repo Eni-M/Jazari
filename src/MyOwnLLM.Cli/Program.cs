@@ -53,8 +53,11 @@ if (cli.Command == "session")
 {
     var ui = startupUi;
     // PrettyPrompt needs a real console; pipes and some IDE terminals get plain line input instead.
-    ILineReader reader = Console.IsInputRedirected || Console.IsOutputRedirected ? new TextLineReader(Console.In) : new PromptLineReader(theme);
-    await InputLoop.RunAsync(new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory), ui, version, directory, reader,
+    var piped = Console.IsInputRedirected || Console.IsOutputRedirected;
+    ILineReader reader = piped ? new TextLineReader(Console.In) : new PromptLineReader(ui);
+    // In a real terminal the typed line becomes the "› question" row; piped input isn't echoed, so Jazari prints it.
+    var interactive = new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory) { EchoQuestions = piped };
+    await InputLoop.RunAsync(interactive, ui, version, directory, reader,
         hasKey: key is not null);
     return 0;
 }

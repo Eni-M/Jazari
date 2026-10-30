@@ -41,5 +41,13 @@ public sealed class Theme(ColorMode mode, bool unicode)
         _ => text,
     };
 
+    /// <summary>A full-width band on the raised surface (#1C1C1C) for the user's turn; plain text below 256 colors.</summary>
+    public string Raised(string text, int width) => mode switch
+    {
+        ColorMode.TrueColor => "\e[48;2;28;28;28m" + Paint(text.PadRight(width), Tone.Primary),
+        ColorMode.Ansi256 => "\e[48;5;234m" + Paint(text.PadRight(width), Tone.Primary),
+        _ => text,
+    };
+
     public char Glyph(char c) => unicode || !Ascii.TryGetValue(c, out var ascii) ? c : ascii;
 }

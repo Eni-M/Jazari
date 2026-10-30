@@ -22,6 +22,11 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
 
     public IReadOnlyList<ChatTurn> History => _history;
     public bool ExitRequested { get; private set; }
+    /// <summary>
+    /// Print the question as a highlighted "› question" row. Off in the interactive session, where the input line
+    /// itself becomes that row, so the question never appears twice.
+    /// </summary>
+    public bool EchoQuestions { get; init; } = true;
     /// <summary>Whether the most recent question or /status ended in an error (one-off commands exit 1).</summary>
     public bool LastFailed { get; private set; }
     bool Live => ui.Theme.Mode != ColorMode.None;
@@ -67,14 +72,11 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     {
         _lastQuestion = question;
         LastFailed = false;
-        ui.Label("you");
-        ui.Line(question);
+        if (EchoQuestions) ui.UserMessage(question);
         ui.Blank();
-        ui.Line(Ui.Name);
 
-        var thinking = Live;
-        if (thinking) ui.Output.Write(ui.Theme.Paint("THINKING", Tone.Muted));
-        void StopThinking() { if (thinking) { ui.Output.Write("\r\e[2K"); thinking = false; } }
+        var thinking = ThinkingIndicator.Start(ui.Output, ui.Theme);
+        void StopThinking() => thinking.StopAsync().GetAwaiter().GetResult();
 
         var renderer = newRenderer();
         var answer = new StringBuilder();
@@ -129,16 +131,18 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     async Task StatusAsync(CancellationToken ct)
     {
         LastFailed = false;
+        var thinking = ThinkingIndicator.Start(ui.Output, ui.Theme);
         try
         {
             var (id, summary) = await gateway.StatusAsync(project, ct);
+            await thinking.StopAsync();
             var renderer = newRenderer();
             renderer.Write(summary + "\n");
             renderer.Complete();
             ui.Metadata(id);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { ui.Metadata("stopped"); }
-        catch (GatewayException e) { Fail(e); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { await thinking.StopAsync(); ui.Metadata("stopped"); }
+        catch (GatewayException e) { await thinking.StopAsync(); Fail(e); }
     }
 
     async Task ModelAsync(CancellationToken ct)

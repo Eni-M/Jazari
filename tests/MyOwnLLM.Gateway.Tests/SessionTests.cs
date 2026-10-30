@@ -47,8 +47,8 @@ public class SessionTests
     {
         await _session.HandleAsync("hi there", CancellationToken.None);
 
-        Assert.Contains("YOU", Text);
-        Assert.Contains(Ui.Name, Text);
+        Assert.Contains("› hi there", Text);
+        Assert.DoesNotContain(Ui.Name, Text);
         Assert.Contains("Hello", Text);
         Assert.Contains("ix-3", Text);
         Assert.Equal([new ChatTurn("user", "hi there"), new ChatTurn("assistant", "Hello")], _session.History);
@@ -184,6 +184,22 @@ public class SessionTests
 
         Assert.Equal("hello", _gateway.Asked.Single().Question);
         Assert.True(_session.ExitRequested);
+    }
+
+    [Theory]
+    [InlineData("/status")]
+    [InlineData("a question")]
+    public async Task Thinking_shows_while_waiting_in_color_mode(string input)
+    {
+        var output = new StringWriter();
+        var theme = new Theme(ColorMode.TrueColor, unicode: true);
+        var session = new Session(_gateway, new Ui(output, theme, 80), () => new MarkdownStream(output, theme, 80), @"C:\Repo");
+
+        await session.HandleAsync(input, CancellationToken.None);
+
+        var text = output.ToString();
+        Assert.Contains("THINKING", text);
+        Assert.True(text.IndexOf("THINKING", StringComparison.Ordinal) < text.LastIndexOf("\r\e[2K", StringComparison.Ordinal), "indicator must be cleared after it shows");
     }
 
     [Fact]

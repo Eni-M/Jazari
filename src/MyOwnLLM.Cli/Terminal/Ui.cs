@@ -55,6 +55,18 @@ public sealed class Ui(TextWriter output, Theme theme, int width)
         if (next is not null) Line(next, Tone.Muted);
     }
 
+    /// <summary>The user's turn: "› question" on the raised surface, full width, continuation lines indented under it.</summary>
+    public void UserMessage(string text)
+    {
+        var first = true;
+        foreach (var paragraph in ConsoleText.Sanitize(text).Split('\n'))
+            foreach (var line in Wrap(paragraph, Width - 2))
+            {
+                output.WriteLine(theme.Raised((first ? $"{theme.Glyph('›')} " : "  ") + line, Width));
+                first = false;
+            }
+    }
+
     public void Metadata(string text) => output.WriteLine(theme.Paint(ConsoleText.Sanitize(text), Tone.Muted));
 
     public void Divider() => output.WriteLine(theme.Paint(new string(theme.Glyph('─'), Math.Min(Width, 60)), Tone.Line));

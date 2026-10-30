@@ -106,8 +106,22 @@ public class InputLoopTests
 
         await InputLoop.RunAsync(session, ui, "0.2.0", @"C:\Repo", new ScriptedReader((true, "/help")), hasKey: false);
 
-        Assert.Contains("Connection  Key not set", output.ToString());
+        Assert.Contains("Key not set", output.ToString());
         Assert.Contains("/details", output.ToString());
         Assert.Equal(0, infoCalls);
+    }
+
+    [Fact]
+    public async Task Interactive_session_does_not_repeat_the_question()
+    {
+        var output = new StringWriter();
+        var theme = new Theme(ColorMode.None, unicode: true);
+        var ui = new Ui(output, theme, 80);
+        var session = new Session(new FakeGateway(), ui, () => new MarkdownStream(output, theme, 80), @"C:\Repo") { EchoQuestions = false };
+
+        await InputLoop.RunAsync(session, ui, "0.2.0", @"C:\Repo", new ScriptedReader((true, "unique question text")));
+
+        Assert.DoesNotContain("unique question text", output.ToString());
+        Assert.Contains("Hello", output.ToString());
     }
 }
