@@ -22,6 +22,8 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
 
     public IReadOnlyList<ChatTurn> History => _history;
     public bool ExitRequested { get; private set; }
+    /// <summary>Whether the most recent question or /status ended in an error (one-off commands exit 1).</summary>
+    public bool LastFailed { get; private set; }
     bool Live => ui.Theme.Mode != ColorMode.None;
 
     public async Task<ConnectionState> ConnectAsync(CancellationToken ct)
@@ -63,6 +65,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     public async Task AskAsync(string question, CancellationToken ct)
     {
         _lastQuestion = question;
+        LastFailed = false;
         ui.Label("you");
         ui.Line(question);
         ui.Blank();
@@ -118,6 +121,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
 
     async Task StatusAsync(CancellationToken ct)
     {
+        LastFailed = false;
         try
         {
             var (id, summary) = await gateway.StatusAsync(project, ct);
@@ -152,6 +156,7 @@ public sealed class Session(IGatewayClient gateway, Ui ui, Func<MarkdownStream> 
     void Fail(GatewayException e)
     {
         _lastError = e;
+        LastFailed = true;
         var next = e.Status switch
         {
             null => "Is the gateway running? See docs/phase1-runbook.md, then /retry.",

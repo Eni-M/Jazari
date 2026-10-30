@@ -165,6 +165,18 @@ public class SessionTests
     }
 
     [Fact]
+    public async Task LastFailed_tracks_the_latest_request()
+    {
+        _gateway.Chat = (_, _, _) => Throwing(new GatewayException("down", null, null));
+        await _session.HandleAsync("one", CancellationToken.None);
+        Assert.True(_session.LastFailed);
+
+        _gateway.Chat = (_, _, _) => FakeGateway.Chunks("ok");
+        await _session.HandleAsync("two", CancellationToken.None);
+        Assert.False(_session.LastFailed);
+    }
+
+    [Fact]
     public async Task Exit_sets_flag()
     {
         await _session.HandleAsync("/exit", CancellationToken.None);
