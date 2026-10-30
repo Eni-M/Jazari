@@ -1,0 +1,6 @@
+# Local model files and llama.cpp binaries (multi-GB, re-downloadable)
+spike/models/
+spike/bin/
+*.gguf
+spike/server.log
+__pycache__/
