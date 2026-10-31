@@ -71,7 +71,7 @@ Plan and status (update as each step finishes):
 
 - ~~Which PC hosts Jazari~~ Answered: every PC, each tuned to itself. Eni-M allowed the downloads and installing here (install from Eni-M's own terminal, see Traps).
 
-- Merge `jazari-optimize` into `main` (see "Next")
+- ~~Merge `jazari-optimize` into `main`~~ Done 2026-10-31 (fast-forward to `d5823a1`). Next: Eni-M runs `jazari update` on the T480 from their own terminal; its first start runs `jazari tune`
 - Paid RAM upgrade (see "The hardware answer")
 
 ## Rules that still apply (from the design doc, `docs/superpowers/specs/2026-10-30-myownllm-design.md`)
