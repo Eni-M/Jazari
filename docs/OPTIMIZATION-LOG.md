@@ -212,3 +212,10 @@ All 32 reported findings fixed; 335 tests pass (27 new, in ReviewFixTests and al
 - Gateway: cut-off or invalid-JSON answers aren't cached and report finish_reason "length"; stream errors are errors; a stopped note update reschedules itself and its prompt has a size budget; a full queue cancels nothing; keys.json is swapped in atomically and recovers from damage.
 - Launcher and tuning: only this install's server processes are stopped or watched; a port conflict is reported instead of blamed on tuning; the fallback is for one start only and isn't saved; a failed device listing keeps the saved tuning; the fingerprint now includes the ggml DLLs, so **every PC re-tunes once after this update** (a few minutes on the T480).
 - Scripts: gateway and app are swapped together or not at all; the launcher runs an updater copy kept in the install folder, replaced only by one that parses; PATH stays REG_EXPAND_SZ with its %VAR% entries; -InstallDir with a trailing backslash works.
+
+## Install and update tested end to end (2026-10-31)
+A full install into a temporary folder on this PC, then `jazari update` the way the launcher runs it: clone, model check, llama.cpp download and check, both builds, config, the `jazari` command and PATH all worked; the update exited 0 and `jazari --help` ran from the installed command. Everything was removed afterwards.
+
+- Found and fixed: the installer called Path.TrimEndingDirectorySeparator, which Windows PowerShell 5.1's .NET Framework doesn't have, so **the installer from the review fixes failed on every PC** before doing anything. It now trims by hand.
+- Hardened: the installer's git calls and the updater's download are judged by exit code, so git and curl progress on stderr can't fail a run whose output is redirected to a log (a console run, which is what the launcher does, was never affected).
+- `.gitattributes` now checks every file out with CRLF, whatever core.autocrlf says.

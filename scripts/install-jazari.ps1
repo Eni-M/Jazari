@@ -32,7 +32,9 @@ if (-not $InstallDir) { $InstallDir = $previous.installDir }
 if (-not $InstallDir) { $InstallDir = $defaultDir }
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 # No trailing backslash (tab completion adds one): the "$InstallDir\" checks below and the default-folder test need it bare.
-$InstallDir = [IO.Path]::TrimEndingDirectorySeparator((Resolve-Path $InstallDir).Path)
+# Trimmed by hand: Windows PowerShell's .NET Framework has no Path.TrimEndingDirectorySeparator. A drive root keeps its "\".
+$InstallDir = (Resolve-Path $InstallDir).Path
+if ($InstallDir.Length -gt 3) { $InstallDir = $InstallDir.TrimEnd("\") }
 $customDir = $InstallDir -ne $defaultDir
 Write-Host "Installing Jazari into $InstallDir"
 
@@ -45,7 +47,9 @@ if ($servers.Count -gt 0) {
     $servers | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 }
 
-# 1. the private source copy
+# 1. the private source copy. Git writes progress to stderr, which "Stop" would turn into an error whenever the
+# installer's output is redirected; each git call is judged by its exit code instead.
+$ErrorActionPreference = "Continue"
 $repoUrl = git -C $root remote get-url origin
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $source = Join-Path $InstallDir "source"
@@ -58,6 +62,7 @@ if (Test-Path (Join-Path $source ".git")) {
     git clone --branch main $repoUrl $source
 }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$ErrorActionPreference = "Stop"
 
 # 2. what this clone already has; the updater verifies both and downloads whatever is still missing
 $manifest = Get-Content -Raw (Join-Path $source "scripts\jazari-manifest.json") | ConvertFrom-Json

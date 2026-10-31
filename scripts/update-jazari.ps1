@@ -30,6 +30,7 @@ function Invoke-Git {
 }
 
 function Download($url, $target) {
+    $ErrorActionPreference = "Continue" # the progress bar is on stderr; failure is curl's exit code
     Write-Host "Downloading $url"
     curl.exe -L --fail --progress-bar -o $target $url
     if ($LASTEXITCODE -ne 0) { throw "download failed: $url" }
