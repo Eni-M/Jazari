@@ -53,7 +53,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     const int EditAnswerTokens = 1000;
     string? _context;
     string? _contextLabel;
-    (string Path, string Text)? _undo;
+    (string Path, byte[] Before, byte[] Written)? _undo;
     /// <summary>Runs git in the project and returns its exit code and output. Replaced in tests.</summary>
     public Func<string[], CancellationToken, Task<(int ExitCode, string Output)>> Git { get; init; } = RunGitAsync;
     bool Live => ui.Theme.Mode != ColorMode.None;
@@ -88,11 +88,11 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/model": return ModelAsync(ct);
             case "/copy": Copy(input.Split(' ', 2) is [_, var number] ? number.Trim() : null); break;
             case "/read": Read(Argument(input)); break;
-            case "/diff": return DiffAsync(Argument(input), ct);
+            case "/diff": return Stoppable(() => DiffAsync(Argument(input), ct), ct);
             case "/context": ShowContext(); break;
-            case "/commit": return CommitAsync(ct);
+            case "/commit": return Stoppable(() => CommitAsync(ct), ct);
             case "/review": return new ProjectReview(gateway, ui, ReviewDir).RunAsync(Resolve(Argument(input) ?? project), ct);
-            case "/edit": return EditAsync(Argument(input), ct);
+            case "/edit": return Stoppable(() => EditAsync(Argument(input), ct), ct);
             case "/undo": Undo(); break;
             case "/clear": _history.Clear(); _context = _contextLabel = null; ui.Metadata("Conversation cleared."); break;
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
@@ -174,18 +174,39 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     async Task StatusAsync(CancellationToken ct)
     {
         LastFailed = false;
+        if (await WithThinking(() => gateway.StatusAsync(project, ct), ct) is not (true, var (id, summary))) return;
+        var renderer = newRenderer();
+        renderer.Write(summary + "\n");
+        renderer.Complete();
+        ui.Metadata(id);
+    }
+
+    /// <summary>
+    /// Waits on the gateway behind the thinking indicator, which is cleared whatever happens: an indicator left running
+    /// would keep redrawing over the prompt. Stopping and gateway errors are reported here; Ok is false after them.
+    /// </summary>
+    async Task<(bool Ok, T Value)> WithThinking<T>(Func<Task<T>> call, CancellationToken ct)
+    {
         var thinking = ThinkingIndicator.Start(ui.Output, ui.Theme);
-        try
+        Exception? error = null;
+        T value = default!;
+        try { value = await call(); }
+        catch (Exception e) { error = e; }
+        finally { await thinking.StopAsync(); }
+        switch (error)
         {
-            var (id, summary) = await gateway.StatusAsync(project, ct);
-            await thinking.StopAsync();
-            var renderer = newRenderer();
-            renderer.Write(summary + "\n");
-            renderer.Complete();
-            ui.Metadata(id);
+            case null: return (true, value);
+            case OperationCanceledException when ct.IsCancellationRequested: ui.Metadata("stopped"); return (false, value);
+            case GatewayException e: Fail(e); return (false, value);
+            default: System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error); return (false, value);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { await thinking.StopAsync(); ui.Metadata("stopped"); }
-        catch (GatewayException e) { await thinking.StopAsync(); Fail(e); }
+    }
+
+    /// <summary>Ctrl+C while git runs is a stop like any other, not the end of the session.</summary>
+    async Task Stoppable(Func<Task> command, CancellationToken ct)
+    {
+        try { await command(); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { ui.Metadata("stopped"); }
     }
 
     async Task ModelAsync(CancellationToken ct)
@@ -231,21 +252,55 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (text.Length > limit) ui.Metadata($"Only the first {MaxReadTokens} tokens or so of the piped input were used.");
     }
 
-    /// <summary>git in the project with nothing from the repo's own config that could run a program: no external diff
-    /// tools, no text conversion filters, no file-system monitor. The repo may be a clone of someone else's code.</summary>
-    string[] SafeGit(params string[] args) => ["-C", project, "-c", "core.fsmonitor=false", .. args];
+    /// <summary>
+    /// git in the project with nothing from the repo's own config that could run a program: no file-system monitor, no
+    /// signature checker, and every clean/smudge/process filter the repo names switched off (an empty command is no
+    /// filter); external diff tools and text conversion are off in the diff calls themselves. The repo may be a clone of
+    /// someone else's code. Reading the config to find the filters runs nothing.
+    /// </summary>
+    async Task<(int ExitCode, string Output)> SafeGitAsync(string[] args, CancellationToken ct)
+    {
+        var (found, filters) = await Git(["-C", project, "config", "--name-only", "--get-regexp", @"^filter\..*\.(clean|smudge|process)$"], ct);
+        var off = found == 0 ? filters.Split('\n').Select(k => k.Trim()).Where(k => k.Length > 0).SelectMany(k => new[] { "-c", k + "=" }) : [];
+        return await Git(["-C", project, "-c", "core.fsmonitor=false", "-c", "log.showSignature=false", .. off, .. args], ct);
+    }
 
     static async Task<(int ExitCode, string Output)> RunGitAsync(string[] args, CancellationToken ct) =>
         UpdateCheck.FindGit(Environment.GetEnvironmentVariable("PATH")) is { } git
             ? await new ProcessRunner().RunAsync(git, args, ct)
             : (-1, "git isn't installed");
 
-    async Task<string?> DiffTextAsync(string[] range, CancellationToken ct)
+    async Task<string?> DiffTextAsync(string[] range, CancellationToken ct, bool quiet = false)
     {
-        var (exit, output) = await Git(SafeGit(["diff", "--no-ext-diff", "--no-textconv", "--no-color", .. range]), ct);
-        if (exit == 0) return output;
-        ui.Metadata(exit == -1 ? "git isn't installed, or isn't on PATH." : "This folder isn't a git repository, or git couldn't read it.");
-        return null;
+        var (exit, output) = await SafeGitAsync(["diff", "--no-ext-diff", "--no-textconv", "--no-color", .. range], ct);
+        if (exit != 0)
+        {
+            ui.Metadata(exit == -1 ? "git isn't installed, or isn't on PATH." : "This folder isn't a git repository, or git couldn't read it.");
+            return null;
+        }
+        var (diff, hidden) = WithoutSecrets(output);
+        if (hidden.Count > 0 && !quiet) ui.Metadata($"Left out the changes to {string.Join(", ", hidden)}: files like these hold keys and passwords.");
+        return diff;
+    }
+
+    /// <summary>The diff without the files /read would never send either (.env, *.pem, appsettings.Production.json).</summary>
+    public static (string Diff, List<string> Hidden) WithoutSecrets(string diff)
+    {
+        var kept = new List<string>();
+        var hidden = new List<string>();
+        var skip = false;
+        foreach (var line in diff.Split('\n'))
+        {
+            if (line.StartsWith("diff --git "))
+            {
+                // Both sides: a renamed .env is still a .env.
+                var secret = line.Split(' ').Skip(2).Select(t => t.Trim('"')).FirstOrDefault(ProjectFiles.IsSecret);
+                skip = secret is not null;
+                if (skip) hidden.Add(Path.GetFileName(secret!));
+            }
+            if (!skip) kept.Add(line);
+        }
+        return (string.Join('\n', kept), hidden);
     }
 
     /// <summary>/diff: the uncommitted changes (or the changes since a ref) go with the next questions, like /read.</summary>
@@ -280,13 +335,13 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (await DiffTextAsync(["--cached"], ct) is not { } staged) return;
         if (staged.Trim().Length == 0) { ui.Metadata("Nothing is staged. git add the changes first."); return; }
         // Only the style is taken from the history, never its subjects: shown earlier subjects, a 3B model describes those.
-        var (_, log) = await Git(SafeGit("log", "-10", "--format=%s"), ct);
+        var (_, log) = await SafeGitAsync(["log", "-10", "--format=%s"], ct);
         var subjects = log.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var prefixed = subjects.Length > 0 && subjects.Count(s => ConventionalPrefix().IsMatch(s)) * 2 > subjects.Length;
         // Measured on Granite 4.1 3B with a 4,400-token diff: given the whole diff as context, it invented unrelated changes;
         // given the file summary and the diff with one line around each change, inside the question, it described them right.
-        var (_, stat) = await Git(SafeGit("diff", "--cached", "--stat", "--no-color"), ct);
-        var compact = await DiffTextAsync(["--cached", "-U1"], ct) ?? staged;
+        var (_, stat) = await SafeGitAsync(["diff", "--cached", "--stat", "--no-color"], ct);
+        var compact = await DiffTextAsync(["--cached", "-U1"], ct, quiet: true) ?? staged;
         var changes = $"{stat.TrimEnd()}\n\n{compact}";
         const int limit = 8000; // characters, about 2,000 tokens
         var question = $"--- staged changes ---\n{(changes.Length > limit ? changes[..limit] : changes)}\n\n" +
@@ -294,13 +349,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             $"at most 72 characters{(prefixed ? ", starting with a type like feat:, fix:, perf:, docs: or chore:" : "")}. " +
             "body: why, only when the subject can't say it; empty otherwise.";
 
-        var thinking = ThinkingIndicator.Start(ui.Output, ui.Theme);
-        string reply;
-        try { reply = await gateway.CompleteAsync(question, "", CommitSchema, 250, ct); }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { await thinking.StopAsync(); ui.Metadata("stopped"); return; }
-        catch (GatewayException e) { await thinking.StopAsync(); Fail(e); return; }
-        await thinking.StopAsync();
-
+        if (await WithThinking(() => gateway.CompleteAsync(question, "", CommitSchema, 250, ct), ct) is not (true, var reply)) return;
         if (CommitMessage(reply) is not { } message) { ui.Metadata("The model's answer couldn't be read. Try /commit again."); return; }
         ui.Line(message, Tone.Primary);
         try { SetClipboard(message); ui.Metadata("Copied. Paste it into git commit, or edit it first."); }
@@ -326,45 +375,66 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     {
         if (argument?.Split(' ', 2) is not [var file, var request]) { ui.Metadata("Usage: /edit <file> <what to change>"); return; }
         var path = Resolve(file);
-        if (!path.StartsWith(Path.TrimEndingDirectorySeparator(Path.GetFullPath(project)) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-        {
-            ui.Metadata("Jazari only edits files inside this project.");
-            return;
-        }
+        if (!InsideProject(path)) { ui.Metadata("Jazari only edits files inside this project."); return; }
         if (!File.Exists(path)) { ui.Metadata($"Can't find {path}."); return; }
 
-        var original = File.ReadAllText(path);
+        if (FileEdit.Read(path) is not { } stored) { ui.Metadata("That file isn't UTF-8 or UTF-16 text, so Jazari can't edit it without damaging it."); return; }
+        var original = stored.Text;
         if (original.Length / 4 > MaxReadTokens) { ui.Metadata("That file is too big to edit in one go."); return; }
 
-        var thinking = ThinkingIndicator.Start(ui.Output, ui.Theme);
-        string reply;
-        try { reply = await gateway.CompleteAsync(FileEdit.Instructions + request, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct); }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { await thinking.StopAsync(); ui.Metadata("stopped"); return; }
-        catch (GatewayException e) { await thinking.StopAsync(); Fail(e); return; }
-        await thinking.StopAsync();
+        var asked = FileEdit.Instructions + request;
+        if (await WithThinking(() => gateway.CompleteAsync(asked, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct), ct) is not (true, var reply)) return;
 
         if (FileEdit.Parse(reply) is not { } edits) { ui.Metadata("The model's answer couldn't be read. Nothing changed."); return; }
-        var (text, problem) = FileEdit.Apply(original, edits);
+        var applied = new List<Replacement>();
+        var (text, problem) = FileEdit.Apply(original, edits, applied);
         if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return; }
 
-        foreach (var edit in edits)
+        foreach (var edit in applied) // what will be written, not what the model sent
         {
             foreach (var line in edit.Search.Split('\n')) ui.Line("- " + ConsoleText.Sanitize(line.TrimEnd('\r')), Tone.Muted);
             foreach (var line in edit.Replace.Split('\n')) ui.Line("+ " + ConsoleText.Sanitize(line.TrimEnd('\r')), Tone.Primary);
             ui.Blank();
         }
         if (!Confirm($"Apply this change to {file}?")) { ui.Metadata("Nothing changed."); return; }
-        FileEdit.Write(path, text);
-        _undo = (path, original);
+        var written = FileEdit.Encode(text, stored.Encoding);
+        File.WriteAllBytes(path, written);
+        _undo = (path, stored.Bytes, written);
         ui.Metadata("Changed. /undo puts it back.");
     }
 
     void Undo()
     {
-        if (_undo is not var (path, text)) { ui.Metadata("Nothing to undo."); return; }
-        FileEdit.Write(path, text);
+        if (_undo is not var (path, before, written)) { ui.Metadata("Nothing to undo."); return; }
+        // Work done on the file since /edit would be lost: only undo while it still holds exactly what /edit wrote.
+        if (!File.Exists(path) || !File.ReadAllBytes(path).AsSpan().SequenceEqual(written))
+        {
+            ui.Metadata($"{path} has changed since /edit, so it wasn't put back. Your editor's undo can take it from here.");
+            _undo = null;
+            return;
+        }
+        File.WriteAllBytes(path, before);
         _undo = null;
         ui.Metadata($"Put back {path}.");
+    }
+
+    /// <summary>
+    /// Whether a path is inside the project without leaving it through a symbolic link or junction on the way, which
+    /// a cloned repository could use to point an edit at any file on the PC.
+    /// </summary>
+    bool InsideProject(string path)
+    {
+        var root = Path.GetFullPath(project);
+        var relative = Path.GetRelativePath(root, path);
+        if (relative == "." || Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar)) return false;
+        var current = root;
+        foreach (var part in relative.Split(Path.DirectorySeparatorChar))
+        {
+            current = Path.Combine(current, part);
+            FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+            if (info.Exists && info.LinkTarget is not null) return false;
+        }
+        return true;
     }
 
     void Copy(string? number)

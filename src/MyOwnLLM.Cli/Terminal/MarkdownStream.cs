@@ -48,7 +48,7 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
 
         if (_state == State.InFence)
         {
-            if (line.TrimStart().StartsWith("```")) { _state = State.Text; if (!restyle) output.WriteLine(); return; }
+            if (ConsoleText.IsFence(line)) { _state = State.Text; if (!restyle) output.WriteLine(); return; }
             if (!restyle) { output.WriteLine(); return; }
             // Printed untouched, no padding and no splitting: a mouse copy must give back exactly the code.
             output.WriteLine(theme.Code(line));
@@ -58,7 +58,7 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
         if (!restyle)
         {
             // The raw echo stays as printed; keep the fence state right for the lines that follow.
-            if (line.TrimStart().StartsWith("```")) { _state = State.InFence; _blocks++; }
+            if (ConsoleText.IsFence(line)) { _state = State.InFence; _blocks++; }
             output.WriteLine();
             return;
         }
@@ -66,7 +66,7 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
         if (line.TrimStart().StartsWith('|')) { _table.Add(Cells(line)); return; }
         FlushTable();
 
-        if (line.TrimStart().StartsWith("```"))
+        if (ConsoleText.IsFence(line))
         {
             _state = State.InFence;
             // Numbered so /copy n can name it.

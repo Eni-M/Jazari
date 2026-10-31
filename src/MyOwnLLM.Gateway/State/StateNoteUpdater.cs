@@ -7,13 +7,18 @@ namespace MyOwnLLM.Gateway.State;
 /// Keeps each project's state note current in idle time. Exchanges pile up per project, and the update waits until the
 /// conversation has been quiet for a while: the note sits near the start of every prompt, so rewriting it mid-conversation
 /// would make the model re-read the whole prompt, and the rewrite itself holds the model for about a minute.
-/// At most one update per project waits in the queue; it reads the note when it runs. A new chat stops a running update,
-/// which keeps its exchanges for the next one.
+/// At most one update per project waits in the queue; it reads the note when it runs. An update that is stopped (by a
+/// chat, a warm-up, a status) or fails keeps its exchanges and waits for the next quiet time.
 /// </summary>
 public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, ProjectStateStore state, ILogger<StateNoteUpdater> logger, TimeSpan? quietFor = null)
 {
     public static readonly TimeSpan DefaultQuietTime = TimeSpan.FromMinutes(3);
     const int NoteTokens = 220;
+    /// <summary>
+    /// About 1,500 tokens of exchanges per update, newest first, so the prompt fits even an 8k context however many
+    /// piled up; long answers are cut, and the oldest exchanges past the budget are left out.
+    /// </summary>
+    const int ExchangeChars = 6000, AnswerChars = 1200;
 
     readonly TimeSpan _quietFor = quietFor ?? DefaultQuietTime;
     readonly object _gate = new();
@@ -23,12 +28,25 @@ public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, Pro
 
     public void Record(string project, string question, string answer)
     {
-        CancellationTokenSource wait;
         lock (_gate)
         {
             if (!_pending.TryGetValue(project, out var list)) _pending[project] = list = [];
             list.Add((question, answer));
-            if (_waits.Remove(project, out var older)) older.Cancel(); // the conversation goes on: start the quiet time again
+        }
+        WaitForQuiet(project);
+    }
+
+    /// <summary>Starts (or restarts) the quiet time after which the project's pending exchanges are written into its note.</summary>
+    void WaitForQuiet(string project)
+    {
+        CancellationTokenSource wait;
+        lock (_gate)
+        {
+            if (_waits.Remove(project, out var older))
+            {
+                try { older.Cancel(); } // the conversation goes on: start the quiet time again
+                catch (ObjectDisposedException) { } // its timer just ran out; the check under the lock below drops it
+            }
             _waits[project] = wait = new CancellationTokenSource();
         }
         _ = QueueWhenQuietAsync(project, wait);
@@ -69,6 +87,7 @@ public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, Pro
             exchanges = _pending.Remove(project, out var list) ? list : [];
         }
         if (exchanges.Count == 0) return 0;
+        exchanges = WithinBudget(exchanges);
 
         try
         {
@@ -84,15 +103,36 @@ public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, Pro
             await state.SetAsync(project, await llama.ChatAsync(prompt, NoteTokens, ct));
             return 0;
         }
-        catch (OperationCanceledException)
+        catch (Exception e)
         {
-            // Stopped for a chat or a shutdown: put the exchanges back in front, so the chat's own Record schedules them again.
+            // Stopped or failed: put the exchanges back in front. A stop (for a chat, a warm-up, a status) waits for the
+            // next quiet time on its own, since those requests don't record exchanges; after a failure the next
+            // exchange retries, so a model server that's down isn't asked again and again.
             lock (_gate)
             {
                 if (_pending.Remove(project, out var newer)) exchanges.AddRange(newer);
                 _pending[project] = exchanges;
             }
+            if (e is OperationCanceledException) WaitForQuiet(project);
+            else logger.LogWarning(e, "State note update failed for {Project}; the next exchange tries again", project);
             return 0;
         }
+    }
+
+    /// <summary>The newest exchanges that fit <see cref="ExchangeChars"/>, oldest first, with long answers cut.</summary>
+    static List<(string Question, string Answer)> WithinBudget(List<(string Question, string Answer)> exchanges)
+    {
+        var kept = new List<(string, string)>();
+        var used = 0;
+        for (var i = exchanges.Count - 1; i >= 0; i--)
+        {
+            var (q, a) = exchanges[i];
+            if (q.Length > AnswerChars) q = q[..AnswerChars] + " …";
+            if (a.Length > AnswerChars) a = a[..AnswerChars] + " …";
+            if (kept.Count > 0 && used + q.Length + a.Length > ExchangeChars) break;
+            kept.Insert(0, (q, a));
+            used += q.Length + a.Length;
+        }
+        return kept;
     }
 }

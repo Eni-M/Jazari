@@ -46,7 +46,7 @@ public static class ChatEndpoints
 
     static Task Chat(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
-        var project = http.Request.Headers["X-Project-Path"].FirstOrDefault();
+        var project = ProjectPath(http);
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultChatTokens, 1, MaxChatTokens);
         var question = request.Messages.LastOrDefault()?.Content ?? "";
         var note = project is null ? null : await s.State.GetAsync(project);
@@ -91,15 +91,23 @@ public static class ChatEndpoints
         }
         else
         {
-            answer = await s.Cache.GetOrCreateAsync(CacheKey("chat", project, note, prompt, maxTokens, request.JsonSchema),
-                ct => new ValueTask<string>(s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, maxTokens, t, request.JsonSchema), ct)),
-                CacheFor, cancellationToken: http.RequestAborted);
+            // Only whole answers are cached: one cut off at max_tokens (or JSON that doesn't parse) would otherwise come
+            // back unchanged on every retry for an hour.
+            var key = CacheKey("chat", project, note, prompt, maxTokens, request.JsonSchema);
+            var cached = await s.Cache.GetOrCreateAsync(key, _ => ValueTask.FromResult<string?>(null), ProbeOnly, cancellationToken: http.RequestAborted);
+            var cutOff = false;
+            if (cached is null)
+            {
+                (answer, cutOff) = await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatWithEndAsync(prompt, maxTokens, t, request.JsonSchema), http.RequestAborted);
+                if (!cutOff && (request.JsonSchema is null || IsJson(answer))) await s.Cache.SetAsync(key, answer, CacheFor, cancellationToken: http.RequestAborted);
+            }
+            else answer = cached;
             id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
             await http.Response.WriteAsJsonAsync(new
             {
                 id = $"ix-{id}",
                 @object = "chat.completion",
-                choices = new[] { new { index = 0, message = new ChatMessage("assistant", answer), finish_reason = "stop" } },
+                choices = new[] { new { index = 0, message = new ChatMessage("assistant", answer), finish_reason = cutOff ? "length" : "stop" } },
             }, SnakeCase, http.RequestAborted);
         }
 
@@ -112,7 +120,7 @@ public static class ChatEndpoints
     /// </summary>
     static Task Warm(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
-        var project = http.Request.Headers["X-Project-Path"].FirstOrDefault();
+        var project = ProjectPath(http);
         var note = project is null ? null : await s.State.GetAsync(project);
         var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, ""), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
         await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, 1, t), http.RequestAborted);
@@ -177,6 +185,22 @@ public static class ChatEndpoints
         await http.Response.WriteAsync($"data: {JsonSerializer.Serialize(payload, SnakeCase)}\n\n", ct);
         await http.Response.Body.FlushAsync(ct);
     }
+
+    /// <summary>Looks in the cache without writing the factory's null into it.</summary>
+    static readonly HybridCacheEntryOptions ProbeOnly = new()
+    {
+        Flags = HybridCacheEntryFlags.DisableLocalCacheWrite | HybridCacheEntryFlags.DisableDistributedCacheWrite,
+    };
+
+    static bool IsJson(string text)
+    {
+        try { using var _ = JsonDocument.Parse(text); return true; }
+        catch (JsonException) { return false; }
+    }
+
+    /// <summary>The project folder, sent percent-encoded because HTTP header values must be ASCII.</summary>
+    static string? ProjectPath(HttpContext http) =>
+        http.Request.Headers["X-Project-Path"].FirstOrDefault() is { } raw ? Uri.UnescapeDataString(raw) : null;
 
     static string CacheKey(params object?[] parts) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(parts))));

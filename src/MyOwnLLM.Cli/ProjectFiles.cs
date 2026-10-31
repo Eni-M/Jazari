@@ -2,7 +2,8 @@ using System.Text.RegularExpressions;
 
 namespace MyOwnLLM.Cli;
 
-public sealed record ProjectFile(string Path, string Text);
+/// <param name="FirstLine">The file's line number of the text's first line: a large file is reviewed in pieces.</param>
+public sealed record ProjectFile(string Path, string Text, int FirstLine = 1);
 
 /// <summary>Finds the files of a project worth reading: real code and config, never generated code, data dumps, or secrets.</summary>
 public static partial class ProjectFiles
@@ -53,8 +54,11 @@ public static partial class ProjectFiles
     static bool Wanted(string path)
     {
         var name = Path.GetFileName(path);
-        return CodeExtensions.Contains(Path.GetExtension(path)) && !Noise().IsMatch(name) && !Secret().IsMatch(name);
+        return CodeExtensions.Contains(Path.GetExtension(path)) && !Noise().IsMatch(name) && !IsSecret(path);
     }
+
+    /// <summary>Files that hold keys and passwords (.env, *.pem, appsettings.Production.json): never sent to the model.</summary>
+    public static bool IsSecret(string path) => Secret().IsMatch(Path.GetFileName(path));
 
     static string? TryRead(string path)
     {

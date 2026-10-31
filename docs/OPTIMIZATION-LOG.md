@@ -201,3 +201,14 @@ A **second 16 GB DDR4 SODIMM** (the empty slot) is the one change that should re
 Downloaded for testing, in `spike/models` (git-ignored): `granite-4.2-3b-Q4_K_M.gguf` (2.24 GB), `granite-4.0-350m-Q8_0.gguf` (0.38 GB), `granite-4.0-1b-Q4_K_M.gguf` (1.02 GB). Safe to delete.
 
 Research notes: `research_notes/Whole laptop Jazari optimization/`. The research agents' notes are raw material: check a claim here before trusting one there.
+
+## Code review fixes (2026-10-31)
+
+All 32 reported findings fixed; 335 tests pass (27 new, in ReviewFixTests and alongside the code they cover).
+
+- Program execution: StartDetached passes every path and argument through environment variables, so cmd never parses `&`, `^` or `%` in them. /diff, /commit and the gateway's GitSummary empty every filter driver the repo names and turn off fsmonitor and signature checks (verified against a real repo with a planted clean filter).
+- Accented folders: X-Project-Path is percent-encoded by the CLI and decoded by the gateway.
+- Data: /edit keeps the file's encoding and refuses non-UTF text; /undo writes back the exact bytes, and only if the file still holds what /edit wrote; edits can't go through symlinks or junctions. Diffs leave out secret files.
+- Gateway: cut-off or invalid-JSON answers aren't cached and report finish_reason "length"; stream errors are errors; a stopped note update reschedules itself and its prompt has a size budget; a full queue cancels nothing; keys.json is swapped in atomically and recovers from damage.
+- Launcher and tuning: only this install's server processes are stopped or watched; a port conflict is reported instead of blamed on tuning; the fallback is for one start only and isn't saved; a failed device listing keeps the saved tuning; the fingerprint now includes the ggml DLLs, so **every PC re-tunes once after this update** (a few minutes on the T480).
+- Scripts: gateway and app are swapped together or not at all; the launcher runs an updater copy kept in the install folder, replaced only by one that parses; PATH stays REG_EXPAND_SZ with its %VAR% entries; -InstallDir with a trailing backslash works.

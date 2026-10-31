@@ -36,10 +36,23 @@ public class GatewayClientTests
         await foreach (var c in client.ChatAsync([new ChatTurn("user", "a"), new ChatTurn("assistant", "b")], "q", @"C:\Repo", CancellationToken.None)) chunks.Add(c);
 
         Assert.Equal("ok", Assert.Single(chunks).Content);
-        Assert.Equal(@"C:\Repo", handler.Request!.Headers.GetValues("X-Project-Path").Single());
+        Assert.Equal(@"C:\Repo", Uri.UnescapeDataString(handler.Request!.Headers.GetValues("X-Project-Path").Single()));
         using var doc = JsonDocument.Parse(handler.Body!);
         Assert.True(doc.RootElement.GetProperty("stream").GetBoolean());
         Assert.Equal(["a", "b", "q"], doc.RootElement.GetProperty("messages").EnumerateArray().Select(m => m.GetProperty("content").GetString()));
+    }
+
+    [Fact]
+    public async Task Chat_works_from_a_folder_with_accents()
+    {
+        const string sse = "data: [DONE]\n\n";
+        var (client, handler) = Create(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(sse, Encoding.UTF8, "text/event-stream") });
+
+        await foreach (var _ in client.ChatAsync([], "q", @"C:\Users\Arbër\proj", CancellationToken.None)) { }
+
+        var sent = handler.Request!.Headers.GetValues("X-Project-Path").Single();
+        Assert.True(sent.All(char.IsAscii), sent);
+        Assert.Equal(@"C:\Users\Arbër\proj", Uri.UnescapeDataString(sent));
     }
 
     [Fact]

@@ -12,10 +12,20 @@ public sealed class ApiKeyStore(string keyFilePath)
     public string AddKey()
     {
         var key = "mollm_" + Base64Url(RandomNumberGenerator.GetBytes(32));
-        var hashes = Load();
+        List<string> hashes;
+        try { hashes = Load(); }
+        catch (Exception e) when (e is JsonException or FormatException)
+        {
+            // A damaged file holds no usable key: keep it aside for a look, and start again so the user isn't locked out.
+            File.Copy(keyFilePath, keyFilePath + ".damaged", overwrite: true);
+            hashes = [];
+        }
         hashes.Add(Hash(key));
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(keyFilePath))!);
-        File.WriteAllText(keyFilePath, JsonSerializer.Serialize(new KeyFile(hashes), JsonSerializerOptions.Web));
+        // Written beside it, then swapped in: the running gateway reads the file on every request and must never see half of it.
+        var temp = keyFilePath + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(new KeyFile(hashes), JsonSerializerOptions.Web));
+        File.Move(temp, keyFilePath, overwrite: true);
         return key;
     }
 
@@ -23,7 +33,12 @@ public sealed class ApiKeyStore(string keyFilePath)
     {
         if (string.IsNullOrEmpty(presentedKey)) return false;
         var presented = Convert.FromHexString(Hash(presentedKey));
-        return Load().Any(h => CryptographicOperations.FixedTimeEquals(Convert.FromHexString(h), presented));
+        for (var attempt = 1; ; attempt++)
+        {
+            try { return Load().Any(h => h.Length == 64 && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(h), presented)); }
+            catch (IOException) when (attempt < 3) { Thread.Sleep(20); } // add-key swapping the file in
+            catch (Exception e) when (e is JsonException or FormatException or IOException) { return false; } // damaged: add-key repairs it
+        }
     }
 
     List<string> Load() =>

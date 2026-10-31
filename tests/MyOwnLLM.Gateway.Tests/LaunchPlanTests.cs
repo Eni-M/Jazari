@@ -28,9 +28,17 @@ public class LaunchPlanTests
     }
 
     [Fact]
-    public void Update_runs_the_updater()
+    public void Update_prefers_the_updater_the_last_good_update_kept()
     {
         var plan = LaunchPlan.Decide(["update"], Config, All);
+
+        Assert.Equal(@"C:\J\update-jazari.ps1", plan.Args[^1]);
+    }
+
+    [Fact]
+    public void Update_runs_the_updater()
+    {
+        var plan = LaunchPlan.Decide(["update"], Config, path => path != @"C:\J\update-jazari.ps1");
 
         Assert.Equal("update", plan.Kind);
         Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"), plan.Exe);

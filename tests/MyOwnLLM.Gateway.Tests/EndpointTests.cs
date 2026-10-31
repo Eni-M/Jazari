@@ -29,6 +29,10 @@ public sealed class FakeLlama : ILlamaClient
         return Chat(ct);
     }
 
+    public bool CutOff { get; set; }
+    public async Task<(string Text, bool CutOff)> ChatWithEndAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null) =>
+        (await ChatAsync(messages, maxTokens, ct, jsonSchema), CutOff);
+
     public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
     {
         Calls.Enqueue(new("stream", messages, maxTokens));
@@ -270,6 +274,18 @@ public class EndpointTests : IDisposable
 
         Assert.Equal(expected, response.StatusCode);
         Assert.Equal("llama says no", (await Json(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Cut_off_answer_says_so_and_is_not_cached()
+    {
+        _llama.CutOff = true;
+
+        var first = await Json(await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("long please")));
+        await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("long please"));
+
+        Assert.Equal("length", first.GetProperty("choices")[0].GetProperty("finish_reason").GetString());
+        Assert.Equal(2, _llama.Calls.Count(c => c.Kind == "chat"));
     }
 
     [Fact]

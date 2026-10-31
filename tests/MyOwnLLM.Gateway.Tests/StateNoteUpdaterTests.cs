@@ -114,13 +114,14 @@ public class StateNoteUpdaterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_chat_stops_a_running_update_and_its_exchanges_are_kept()
+    public async Task A_stopped_update_runs_again_on_its_own()
     {
+        // A warm-up or /status stops the update but records no exchange of its own: nothing else would reschedule it.
         var started = new TaskCompletionSource();
         var calls = 0;
         _llama.Chat = async ct =>
         {
-            if (Interlocked.Increment(ref calls) > 1) return "note with both";
+            if (Interlocked.Increment(ref calls) > 1) return "note after the stop";
             started.SetResult();
             await Task.Delay(Timeout.Infinite, ct);
             return "never";
@@ -128,13 +129,39 @@ public class StateNoteUpdaterTests : IAsyncLifetime
         _updater.Record(Project, "first question", "first answer");
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var chat = _queue.EnqueueAsync(WorkKind.Chat, _ => Task.FromResult(0), default);
-        await chat.WaitAsync(TimeSpan.FromSeconds(5));
+        await _queue.EnqueueAsync(WorkKind.Chat, _ => Task.FromResult(0), default).WaitAsync(TimeSpan.FromSeconds(5));
+
+        await WaitForNote("note after the stop");
+        Assert.Contains("first question", _llama.Calls.Last().Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task A_failed_update_keeps_its_exchanges_for_the_next_one()
+    {
+        var calls = 0;
+        _llama.Chat = _ => Interlocked.Increment(ref calls) == 1 ? throw new InvalidOperationException("model server down") : Task.FromResult("note");
+        _updater.Record(Project, "first question", "first answer");
+        for (var i = 0; i < 100 && calls == 0; i++) await Task.Delay(20);
+
         _updater.Record(Project, "second question", "second answer");
 
-        await WaitForNote("note with both");
+        await WaitForNote("note");
         Assert.Contains("first question", _llama.Calls.Last().Messages[^1].Content);
         Assert.Contains("second question", _llama.Calls.Last().Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task Piled_up_exchanges_are_cut_to_fit_the_context()
+    {
+        _llama.Chat = _ => Task.FromResult("note");
+        var release = Block();
+        for (var i = 0; i < 40; i++) _updater.Record(Project, $"question {i}", new string('x', 2000));
+        release.SetResult();
+
+        await WaitForNote("note");
+        var sent = Assert.Single(_llama.Calls).Messages[^1].Content;
+        Assert.InRange(sent.Length, 1, 9000);
+        Assert.Contains("question 39", sent); // the newest are kept
     }
 
     [Fact]

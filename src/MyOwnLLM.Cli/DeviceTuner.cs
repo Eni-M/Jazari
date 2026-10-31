@@ -28,23 +28,25 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
     public async Task<Tuning> EnsureAsync(JazariConfig config, Machine machine, string path, CancellationToken ct, bool force = false)
     {
         var gpus = await ListGpusAsync(config.LlamaServer, ct);
-        var fingerprint = Fingerprint(machine, gpus, config, _fileSize);
-        if (!force && Tuning.Load(path) is { } saved && saved.Fingerprint == fingerprint) return saved;
+        var saved = Tuning.Load(path);
+        // A device listing that failed or hung says nothing about the PC: keep what was measured instead of re-tuning
+        // for a PC without GPUs (and again when the GPU is back).
+        if (!force && gpus is null && saved is not null) return saved;
+        var fingerprint = Fingerprint(machine, gpus ?? [], config, _fileSize);
+        if (!force && saved is not null && saved.Fingerprint == fingerprint) return saved;
 
         ui.Metadata("Finding the fastest settings for this PC. This runs once and takes a few minutes.");
-        var tuning = await TuneAsync(config, machine, gpus, fingerprint, ct);
+        var tuning = await TuneAsync(config, machine, gpus ?? [], fingerprint, ct);
         try { tuning.Save(path); }
-        catch (IOException e) { ui.Metadata($"Couldn't save the settings ({e.Message}); they'll be measured again next time."); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { ui.Metadata($"Couldn't save the settings ({e.Message}); they'll be measured again next time."); }
         return tuning;
     }
 
-    /// <summary>Saves safe CPU settings for this PC after the tuned ones failed, so later starts don't fail again.</summary>
-    public async Task<Tuning> FallBackAsync(JazariConfig config, Machine machine, string path, CancellationToken ct)
-    {
-        var safe = Tuning.Default(Fingerprint(machine, await ListGpusAsync(config.LlamaServer, ct), config, _fileSize), machine.LogicalCores, machine.RamBytes);
-        try { safe.Save(path); } catch (IOException) { } // used for this start either way
-        return safe;
-    }
+    /// <summary>
+    /// Safe CPU settings for this one start after the tuned ones failed. Not saved: one bad start (a port in use, a
+    /// moment without VRAM) mustn't replace what was measured; <c>jazari tune</c> measures again when it keeps failing.
+    /// </summary>
+    public static Tuning FallBack(Machine machine) => Tuning.Default("", machine.LogicalCores, machine.RamBytes);
 
     async Task<Tuning> TuneAsync(JazariConfig config, Machine machine, List<GpuDevice> gpus, string fingerprint, CancellationToken ct)
     {
@@ -110,8 +112,9 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
     async Task<List<(Tuning, double)>> BenchAsync(string bench, string model, Tuning template, string[] device, string flashAttention, CancellationToken ct)
     {
         string[] args = ["-m", model, .. device, "-fa", flashAttention, "-p", "512", "-n", "64", "-r", "2", "-o", "json"];
-        var (exit, output) = await runner.RunAsync(bench, args, ct);
-        return exit == 0 ? Results(output, template) : [];
+        // A crash part-way (a GPU driver failing on flash attention, say) still leaves the rows measured before it.
+        var (_, output) = await runner.RunAsync(bench, args, ct);
+        return Results(output, template);
     }
 
     /// <summary>Pairs llama-bench's prompt and answer rows that share settings into one measured option each.</summary>
@@ -120,7 +123,7 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         List<(int Threads, bool Fa, bool Prompt, double Speed)> rows = [];
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = ParseRows(json);
             foreach (var r in doc.RootElement.EnumerateArray())
             {
                 var fa = r.GetProperty("flash_attn") is { ValueKind: JsonValueKind.True or JsonValueKind.False } b ? b.GetBoolean() : r.GetProperty("flash_attn").GetInt32() != 0;
@@ -139,10 +142,30 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
             .ToList();
     }
 
-    async Task<List<GpuDevice>> ListGpusAsync(string server, CancellationToken ct)
+    /// <summary>llama-bench writes its JSON array row by row; when it dies part-way, the array is cut after the last whole row.</summary>
+    static JsonDocument ParseRows(string json)
     {
-        var (exit, output) = await runner.RunAsync(server, ["--list-devices"], ct);
-        return exit == 0 ? ParseDevices(output) : [];
+        try { return JsonDocument.Parse(json); }
+        catch (JsonException)
+        {
+            var start = json.IndexOf('[');
+            var lastRow = json.LastIndexOf('}');
+            if (start < 0 || lastRow < start) throw;
+            return JsonDocument.Parse(json[start..(lastRow + 1)] + "]");
+        }
+    }
+
+    /// <summary>The GPUs, or null when the listing failed or took longer than 30 s (a hung driver mustn't block startup).</summary>
+    async Task<List<GpuDevice>?> ListGpusAsync(string server, CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            var (exit, output) = await runner.RunAsync(server, ["--list-devices"], timeout.Token);
+            return exit == 0 ? ParseDevices(output) : null;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
     }
 
     /// <summary>Lines like "  Vulkan0: Intel(R) Iris(R) Xe Graphics (16211 MiB, 15443 MiB free)".</summary>
@@ -156,8 +179,11 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
     public static string Fingerprint(Machine machine, IEnumerable<GpuDevice> gpus, JazariConfig config, Func<string, long?> fileSize)
     {
         string FileStamp(string path) => $"{Path.GetFileName(path)}:{fileSize(path)}";
+        // The compute code lives in the ggml DLLs next to llama-server.exe, which an update can change on their own.
+        var folder = Path.GetDirectoryName(config.LlamaServer)!;
+        var dlls = Directory.Exists(folder) ? Directory.GetFiles(folder, "ggml*.dll").Order(StringComparer.OrdinalIgnoreCase).Select(FileStamp) : [];
         var text = string.Join('|', machine.CpuName.Trim(), machine.LogicalCores, machine.RamBytes >> 30,
-            string.Join(',', gpus.Select(g => g.Name)), FileStamp(config.LlamaServer), FileStamp(config.Model));
+            string.Join(',', gpus.Select(g => g.Name)), FileStamp(config.LlamaServer), FileStamp(config.Model), string.Join(',', dlls));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..16];
     }
 

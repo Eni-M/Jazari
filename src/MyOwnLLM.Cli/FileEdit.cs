@@ -32,7 +32,8 @@ public static class FileEdit
     }
 
     /// <summary>The new text, or the reason it can't apply. Compares with \n line ends and restores the file's own.</summary>
-    public static (string? Text, string? Problem) Apply(string original, IReadOnlyList<Replacement> edits)
+    /// <param name="applied">Gets what actually changed, which the fallback can make differ from the model's text: that's what the user approves.</param>
+    public static (string? Text, string? Problem) Apply(string original, IReadOnlyList<Replacement> edits, List<Replacement>? applied = null)
     {
         var crlf = original.Contains("\r\n");
         var text = original.Replace("\r\n", "\n");
@@ -46,46 +47,82 @@ public static class FileEdit
             {
                 if (text.IndexOf(search, first + 1, StringComparison.Ordinal) >= 0) return (null, $"this text appears more than once: {Short(search)}");
                 text = text[..first] + replace + text[(first + search.Length)..];
+                applied?.Add(new(search, replace));
                 continue;
             }
-            var (lineText, problem) = ApplyByLines(text, search, replace);
+            var (lineText, problem, change) = ApplyByLines(text, search, replace);
             if (lineText is null) return (null, $"{problem}: {Short(search)}");
             text = lineText;
+            applied?.Add(change!);
         }
         return (crlf ? text.Replace("\n", "\r\n") : text, null);
     }
 
     /// <summary>
     /// Fallback for small models that get indentation or trailing spaces wrong: matches whole lines with their ends trimmed,
-    /// then moves the replacement to the file's own indentation.
+    /// then shifts the whole replacement by the difference between the file's indentation and the model's, so lines
+    /// indented less than the first keep their place relative to it (which matters in Python and YAML).
     /// </summary>
-    static (string? Text, string? Problem) ApplyByLines(string text, string search, string replace)
+    static (string? Text, string? Problem, Replacement? Change) ApplyByLines(string text, string search, string replace)
     {
         var wanted = search.Trim('\n').Split('\n');
-        if (wanted.All(string.IsNullOrWhiteSpace)) return (null, "this text isn't in the file");
+        if (wanted.All(string.IsNullOrWhiteSpace)) return (null, "this text isn't in the file", null);
         var lines = text.Split('\n');
+        if (wanted.Length > lines.Length) return (null, "this text isn't in the file", null);
         var starts = Enumerable.Range(0, lines.Length - wanted.Length + 1)
             .Where(i => wanted.Select((w, j) => lines[i + j].Trim() == w.Trim()).All(same => same)).Take(2).ToList();
-        if (starts.Count == 0) return (null, "this text isn't in the file");
-        if (starts.Count > 1) return (null, "this text appears more than once");
+        if (starts.Count == 0) return (null, "this text isn't in the file", null);
+        if (starts.Count > 1) return (null, "this text appears more than once", null);
 
         var at = starts[0];
         var fileIndent = Indent(lines[at]);
         var modelIndent = Indent(wanted[0]);
-        var replaced = replace.Trim('\n').Split('\n')
-            .Select(l => l.Length == 0 ? l : l.StartsWith(modelIndent, StringComparison.Ordinal) ? fileIndent + l[modelIndent.Length..] : l);
-        return (string.Join('\n', lines[..at].Concat(replace.Trim('\n').Length == 0 ? [] : replaced).Concat(lines[(at + wanted.Length)..])), null);
+        var unit = (fileIndent + modelIndent).Distinct().ToList();
+        if (unit.Count > 1) return (null, "the indentation mixes tabs and spaces, so it can't be matched safely", null);
+        var pad = unit.Count == 1 ? unit[0] : ' ';
+        var shift = fileIndent.Length - modelIndent.Length;
+        string Shifted(string l)
+        {
+            if (l.Trim().Length == 0) return "";
+            var own = Indent(l);
+            if (own.Any(c => c != pad)) return l; // a line with other indentation is left as the model wrote it
+            return new string(pad, Math.Max(0, own.Length + shift)) + l[own.Length..];
+        }
+        var replaced = replace.Trim('\n').Length == 0 ? [] : replace.Trim('\n').Split('\n').Select(Shifted).ToArray();
+        var change = new Replacement(string.Join('\n', lines[at..(at + wanted.Length)]), string.Join('\n', replaced));
+        return (string.Join('\n', lines[..at].Concat(replaced).Concat(lines[(at + wanted.Length)..])), null, change);
     }
 
     static string Indent(string line) => line[..(line.Length - line.TrimStart().Length)];
 
-    /// <summary>Saves over the file, keeping whether it had a byte-order mark.</summary>
-    public static void Write(string path, string text)
+    /// <summary>A file's text and the encoding it's stored in, so an edit writes it back the same way.</summary>
+    public sealed record Stored(string Text, Encoding Encoding, byte[] Bytes);
+
+    /// <summary>
+    /// Reads a text file in UTF-8 (with or without a byte-order mark) or UTF-16/32 with one. Null for anything else
+    /// (Windows-1252, say): decoding it as UTF-8 and writing it back would damage every accented letter in the file.
+    /// </summary>
+    public static Stored? Read(string path)
     {
         var bytes = File.ReadAllBytes(path);
-        var bom = bytes is [0xEF, 0xBB, 0xBF, ..];
-        File.WriteAllText(path, text, new UTF8Encoding(bom));
+        Encoding encoding = bytes switch
+        {
+            [0xEF, 0xBB, 0xBF, ..] => new UTF8Encoding(true, true),
+            [0xFF, 0xFE, 0, 0, ..] => new UTF32Encoding(false, true, true),
+            [0xFF, 0xFE, ..] => new UnicodeEncoding(false, true, true),
+            [0xFE, 0xFF, ..] => new UnicodeEncoding(true, true, true),
+            _ => new UTF8Encoding(false, true),
+        };
+        try
+        {
+            var bom = encoding.GetPreamble().Length;
+            return new(encoding.GetString(bytes, bom, bytes.Length - bom), encoding, bytes);
+        }
+        catch (DecoderFallbackException) { return null; }
     }
+
+    /// <summary>The bytes to save: the text in the file's own encoding, with its byte-order mark if it had one.</summary>
+    public static byte[] Encode(string text, Encoding encoding) => [.. encoding.GetPreamble(), .. encoding.GetBytes(text)];
 
     static string Short(string text) => (text.Length > 60 ? text[..60] + "..." : text).Replace("\n", " ");
 }

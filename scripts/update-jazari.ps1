@@ -86,9 +86,13 @@ function Repair-Llama {
 }
 
 # A build is current when its exe is there and its marker names the source commit.
-function Repair-Build($thing, $project, $folder, $exe) {
+function Test-Build($folder, $exe) {
     $marker = Join-Path $folder "build-commit.txt"
-    if ((Test-Path (Join-Path $folder $exe)) -and (Test-Path $marker) -and "$(Get-Content -Raw $marker)".Trim() -eq $commit) { Say-Ok $thing; return }
+    (Test-Path (Join-Path $folder $exe)) -and (Test-Path $marker) -and "$(Get-Content -Raw $marker)".Trim() -eq $commit
+}
+
+# Builds into <folder>.new and leaves it there; the caller swaps it in. Throws when the build fails.
+function New-Build($thing, $project, $folder) {
     $new = "$folder.new"
     if (Test-Path $new) { Remove-Item -Recurse -Force $new }
     # No shared compiler server: one left over from an app with redirected AppData (Claude Desktop) would write the build there.
@@ -102,8 +106,23 @@ function Repair-Build($thing, $project, $folder, $exe) {
         throw "the build failed`n$($errors -join "`n")"
     }
     Set-Content -Encoding ASCII (Join-Path $new "build-commit.txt") $commit
-    Swap-Folder $new $folder
-    Say-Repaired $thing
+}
+
+# The gateway and the app talk to each other, so they move together: both are built first, and only when both
+# built are they swapped in. A failed build leaves both at the previous version, which the launcher then reopens.
+function Repair-Builds {
+    $builds = @(
+        @{ Thing = "gateway"; Project = "MyOwnLLM.Gateway"; Folder = (Join-Path $installDir "gateway"); Exe = "MyOwnLLM.Gateway.exe" },
+        @{ Thing = "app"; Project = "MyOwnLLM.Cli"; Folder = (Join-Path $installDir "app"); Exe = "jazari.exe" }
+    )
+    # Both are rebuilt when either is stale: a gateway from one commit and an app from another may not understand each other.
+    if (@($builds | Where-Object { -not (Test-Build $_.Folder $_.Exe) }).Count -eq 0) { foreach ($b in $builds) { Say-Ok $b.Thing }; return }
+    try { foreach ($b in $builds) { New-Build $b.Thing $b.Project $b.Folder } }
+    catch {
+        foreach ($b in $builds) { if (Test-Path "$($b.Folder).new") { Remove-Item -Recurse -Force "$($b.Folder).new" } }
+        throw
+    }
+    foreach ($b in $builds) { Swap-Folder "$($b.Folder).new" $b.Folder; Say-Repaired $b.Thing }
 }
 
 # 1. config
@@ -154,18 +173,30 @@ if (-not $Reexec) {
         exit 1
     }
     Say-Ok "source"
-    & $PSCommandPath -Reexec
-    exit $LASTEXITCODE
+
+    # The synced updater runs the rest, so changes to it apply in this same update; but only if it parses. A broken
+    # one on main would otherwise break every later `jazari update` before it could fetch the fix. The launcher runs
+    # the copy kept in the install folder, which is replaced only by an updater that parses.
+    $synced = Join-Path $sourceDir "scripts\update-jazari.ps1"
+    $parseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($synced, [ref]$null, [ref]$parseErrors)
+    if ($parseErrors.Count -eq 0) {
+        try { Copy-Item -Force $synced (Join-Path $installDir "update-jazari.ps1") }
+        catch { Write-Host "Couldn't keep a copy of the updater ($_); the next update uses the one in the source copy." }
+        & $synced -Reexec
+        exit $LASTEXITCODE
+    }
+    Write-Host "ERROR updater: the new update-jazari.ps1 on main doesn't parse ($($parseErrors[0].Message)); this update carries on with the previous one, and the next jazari update tries again."
+    $script:failed = $true
 }
 
-$manifest = Get-Content -Raw (Join-Path $PSScriptRoot "jazari-manifest.json") | ConvertFrom-Json
+$manifest = Get-Content -Raw (Join-Path $sourceDir "scripts\jazari-manifest.json") | ConvertFrom-Json
 $commit = (Invoke-Git rev-parse HEAD | Select-Object -First 1).Trim()
 
 # 4-6. each component on its own: one that fails keeps its previous version and the others still run
 try { Repair-Model } catch { Say-Error "model" $_ }
 try { Repair-Llama } catch { Say-Error "llama.cpp" $_ }
-try { Repair-Build "gateway" "MyOwnLLM.Gateway" (Join-Path $installDir "gateway") "MyOwnLLM.Gateway.exe" } catch { Say-Error "gateway" $_ }
-try { Repair-Build "app" "MyOwnLLM.Cli" (Join-Path $installDir "app") "jazari.exe" } catch { Say-Error "app" $_ }
+try { Repair-Builds } catch { Say-Error "gateway and app" $_ }
 
 # 7. config: current paths, and installedCommit only when everything above worked
 $paths = @{

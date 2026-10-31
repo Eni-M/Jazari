@@ -9,6 +9,7 @@ public class CliCompletenessTests : IDisposable
     readonly FakeGateway _gateway = new();
     readonly StringWriter _output = new();
     readonly List<string[]> _gitCalls = [];
+    (int, string) _filters = (1, "");
     string? _clipboard;
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
@@ -18,7 +19,12 @@ public class CliCompletenessTests : IDisposable
         var theme = new Theme(ColorMode.None, unicode: true);
         return new Session(_gateway, new Ui(_output, theme, 100), () => new MarkdownStream(_output, theme, 100), _dir)
         {
-            Git = (args, _) => { _gitCalls.Add(args); return Task.FromResult(git(args)); },
+            Git = (args, _) =>
+            {
+                if (args.Contains("--get-regexp")) return Task.FromResult(_filters); // the hardening's look at the repo's filters
+                _gitCalls.Add(args);
+                return Task.FromResult(git(args));
+            },
             SetClipboard = text => _clipboard = text,
         };
     }
@@ -41,6 +47,49 @@ public class CliCompletenessTests : IDisposable
         Assert.Contains("--no-textconv", args);
         Assert.Equal("HEAD", args[^1]);
         Assert.Contains("1 file", _output.ToString());
+    }
+
+    [Fact]
+    public async Task Diff_switches_off_the_repos_filter_programs()
+    {
+        _filters = (0, "filter.evil.clean\nfilter.lfs.process\n");
+        var session = NewSession(_ => (0, Diff));
+
+        await session.HandleAsync("/diff", CancellationToken.None);
+
+        var args = Assert.Single(_gitCalls);
+        Assert.Contains("filter.evil.clean=", args);
+        Assert.Contains("filter.lfs.process=", args);
+        Assert.Contains("log.showSignature=false", args);
+    }
+
+    [Fact]
+    public async Task Diff_leaves_out_secret_files()
+    {
+        const string withSecret = Diff + "diff --git a/.env b/.env\n--- a/.env\n+++ b/.env\n@@ -1 +1 @@\n-KEY=old\n+KEY=hunter2\n";
+        var session = NewSession(_ => (0, withSecret));
+
+        await session.HandleAsync("/diff", CancellationToken.None);
+        await session.AskAsync("review", CancellationToken.None);
+
+        Assert.Contains("+int b;", _gateway.LastContext);
+        Assert.DoesNotContain("hunter2", _gateway.LastContext);
+        Assert.Contains("Left out the changes to .env", _output.ToString());
+    }
+
+    [Fact]
+    public async Task Ctrl_C_while_git_runs_stops_the_command_not_the_session()
+    {
+        using var cts = new CancellationTokenSource();
+        var theme = new Theme(ColorMode.None, unicode: true);
+        var session = new Session(_gateway, new Ui(_output, theme, 100), () => new MarkdownStream(_output, theme, 100), _dir)
+        {
+            Git = (_, ct) => { cts.Cancel(); ct.ThrowIfCancellationRequested(); return Task.FromResult((0, "")); },
+        };
+
+        await session.HandleAsync("/diff", cts.Token);
+
+        Assert.Contains("stopped", _output.ToString());
     }
 
     [Fact]

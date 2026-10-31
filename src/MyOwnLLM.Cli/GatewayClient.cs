@@ -47,7 +47,7 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
     {
         var messages = history.Select(t => new { role = t.Role, content = t.Content }).Append(new { role = "user", content = question });
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(new { messages, stream = true, context }) };
-        request.Headers.Add("X-Project-Path", project);
+        request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project)); // header values must be ASCII, and folders can have accents
         using var response = await SendAsync(request, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
         while (true)
@@ -71,7 +71,7 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
     {
         var messages = history.Select(t => new { role = t.Role, content = t.Content });
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/warm") { Content = JsonContent.Create(new { messages, context }) };
-        request.Headers.Add("X-Project-Path", project);
+        request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project)); // header values must be ASCII, and folders can have accents
         using var _ = await SendAsync(request, ct);
     }
 

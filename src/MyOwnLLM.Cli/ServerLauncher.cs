@@ -53,13 +53,23 @@ public sealed class ServerLauncher(
             var ready = await llamaReady(ct);
             if (gatewayState is not ConnectionState.GatewayNotRunning && ready) return gatewayState;
 
-            // The tuned settings can stop working (a GPU driver update, say): once llama-server has had a few seconds and
-            // is gone, start it again on safe CPU settings rather than waiting for a server that crashed.
-            if (!llamaUp && !ready && !fellBack && fallbackArgs is not null && i >= 6 && !(llamaAlive ?? LlamaAlive)())
+            // The tuned settings can stop working (a GPU driver update, say): once our llama-server has had a few seconds
+            // and is gone, start it again on safe CPU settings rather than waiting for a server that crashed.
+            if (!llamaUp && !ready && !fellBack && fallbackArgs is not null && i >= 6 && !(llamaAlive ?? (() => Running(config.LlamaServer) > 0))())
             {
+                var log = Path.Combine(logDir, "llama-server.log");
+                var why = ReadLog(log);
+                // A port taken by another program isn't the settings' fault: CPU settings would fail the same way.
+                if (why.Contains("couldn't bind", StringComparison.OrdinalIgnoreCase) || why.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
+                {
+                    ui.Error("The model server couldn't start: port 8080 is used by another program.", $"see {log}", "Close that program, then run jazari again.");
+                    return ConnectionState.GatewayNotRunning;
+                }
                 fellBack = true;
-                ui.Metadata("The model server stopped with this PC's tuned settings, so it's starting on safe CPU settings. Run jazari tune to measure again.");
-                runner.StartDetached(config.LlamaServer, await fallbackArgs(config, ct), Path.Combine(logDir, "llama-server.log"));
+                try { if (why.Length > 0) File.Copy(log, Path.Combine(logDir, "llama-server.failed.log"), overwrite: true); } // the restart overwrites it
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                ui.Metadata("The model server stopped with this PC's tuned settings, so it's starting on safe CPU settings for now. Run jazari tune to measure again.");
+                runner.StartDetached(config.LlamaServer, await fallbackArgs(config, ct), log);
             }
         }
 
@@ -67,11 +77,39 @@ public sealed class ServerLauncher(
         return ConnectionState.GatewayNotRunning;
     }
 
-    static bool LlamaAlive()
+    static string ReadLog(string path)
     {
-        var running = Process.GetProcessesByName("llama-server");
+        try
+        {
+            using var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return new StreamReader(s).ReadToEnd();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ""; }
+    }
+
+    /// <summary>
+    /// The running processes started from exactly this file. Another tool's llama-server has the same name; a process
+    /// whose path can't be read (elevated, already exiting) isn't ours to touch either.
+    /// </summary>
+    static List<Process> Ours(string exe)
+    {
+        var mine = new List<Process>();
+        foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)))
+        {
+            string? path = null;
+            try { path = p.MainModule?.FileName; }
+            catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException) { }
+            if (path is not null && string.Equals(Path.GetFullPath(path), Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase)) mine.Add(p);
+            else p.Dispose();
+        }
+        return mine;
+    }
+
+    static int Running(string exe)
+    {
+        var running = Ours(exe);
         foreach (var p in running) p.Dispose();
-        return running.Length > 0;
+        return running.Count;
     }
 
     async Task<ConnectionState> GatewayStateAsync(CancellationToken ct)
@@ -86,15 +124,15 @@ public sealed class ServerLauncher(
     }
 
     /// <summary><c>jazari stop</c>: ends the background servers to free their RAM. Returns how many were stopped.</summary>
-    public static int StopServers()
+    public static int StopServers(JazariConfig config)
     {
         var stopped = 0;
-        foreach (var p in Process.GetProcessesByName("llama-server").Concat(Process.GetProcessesByName("MyOwnLLM.Gateway")))
+        foreach (var p in Ours(config.LlamaServer).Concat(Ours(config.GatewayExe)))
         {
             using (p)
             {
                 try { p.Kill(entireProcessTree: true); stopped++; }
-                catch (InvalidOperationException) { } // already gone
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) { } // gone, or not ours to stop
             }
         }
         return stopped;

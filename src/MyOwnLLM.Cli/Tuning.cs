@@ -38,12 +38,15 @@ public sealed record Tuning(
     public static Tuning? Load(string path)
     {
         try { return File.Exists(path) ? JsonSerializer.Deserialize<Tuning>(File.ReadAllText(path), JsonSerializerOptions.Web) : null; }
-        catch (JsonException) { return null; }
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) { return null; } // unreadable: measure again
     }
 
+    /// <summary>Written to a temporary file first, so a start cut short never leaves half a file behind.</summary>
     public void Save(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions(JsonSerializerOptions.Web) { WriteIndented = true }));
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(this, new JsonSerializerOptions(JsonSerializerOptions.Web) { WriteIndented = true }));
+        File.Move(temp, path, overwrite: true);
     }
 }

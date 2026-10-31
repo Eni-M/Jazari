@@ -15,23 +15,23 @@ if (cli.Command == "version")
     return 0;
 }
 
-if (cli.Command == "stop")
-{
-    Console.WriteLine($"stopped {ServerLauncher.StopServers()} Jazari server process(es)");
-    return 0;
-}
-
 // Everything machine-specific comes from the config the installer wrote, so nothing is hard-coded.
 var config = JazariConfig.Load(JazariConfig.DefaultPath);
 var runner = new ProcessRunner();
 
+if (cli.Command is "stop" or "tune" && config is null) { Console.Error.WriteLine("Jazari isn't installed: run scripts/install-jazari.ps1"); return 2; }
+if (cli.Command == "stop")
+{
+    Console.WriteLine($"stopped {ServerLauncher.StopServers(config!)} Jazari server process(es)");
+    return 0;
+}
+
 if (cli.Command == "tune")
 {
-    if (config is null) { Console.Error.WriteLine("Jazari isn't installed: run scripts/install-jazari.ps1"); return 2; }
     // The model must have the PC to itself while it's measured.
-    if (ServerLauncher.StopServers() > 0) Console.WriteLine("Stopped Jazari's servers; they start again with the new settings.");
+    if (ServerLauncher.StopServers(config!) > 0) Console.WriteLine("Stopped Jazari's servers; they start again with the new settings.");
     var tuneUi = new Ui(Console.Out, new Theme(ColorMode.None, unicode: true), 100);
-    await new DeviceTuner(runner, tuneUi).EnsureAsync(config, DeviceTuner.ReadMachine(), Tuning.DefaultPath, CancellationToken.None, force: true);
+    await new DeviceTuner(runner, tuneUi).EnsureAsync(config!, DeviceTuner.ReadMachine(), Tuning.DefaultPath, CancellationToken.None, force: true);
     return 0;
 }
 Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0"); // git must never stop to ask for credentials
@@ -73,16 +73,22 @@ if (cli.Command == "session") startupUi.TakeOverScreen();
 var tuner = new DeviceTuner(runner, startupUi);
 async Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) =>
     (await tuner.EnsureAsync(c, DeviceTuner.ReadMachine(), Tuning.DefaultPath, ct)).ServerArgs(c.Model);
-async Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) =>
-    (await tuner.FallBackAsync(c, DeviceTuner.ReadMachine(), Tuning.DefaultPath, ct)).ServerArgs(c.Model);
+Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.FallBack(DeviceTuner.ReadMachine()).ServerArgs(c.Model));
 var serverState = await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay,
         llamaArgs: TunedArgs, fallbackArgs: SafeArgs)
     .EnsureRunningAsync(config, CancellationToken.None);
-// A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run.
-if (serverState == ConnectionState.KeyRejected && await provisioner.EnsureKeyAsync(key, config, CancellationToken.None, rejected: true) is { } freshKey)
+// A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run. It's kept only if the
+// gateway answering here accepts it: a 401 from some other server on the port mustn't replace a working key.
+async Task<bool> Accepted(string candidate, CancellationToken ct)
+{
+    var previous = http.DefaultRequestHeaders.Authorization;
+    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", candidate);
+    try { await gateway.InfoAsync(ct); return true; }
+    catch (GatewayException) { http.DefaultRequestHeaders.Authorization = previous; return false; }
+}
+if (serverState == ConnectionState.KeyRejected && await provisioner.EnsureKeyAsync(key, config, CancellationToken.None, rejected: true, accepted: Accepted) is { } freshKey)
 {
     key = freshKey;
-    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
 }
 
 if (cli.Command == "session")

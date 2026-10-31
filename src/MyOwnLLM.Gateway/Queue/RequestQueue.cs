@@ -47,6 +47,13 @@ public sealed class RequestQueue(int capacity = 8)
 
         lock (_gate)
         {
+            // Refuse before cancelling anything: a request turned away mustn't have stopped someone else's work.
+            // A new completion replaces the waiting ones, so those don't count against it.
+            if (_pending.Count(i => kind != WorkKind.Completion || i.Kind != WorkKind.Completion) >= capacity)
+            {
+                cts.Dispose();
+                throw new QueueFullException();
+            }
             if (kind == WorkKind.Completion) SupersedeCompletions();
             if (kind == WorkKind.Chat && _running is { Kind: WorkKind.Background } background)
             {
@@ -54,7 +61,6 @@ public sealed class RequestQueue(int capacity = 8)
                 background.Superseded = true;
                 background.Cts.Cancel();
             }
-            if (_pending.Count >= capacity) throw new QueueFullException();
             _pending.Add(item);
         }
 

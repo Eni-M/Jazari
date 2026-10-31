@@ -17,7 +17,10 @@ public sealed record LaunchPlan(string Kind, string Exe, string[] Args, string? 
 
         if (args is ["update"])
         {
-            var updater = Path.Combine(sourceDir, "scripts", "update-jazari.ps1");
+            // The copy the last good update kept in the install folder: one broken on main never reaches it, so a fix can
+            // still be fetched. Installs from before that copy existed use the source copy.
+            var kept = Path.Combine(installDir, "update-jazari.ps1");
+            var updater = fileExists(kept) ? kept : Path.Combine(sourceDir, "scripts", "update-jazari.ps1");
             return fileExists(updater)
                 ? new("update", PowerShell, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", updater], null, sourceDir)
                 : Fail(@"Jazari's updater is missing. Run scripts\install-jazari.ps1 again from your MyOwnLLM clone.");

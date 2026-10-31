@@ -11,14 +11,15 @@ public class ProcessRunnerTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch (IOException) { }
     }
 
+    static string PowerShell => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
+
     [Fact]
     public async Task StartDetached_runs_the_program_and_writes_its_log()
     {
         if (!OperatingSystem.IsWindows()) return;
         var log = Path.Combine(_dir, "logs", "out.log");
-        var comspec = Environment.GetEnvironmentVariable("ComSpec")!;
 
-        new ProcessRunner().StartDetached(comspec, ["/c", "echo", "jazari-ok"], log);
+        new ProcessRunner().StartDetached(PowerShell, ["-NoProfile", "-Command", "Write-Output jazari-ok"], log);
 
         for (var i = 0; i < 50 && !(File.Exists(log) && (await ReadShared(log)).Contains("jazari-ok")); i++) await Task.Delay(100);
         Assert.Contains("jazari-ok", await ReadShared(log));
@@ -29,12 +30,25 @@ public class ProcessRunnerTests : IDisposable
     {
         if (!OperatingSystem.IsWindows()) return;
         var log = Path.Combine(_dir, "cwd.log");
-        var comspec = Environment.GetEnvironmentVariable("ComSpec")!;
 
-        new ProcessRunner().StartDetached(comspec, ["/c", "cd"], log);
+        new ProcessRunner().StartDetached(PowerShell, ["-NoProfile", "-Command", "(Get-Location).Path"], log);
 
-        for (var i = 0; i < 50 && (await ReadShared(log)).Trim().Length == 0; i++) await Task.Delay(100);
-        Assert.Equal(Path.GetDirectoryName(comspec)!.TrimEnd('\\'), (await ReadShared(log)).Trim().TrimEnd('\\'), ignoreCase: true);
+        for (var i = 0; i < 100 && (await ReadShared(log)).Trim().Length == 0; i++) await Task.Delay(100);
+        Assert.Equal(Path.GetDirectoryName(PowerShell)!.TrimEnd('\\'), (await ReadShared(log)).Trim().TrimEnd('\\'), ignoreCase: true);
+    }
+
+    [Fact]
+    public async Task StartDetached_passes_cmd_special_characters_through_untouched()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var log = Path.Combine(_dir, "R&D %OS% ^x", "out.log"); // a folder name cmd would split at & and expand
+        var marker = Path.Combine(_dir, "injected.txt");
+
+        new ProcessRunner().StartDetached(PowerShell, ["-NoProfile", "-Command", $"Write-Output 'R&D%OS%^x&echo x>{marker}'"], log);
+
+        for (var i = 0; i < 100 && !(await ReadShared(log)).Contains("R&D"); i++) await Task.Delay(100);
+        Assert.Contains($"R&D%OS%^x&echo x>{marker}", await ReadShared(log));
+        Assert.False(File.Exists(marker));
     }
 
     [Fact]

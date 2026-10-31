@@ -43,13 +43,21 @@ public sealed class ProcessRunner : IProcessRunner
         // terminal's handles, so it outlives jazari and never holds a pipe open.
         // Full path for cmd, and the server starts in its own folder: jazari runs inside arbitrary (maybe cloned, untrusted)
         // folders, and a bare name or that folder as working directory could pick up a planted cmd.exe or git.exe.
-        var command = $"\"{exe}\" {string.Join(' ', args.Select(Quote))} > \"{logFile}\" 2>&1";
+        // No path or argument is ever written into the command line itself: cmd would act on a & or ^ in a folder name
+        // (C:\Users\R&D\...) and expand %...% even inside quotes. Each goes through an environment variable the child
+        // inherits instead; cmd expands it once, never re-reads the result for %, and the quotes keep & | < > literal.
+        string[] parts = [exe, .. args, logFile];
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (parts[i].Contains('"')) throw new ArgumentException($"can't pass a quote to {Path.GetFileName(exe)}: {parts[i]}");
+            Environment.SetEnvironmentVariable($"JAZARI_ARG{i}", parts[i]);
+        }
+        string Ref(int i) => parts[i].Length == 0 ? "\"\"" : $"\"%JAZARI_ARG{i}%\"";
+        var command = $"{string.Join(' ', Enumerable.Range(0, parts.Length - 1).Select(Ref))} > {Ref(parts.Length - 1)} 2>&1";
         var cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
-        Process.Start(new ProcessStartInfo(cmd, $"/d /c \"{command}\"")
+        Process.Start(new ProcessStartInfo(cmd, $"/d /v:off /c \"{command}\"")
         {
             UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = Path.GetDirectoryName(exe)!,
         });
     }
-
-    static string Quote(string arg) => arg.Contains(' ') ? $"\"{arg}\"" : arg;
 }

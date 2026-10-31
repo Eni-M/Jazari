@@ -112,12 +112,27 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     {
         if (Tokens(file.Text) <= unitTokens) { yield return file; yield break; }
         var part = new StringBuilder();
-        foreach (var line in file.Text.Split('\n'))
+        var partStart = 1;
+        var lineNumber = 0;
+        var maxChars = unitTokens * 4;
+        foreach (var whole in file.Text.Split('\n'))
         {
-            if (Tokens(part.ToString()) + Tokens(line) > unitTokens && part.Length > 0) { yield return file with { Text = part.ToString() }; part.Clear(); }
-            part.Append(line).Append('\n');
+            lineNumber++;
+            // A single line longer than a part (minified or generated code, a one-line JSON file) is cut into pieces too,
+            // or its part would never fit the model and the review would stop there on every run.
+            for (var at = 0; at == 0 || at < whole.Length; at += maxChars)
+            {
+                var line = whole.Length <= maxChars ? whole : whole.Substring(at, Math.Min(maxChars, whole.Length - at));
+                if (Tokens(part.ToString()) + Tokens(line) > unitTokens && part.Length > 0)
+                {
+                    yield return file with { Text = part.ToString(), FirstLine = partStart };
+                    part.Clear();
+                    partStart = lineNumber;
+                }
+                part.Append(line).Append('\n');
+            }
         }
-        if (part.Length > 0) yield return file with { Text = part.ToString() };
+        if (part.Length > 0) yield return file with { Text = part.ToString(), FirstLine = partStart };
     }
 
     static int Tokens(string text) => (text.Length + 3) / 4;
@@ -147,7 +162,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             if (wanted.Length == 0) break;
             var lines = candidate.Text.Split('\n');
             var at = Array.FindIndex(lines, l => Squeeze(l).Contains(wanted, StringComparison.Ordinal));
-            if (at >= 0) return new(candidate.Path, at + 1, quote.Trim(), problem, severity, fix, Verified: true);
+            if (at >= 0) return new(candidate.Path, candidate.FirstLine + at, quote.Trim(), problem, severity, fix, Verified: true);
         }
         return new(file, null, quote.Trim(), problem, severity, fix, Verified: false);
     }

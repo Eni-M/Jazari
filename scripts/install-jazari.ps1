@@ -31,7 +31,8 @@ if (Test-Path $configPath) {
 if (-not $InstallDir) { $InstallDir = $previous.installDir }
 if (-not $InstallDir) { $InstallDir = $defaultDir }
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
-$InstallDir = (Resolve-Path $InstallDir).Path
+# No trailing backslash (tab completion adds one): the "$InstallDir\" checks below and the default-folder test need it bare.
+$InstallDir = [IO.Path]::TrimEndingDirectorySeparator((Resolve-Path $InstallDir).Path)
 $customDir = $InstallDir -ne $defaultDir
 Write-Host "Installing Jazari into $InstallDir"
 
@@ -88,7 +89,8 @@ New-Item -ItemType Directory -Force (Split-Path $configPath) | Out-Null
 } | ConvertTo-Json | Set-Content -Encoding UTF8 "$configPath.new"
 Move-Item -Force "$configPath.new" $configPath
 
-# 4. everything else
+# 4. everything else. `jazari update` runs the updater copy kept in the install folder (see update-jazari.ps1).
+Copy-Item -Force (Join-Path $source "scripts\update-jazari.ps1") (Join-Path $InstallDir "update-jazari.ps1")
 & (Join-Path $source "scripts\update-jazari.ps1") -Reexec
 $updated = $LASTEXITCODE
 if (-not (Test-Path (Join-Path $InstallDir "app\jazari.exe"))) {
@@ -109,9 +111,16 @@ if ($customDir) {
     & { $ErrorActionPreference = "Continue"; dotnet tool uninstall --global Jazari *> $null }   # fine if it wasn't installed
     dotnet tool update --tool-path $binDir Jazari --add-source $artifacts --version $package
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    # Read and written as stored, unexpanded: entries like %USERPROFILE%\.dotnet\tools must stay variables, and the
+    # value stays REG_EXPAND_SZ. A user without a Path of their own gets one.
+    $envKey = Get-Item "HKCU:\Environment"
+    $userPath = [string]$envKey.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
     if (-not (($userPath -split ";") -contains $binDir)) {
-        [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(";"), $binDir) -join ";"), "User")
+        $newPath = (@($userPath.TrimEnd(";"), $binDir) | Where-Object { $_ }) -join ";"
+        Set-ItemProperty -Path "HKCU:\Environment" -Name "Path" -Value $newPath -Type ExpandString
+        # Tell open programs the environment changed (what setx does); setting and clearing a variable broadcasts it.
+        [Environment]::SetEnvironmentVariable("JAZARI_PATH_REFRESH", "1", "User")
+        [Environment]::SetEnvironmentVariable("JAZARI_PATH_REFRESH", $null, "User")
         Write-Host "Added $binDir to your PATH"
     }
 } else {

@@ -9,14 +9,19 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
     const double CodeTemperature = 0.2; // llama-server's default of 0.8 is meant for prose; code wants the likeliest answer
 
-    public async Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null)
+    public async Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null) =>
+        (await ChatWithEndAsync(messages, maxTokens, ct, jsonSchema)).Text;
+
+    public async Task<(string Text, bool CutOff)> ChatWithEndAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null)
     {
         var body = jsonSchema is null
             ? ChatBody(messages, maxTokens, stream: false)
             : new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = false, Temperature = CodeTemperature, JsonSchema = JsonDocument.Parse(jsonSchema).RootElement };
         using var response = await SendAsync("/v1/chat/completions", body, stream: false, ct);
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-        return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+        var choice = doc.RootElement.GetProperty("choices")[0];
+        var cutOff = choice.TryGetProperty("finish_reason", out var finish) && finish.ValueKind == JsonValueKind.String && finish.GetString() == "length";
+        return (choice.GetProperty("message").GetProperty("content").GetString() ?? "", cutOff);
     }
 
     public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
@@ -27,6 +32,8 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
         while (await reader.ReadLineAsync(ct) is { } line)
         {
+            // An error after streaming began (out of memory, a decode failure) must not pass for a finished answer.
+            if (line.StartsWith("error:")) throw new LlamaErrorException(500, StreamError(line["error:".Length..].Trim()));
             if (!line.StartsWith("data: ")) continue;
             var data = line["data: ".Length..];
             if (data == "[DONE]") yield break;
@@ -39,6 +46,7 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
     {
         using var doc = JsonDocument.Parse(data);
         var root = doc.RootElement;
+        if (root.TryGetProperty("error", out _)) throw new LlamaErrorException(500, StreamError(data));
         List<StreamPart> parts = [];
         if (root.TryGetProperty("prompt_progress", out var p) && p.ValueKind == JsonValueKind.Object)
             parts.Add(new(null, Progress: new(Int(p, "total"), Int(p, "cache"), Int(p, "processed"))));
@@ -52,6 +60,21 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
             parts.Add(new(null, Stats: new(Int(t, "prompt_n") + Int(t, "cache_n"), Int(t, "cache_n"), Number(t, "prompt_per_second"),
                 Int(t, "predicted_n"), Number(t, "predicted_per_second"))));
         return parts;
+    }
+
+    /// <summary>The message from an in-stream error, {"error":{"message":"..."}} or {"error":"..."}.</summary>
+    static string StreamError(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var error = doc.RootElement.TryGetProperty("error", out var e) ? e : doc.RootElement;
+            var message = error.ValueKind == JsonValueKind.String ? error.GetString()
+                : error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var m) ? m.GetString() : null;
+            if (message is { Length: > 0 }) return $"the model server failed while answering: {message}";
+        }
+        catch (JsonException) { }
+        return "the model server failed while answering";
     }
 
     static int Int(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.TryGetInt32(out var i) ? i : 0;

@@ -14,6 +14,9 @@ public sealed record StreamPart(string? Text, PromptProgress? Progress = null, A
 public interface ILlamaClient
 {
     Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null);
+    /// <summary>Like <see cref="ChatAsync"/>, also saying whether the answer stopped at <paramref name="maxTokens"/>.</summary>
+    async Task<(string Text, bool CutOff)> ChatWithEndAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null) =>
+        (await ChatAsync(messages, maxTokens, ct, jsonSchema), false);
     IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct);
     Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct);
     /// <summary>The context size llama-server was started with, or null when it can't say.</summary>

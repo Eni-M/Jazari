@@ -100,6 +100,42 @@ public class DeviceTunerTests : IDisposable
         Assert.Contains("safe CPU settings", _output.ToString());
     }
 
+    [Fact]
+    public void A_bench_that_crashed_part_way_keeps_the_rows_it_measured()
+    {
+        // llama-bench died on the second option: the array is cut after the first option's rows.
+        var cut = BenchJson[..BenchJson.IndexOf("{\"n_threads\":6", StringComparison.Ordinal)];
+
+        var results = DeviceTuner.Results(cut, Tuning.Default("f", 8, 16L << 30));
+
+        Assert.Equal(4, Assert.Single(results).Item1.Threads);
+    }
+
+    [Fact]
+    public async Task A_failed_device_listing_keeps_the_saved_settings()
+    {
+        var path = Path.Combine(_dir, "t.json");
+        var saved = Tuning.Default("an older fingerprint", 8, 16L << 30) with { Device = "Vulkan0", GpuLayers = 24 };
+        saved.Save(path);
+        var runner = new FakeRunner { DevicesExit = 1 };
+
+        var tuning = await Tuner(runner).EnsureAsync(Config(), Laptop, path, CancellationToken.None);
+
+        Assert.Equal(saved, tuning);
+        Assert.Equal(0, runner.Benches);
+    }
+
+    [Fact]
+    public void Falling_back_saves_nothing()
+    {
+        var path = Path.Combine(_dir, "t.json");
+
+        var safe = DeviceTuner.FallBack(Laptop);
+
+        Assert.Equal("none", safe.Device);
+        Assert.False(File.Exists(path));
+    }
+
     static JazariConfig Config() => new(@"C:\J", @"C:\J\gateway.exe", @"C:\J\llama\llama-server.exe", @"C:\J\m.gguf");
 
     /// <summary>Pretends the server, llama-bench and a 2 GB model are installed, without writing any files.</summary>
@@ -111,16 +147,19 @@ public class DeviceTunerTests : IDisposable
     {
         public int Benches { get; private set; }
         public int BenchExit { get; init; }
+        public int DevicesExit { get; init; }
         public string Devices { get; init; } = "Available devices:\n  (none)\n";
         public List<string[]> Runs { get; } = [];
 
         public Task<(int ExitCode, string Output)> RunAsync(string exe, string[] args, CancellationToken ct)
         {
-            if (args is ["--list-devices"]) return Task.FromResult((0, Devices));
+            if (args is ["--list-devices"]) return Task.FromResult((DevicesExit, Devices));
             Benches++;
             Runs.Add(args);
-            return Task.FromResult((BenchExit, BenchJson));
+            return Task.FromResult((BenchExit, BenchOutput ?? (BenchExit == 0 ? BenchJson : "Access is denied.")));
         }
+
+        public string? BenchOutput { get; init; }
 
         public void StartDetached(string exe, string[] args, string logFile) { }
     }

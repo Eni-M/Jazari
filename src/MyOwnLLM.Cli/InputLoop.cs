@@ -93,7 +93,8 @@ public static class InputLoop
         {
             if (generating is not { } current) return;
             e.Cancel = true;
-            current.Cancel();
+            try { current.Cancel(); }
+            catch (ObjectDisposedException) { } // the answer finished at that very moment
         };
         Console.CancelKeyPress += onCancel;
         try
@@ -126,8 +127,9 @@ public static class InputLoop
                 catch (Exception e) when (e is not OperationCanceledException) { session.Unexpected(e); }
                 finally
                 {
-                    generating.Dispose();
-                    generating = null;
+                    var finished = generating;
+                    generating = null; // first, so a Ctrl+C from now on finds nothing to cancel
+                    finished.Dispose();
                 }
             }
         }
