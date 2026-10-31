@@ -381,11 +381,44 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         catch (Exception e) when (e is not OperationCanceledException) { ui.Error("Couldn't reach the clipboard.", e.Message, null); }
     }
 
+    static readonly (string Label, string[] Commands)[] HelpGroups =
+    [
+        ("Ask", ["/retry", "/status"]),
+        ("Files and code", ["/read", "/diff", "/context", "/edit", "/undo", "/copy", "/review", "/commit"]),
+        ("Session", ["/model", "/clear", "/details", "/help", "/exit"]),
+    ];
+
+    static readonly (string Key, string Value)[] Keys =
+    [
+        ("Enter", "Send"), ("Alt+Enter", "New line (also Shift+Enter, Ctrl+J)"), ("Tab", "Complete commands and paths"),
+        ("Up / Down", "History"), ("Ctrl+C", "Stop the answer; twice on an empty line quits"),
+    ];
+
     void Help()
     {
-        ui.Rows(Commands.Select(c => (c.Command, c.What)));
-        ui.Blank();
-        ui.Rows([("Enter", "Send"), ("Alt+Enter", "New line (also Shift+Enter, Ctrl+J)"), ("Ctrl+C", "Stop the answer"), ("Up / Down", "History")]);
+        var groups = HelpGroups.Select(g => (g.Label, Rows: g.Commands.Select(name => Commands.First(c => c.Command.Split(' ')[0] == name))
+            .Select(c => (c.Command, c.What)).ToList())).ToList();
+        groups[0].Rows.Insert(0, ("(just type)", "Ask a question; answers keep the conversation"));
+        var width = Ui.KeyWidth([.. groups.Select(g => g.Rows), Keys]);
+        foreach (var (label, rows) in groups)
+        {
+            ui.Label(label);
+            ui.Rows(rows, width);
+            ui.Blank();
+        }
+        ui.Label("Keys");
+        ui.Rows(Keys, width);
+    }
+
+    /// <summary>What the next question carries besides itself, for the line above the prompt; null when nothing.</summary>
+    public string? StatusLine
+    {
+        get
+        {
+            var turns = _history.Count / 2;
+            var parts = new[] { _contextLabel, turns > 0 ? $"{turns} question{(turns == 1 ? "" : "s")}" : null }.OfType<string>().ToList();
+            return parts.Count == 0 ? null : string.Join($" {ui.Theme.Glyph('·')} ", parts);
+        }
     }
 
     void Details()

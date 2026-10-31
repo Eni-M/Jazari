@@ -71,7 +71,7 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
             if (layers < MinUsefulLayers) continue;
             ui.Metadata($"Measuring the GPU {gpu.Name}{(layers < ModelLayers ? $" with {layers} of {ModelLayers} layers" : "")}.");
             var ngl = layers >= ModelLayers ? 99 : layers;
-            results.AddRange(await BenchAsync(bench, config.Model, best with { Device = gpu.Id, GpuLayers = ngl },
+            results.AddRange(await BenchAsync(bench, config.Model, best with { Device = gpu.Id, GpuLayers = ngl, DeviceName = gpu.Name },
                 ["-dev", gpu.Id, "-ngl", ngl.ToString(), "-t", bestThreads.ToString()], "0,1", ct));
         }
 

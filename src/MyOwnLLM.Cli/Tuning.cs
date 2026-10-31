@@ -9,7 +9,7 @@ namespace MyOwnLLM.Cli;
 /// </summary>
 public sealed record Tuning(
     string Fingerprint, string Device, int Threads, int GpuLayers, bool FlashAttention, int ContextTokens, int CacheRamMiB,
-    double PromptPerSecond = 0, double AnswerPerSecond = 0)
+    double PromptPerSecond = 0, double AnswerPerSecond = 0, string? DeviceName = null)
 {
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "tuning.json");
 
@@ -22,6 +22,11 @@ public sealed record Tuning(
 
     /// <summary>16k tokens of context cost about 1.25 GB of cache on Granite 4.1 3B; below 12 GB of RAM, 8k leaves room for everything else.</summary>
     public static int ContextFor(long ramBytes) => ramBytes < 12L << 30 ? 8192 : 16384;
+
+    /// <summary>For the welcome screen: "Intel(R) Iris(R) Xe Graphics · flash attention · 14.9 tok/s".</summary>
+    public string Summary(char dot) =>
+        (Device == "none" ? $"CPU, {Threads} threads" : $"{DeviceName ?? Device}{(GpuLayers is > 0 and < 99 ? $", {GpuLayers} layers" : "")}")
+        + (FlashAttention ? $" {dot} flash attention" : "") + (AnswerPerSecond > 0 ? $" {dot} {AnswerPerSecond:0.0} tok/s" : "");
 
     public string[] ServerArgs(string model) =>
     [

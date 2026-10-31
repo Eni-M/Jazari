@@ -98,7 +98,7 @@ if (cli.Command == "session")
         Confirm = question => { Console.Write($"{question} [y/n] "); return Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes"; },
     };
     await InputLoop.RunAsync(interactive, ui, version, directory, reader,
-        hasKey: key is not null, updateAvailable: updateAvailable);
+        hasKey: key is not null, updateAvailable: updateAvailable, runningOn: Tuning.Load(Tuning.DefaultPath)?.Summary(theme.Glyph('·')));
     return 0;
 }
 

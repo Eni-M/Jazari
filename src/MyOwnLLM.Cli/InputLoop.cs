@@ -23,6 +23,8 @@ public sealed class PromptLineReader : ILineReader
 {
     readonly Prompt _prompt;
     readonly Ui _ui;
+    /// <summary>What the next question carries (files read, conversation), shown on the line above the prompt.</summary>
+    public Func<string?>? Status { get; set; }
 
     public PromptLineReader(Ui ui)
     {
@@ -40,7 +42,7 @@ public sealed class PromptLineReader : ILineReader
     public async Task<(bool Ok, string? Text)> ReadAsync()
     {
         _ui.Blank();
-        _ui.Divider();
+        _ui.Divider(Status?.Invoke());
         var result = await _prompt.ReadLineAsync();
         if (result.IsSuccess && FitsOneRow(result.Text))
         {
@@ -77,11 +79,12 @@ public sealed class PromptLineReader : ILineReader
 public static class InputLoop
 {
     public static async Task RunAsync(Session session, Ui ui, string version, string directory, ILineReader reader, bool hasKey = true,
-        Task<bool>? updateAvailable = null)
+        Task<bool>? updateAvailable = null, string? runningOn = null)
     {
         // Like any good CLI, open even when setup is incomplete, and say what's missing instead of exiting.
         var state = hasKey ? await session.ConnectAsync(CancellationToken.None) : ConnectionState.NoKey;
-        Welcome.Render(ui, version, session.ModelName, directory, state);
+        Welcome.Render(ui, version, session.ModelName, directory, state, runningOn);
+        if (reader is PromptLineReader prompt) prompt.Status = () => session.StatusLine;
         ui.Blank();
 
         // While an answer streams nobody is reading keys, so Ctrl+C arrives as a console signal: stop the answer.

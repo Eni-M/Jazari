@@ -2,27 +2,32 @@ using MyOwnLLM.Cli.Terminal;
 
 namespace MyOwnLLM.Cli;
 
-/// <summary>The opening header: three lines and a hint, then it scrolls away with the conversation.</summary>
+/// <summary>The opening header: the wordmark, four rows and a hint, then it scrolls away with the conversation.</summary>
 public static class Welcome
 {
-    public static void Render(Ui ui, string version, string model, string directory, ConnectionState state)
+    /// <param name="runningOn">Where this PC's tuning runs the model ("Intel(R) Iris(R) Xe Graphics · flash attention · 14.9 tok/s"), when known.</param>
+    public static void Render(Ui ui, string version, string model, string directory, ConnectionState state, string? runningOn = null)
     {
         var dot = ui.Theme.Glyph('·');
         ui.Wordmark(version);
-        ui.Line($"{model} {dot} local {dot} {state switch
+        ui.Blank();
+        List<(string, string)> rows = [("Model", $"{model} {dot} local")];
+        if (runningOn is { Length: > 0 }) rows.Add(("Running on", runningOn));
+        rows.Add(("Directory", ShortPath(directory)));
+        rows.Add(("Connection", state switch
         {
             ConnectionState.Available => "Available",
             ConnectionState.KeyRejected => "Key rejected",
             ConnectionState.NoKey => "Key not set",
             _ => "Gateway not running",
-        }}", Tone.Secondary);
-        ui.Line(ShortPath(directory), Tone.Secondary);
+        }));
+        ui.Rows(rows);
         ui.Blank();
-        ui.Line($"/help for commands {dot} /status for where we left off", Tone.Muted);
+        ui.Line($"/help for commands {dot} Tab completes {dot} Ctrl+C stops an answer", Tone.Muted);
 
         if (state == ConnectionState.Available) return;
         ui.Blank();
-        ui.Line("To get started", Tone.Secondary);
+        ui.Label("To get started");
         foreach (var step in NextSteps(state)) ui.Line(step, Tone.Muted);
     }
 

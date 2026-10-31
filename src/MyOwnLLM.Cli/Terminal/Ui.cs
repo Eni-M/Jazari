@@ -31,15 +31,22 @@ public sealed class Ui(TextWriter output, Theme theme, int width)
 
     public void Label(string text) => output.WriteLine(theme.Paint(ConsoleText.Sanitize(text).ToUpperInvariant(), Tone.Muted));
 
-    public void Rows(IEnumerable<(string Key, string Value)> rows)
+    /// <summary>Key/value rows; the key column fits the longest key (at least 12), so values never run into keys.</summary>
+    public void Rows(IEnumerable<(string Key, string Value)> rows, int? keyWidth = null)
     {
-        foreach (var (key, value) in rows)
+        var list = rows.Select(r => (Key: ConsoleText.Sanitize(r.Key), Value: ConsoleText.Sanitize(r.Value))).ToList();
+        var column = keyWidth ?? Math.Max(KeyColumn, list.Select(r => r.Key.Length + 2).DefaultIfEmpty(0).Max());
+        foreach (var (key, value) in list)
         {
-            var lines = Wrap(ConsoleText.Sanitize(value), Width - KeyColumn);
-            output.WriteLine(theme.Paint(ConsoleText.Sanitize(key).PadRight(KeyColumn), Tone.Muted) + theme.Paint(lines[0], Tone.Secondary));
-            foreach (var more in lines.Skip(1)) output.WriteLine(new string(' ', KeyColumn) + theme.Paint(more, Tone.Secondary));
+            var lines = Wrap(value, Width - column);
+            output.WriteLine(theme.Paint(key.PadRight(column), Tone.Muted) + theme.Paint(lines[0], Tone.Secondary));
+            foreach (var more in lines.Skip(1)) output.WriteLine(new string(' ', column) + theme.Paint(more, Tone.Secondary));
         }
     }
+
+    /// <summary>The key column that fits every key in all of <paramref name="groups"/>, so grouped rows line up.</summary>
+    public static int KeyWidth(IEnumerable<IEnumerable<(string Key, string Value)>> groups) =>
+        Math.Max(KeyColumn, groups.SelectMany(g => g).Select(r => r.Key.Length + 2).DefaultIfEmpty(0).Max());
 
     public void ToolLines(string label, IEnumerable<string> doneSteps)
     {
@@ -78,7 +85,15 @@ public sealed class Ui(TextWriter output, Theme theme, int width)
 
     public void Metadata(string text) => output.WriteLine(theme.Paint(ConsoleText.Sanitize(text), Tone.Muted));
 
-    public void Divider() => output.WriteLine(theme.Paint(new string(theme.Glyph('─'), Math.Min(Width, 60)), Tone.Line));
+    /// <summary>The thin line above the prompt; with a label, it starts with what the next question will carry.</summary>
+    public void Divider(string? label = null)
+    {
+        var length = Math.Min(Width, 60);
+        if (label is not { Length: > 0 }) { output.WriteLine(theme.Paint(new string(theme.Glyph('─'), length), Tone.Line)); return; }
+        var text = ConsoleText.Sanitize(label);
+        if (text.Length > length - 4) text = text[..(length - 7)] + "...";
+        output.WriteLine(theme.Paint(text + " ", Tone.Muted) + theme.Paint(new string(theme.Glyph('─'), Math.Max(3, length - text.Length - 1)), Tone.Line));
+    }
 
     /// <summary>Word-wraps to <paramref name="max"/> columns; words longer than a line are split.</summary>
     public static IReadOnlyList<string> Wrap(string text, int max)
