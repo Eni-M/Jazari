@@ -58,6 +58,7 @@ Plan and status (update as each step finishes):
 - Shorter answers: the new system prompt cut five test answers from 762 to 246 tokens with the same findings (`be29f23`). Answers cut at the token limit now say so.
 - Skipped, measured or reasoned: batch sizes (`-ub` 256 to 2048 made no difference on Iris Xe or CPU), and saving the prompt cache to disk (after a restart the CLI starts a fresh conversation, so only the system prompt and note would carry over, and the note changes).
 - CLI: `/diff`, `/commit`, `/context`, path completion, `--help`, `--version`. Lesson for prompts: a 3B model given a big diff as background context, or examples, describes the wrong thing. Put the material in the question and keep it compact (`--stat` plus `-U1`).
+- Interface refresh (`666fc82`), within the CLI design spec: welcome rows with "Running on" (the tuned device), grouped `/help` with a key column that fits every command (long commands used to overlap their descriptions), and what the next question carries shown on the line above the prompt. Checked by rendering the screens to HTML.
 - The clipboard failed again while the PC was locked (`/commit` says so and leaves the text on screen).
 
 ### Next, after session 2
