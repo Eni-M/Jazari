@@ -21,7 +21,6 @@ public sealed class TextLineReader(TextReader input) : ILineReader
 /// <summary>The full editor: multi-line input, persistent history, Tab completion of / commands.</summary>
 public sealed class PromptLineReader : ILineReader
 {
-    static readonly string[] Commands = ["/help", "/status", "/model", "/clear", "/retry", "/details", "/exit"];
     readonly Prompt _prompt;
     readonly Ui _ui;
 
@@ -58,16 +57,19 @@ public sealed class PromptLineReader : ILineReader
 
     sealed class Callbacks : PromptCallbacks
     {
-        protected override Task<bool> ShouldOpenCompletionWindowAsync(string text, int caret, KeyPress keyPress, CancellationToken ct) =>
-            Task.FromResult(text.StartsWith('/') && !text.Contains(' '));
+        static string Here => Directory.GetCurrentDirectory();
 
-        protected override Task<TextSpan> GetSpanToReplaceByCompletionAsync(string text, int caret, CancellationToken ct) =>
-            Task.FromResult(text.StartsWith('/') ? new TextSpan(0, caret) : new TextSpan(caret, 0));
+        protected override Task<bool> ShouldOpenCompletionWindowAsync(string text, int caret, KeyPress keyPress, CancellationToken ct) =>
+            Task.FromResult(Completions.For(text, caret, Here).Items.Count > 0);
+
+        protected override Task<TextSpan> GetSpanToReplaceByCompletionAsync(string text, int caret, CancellationToken ct)
+        {
+            var start = Completions.For(text, caret, Here).Start;
+            return Task.FromResult(new TextSpan(start, caret - start));
+        }
 
         protected override Task<IReadOnlyList<CompletionItem>> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<CompletionItem>>(text.StartsWith('/')
-                ? Commands.Where(c => c.StartsWith(text[..caret], StringComparison.OrdinalIgnoreCase)).Select(c => new CompletionItem(c)).ToList()
-                : []);
+            Task.FromResult<IReadOnlyList<CompletionItem>>(Completions.For(text, caret, Here).Items.Select(i => new CompletionItem(i)).ToList());
     }
 }
 

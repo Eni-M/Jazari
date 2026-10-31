@@ -8,6 +8,13 @@ CliArgs cli;
 try { cli = CliArgs.Parse(args); }
 catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
 
+if (cli.Command == "help") { Console.WriteLine(CliArgs.Usage); return 0; }
+if (cli.Command == "version")
+{
+    Console.WriteLine($"jazari {typeof(CliArgs).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0"}");
+    return 0;
+}
+
 if (cli.Command == "stop")
 {
     Console.WriteLine($"stopped {ServerLauncher.StopServers()} Jazari server process(es)");
@@ -112,6 +119,13 @@ switch (cli.Command)
         break;
     case "status":
         await session.HandleAsync("/status", cts.Token);
+        break;
+    case "commit":
+        await session.HandleAsync("/commit", cts.Token);
+        break;
+    case "diff":
+        await session.HandleAsync("/diff", cts.Token);
+        if (session.HasContext) await session.AskAsync(cli.Text!, cts.Token);
         break;
     case "review":
         await session.HandleAsync($"/review {cli.Text}", cts.Token);

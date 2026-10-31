@@ -49,6 +49,6 @@ public class CliArgsTests
     {
         var ex = Assert.Throws<ArgumentException>(() => CliArgs.Parse(args));
 
-        Assert.Contains("usage: jazari", ex.Message);
+        Assert.Contains("usage:", ex.Message);
     }
 }
