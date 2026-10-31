@@ -54,6 +54,12 @@ Plan and status (update as each step finishes):
 
 **Eni-M, 2026-10-31:** the T480 is the main device. No new models: tune Granite 4.1 3B for every device. The 8B download was stopped and deleted, and so was the OpenVINO build (tried first: reads 249 tok/s but writes only 8.0 on Iris Xe, so Vulkan stays). The review fixture is now in `spike/review-test` (3B on Iris Xe: 45 s, found the password and the SQL injection, missed the refund ownership check).
 
+**Session 2, later (2026-10-31):**
+- Shorter answers: the new system prompt cut five test answers from 762 to 246 tokens with the same findings (`be29f23`). Answers cut at the token limit now say so.
+- Skipped, measured or reasoned: batch sizes (`-ub` 256 to 2048 made no difference on Iris Xe or CPU), and saving the prompt cache to disk (after a restart the CLI starts a fresh conversation, so only the system prompt and note would carry over, and the note changes).
+- CLI: `/diff`, `/commit`, `/context`, path completion, `--help`, `--version`. Lesson for prompts: a 3B model given a big diff as background context, or examples, describes the wrong thing. Put the material in the question and keep it compact (`--stat` plus `-U1`).
+- The clipboard failed again while the PC was locked (`/commit` says so and leaves the text on screen).
+
 ### Next, after session 2
 
 - If llama-server doesn't come up with GPU settings (a driver update, for example), fall back to CPU settings and re-tune, instead of timing out. The fingerprint doesn't include the GPU driver version.
