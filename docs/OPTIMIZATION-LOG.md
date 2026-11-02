@@ -240,3 +240,7 @@ Answers like "tokens are limited by your subscription plan" and a fake GitHub li
 Tried on Granite 4.1 3B with a temporary llama-server on port 8099, not through Jazari. "As few words as the question needs" gave one-word, often wrong answers; "one to three complete sentences" gave correct ones to the questions tried, at 40-160 tokens. That undoes part of the 68% cut from 2026-10-31, so answers take longer: accuracy comes first. Still wrong: it says Jazari has no GitHub repository, because the prompt doesn't name one.
 
 The panel now sits at the bottom of the window. It's drawn at a fixed position while the conversation scrolls normally, so scrollback still works; scroll margins aren't used.
+
+## Model chosen by the test set (2026-11-02)
+
+`eval/` runs 45 C#/.NET questions plus `/read`, `/edit`, `/review` and a conversation against any model. Granite 4.0-H Tiny on the CPU won under the agreed limits: 37/45, typically 8 s an answer, 47 s for the first answer after `/read`, 12 s for a follow-up. Qwen3 4B scored higher, 41/45, but missed the limits, at 23 s typically and 153 s after `/read`. Compare them again once the law book exists. CPU threads are now capped at half: on the T480 that wrote faster than all 8. Full results: `docs/superpowers/specs/2026-11-02-model-choice-results.md`.

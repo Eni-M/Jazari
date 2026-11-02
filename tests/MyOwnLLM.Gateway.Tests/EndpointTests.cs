@@ -327,7 +327,7 @@ public class EndpointTests : IDisposable
         response.EnsureSuccessStatusCode();
         var json = await Json(response);
         Assert.Equal("Jazari", json.GetProperty("name").GetString());
-        Assert.Equal("Granite 4.1 3B", json.GetProperty("model").GetString());
+        Assert.Equal("Granite 4.0-H Tiny", json.GetProperty("model").GetString());
         Assert.False(string.IsNullOrEmpty(json.GetProperty("version").GetString()));
     }
 

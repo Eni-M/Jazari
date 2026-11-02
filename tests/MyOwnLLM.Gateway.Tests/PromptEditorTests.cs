@@ -308,6 +308,19 @@ public class PromptEditorTests
     }
 
     [Fact]
+    public async Task The_panel_shortens_the_model_name()
+    {
+        var output = new StringWriter();
+        var theme = new Theme(ColorMode.TrueColor, unicode: true);
+        var gateway = new FakeGateway { Info = _ => Task.FromResult(new GatewayInfo("Jazari", "Granite 4.0-H Tiny", "0.3.0")) };
+        var session = new Session(gateway, new Ui(output, theme, 100), () => new MarkdownStream(output, theme, 100), @"C:\Repo");
+
+        await session.ConnectAsync(CancellationToken.None);
+
+        Assert.StartsWith("granite tiny", session.Panel().Status);
+    }
+
+    [Fact]
     public void The_short_device_name_drops_the_vendor()
     {
         Assert.Equal("iris xe", (Tuning.Default("f", 8, 16L << 30) with { Device = "Vulkan0", DeviceName = "Intel(R) Iris(R) Xe Graphics" }).ShortName());
@@ -317,6 +330,7 @@ public class PromptEditorTests
 
     [Theory]
     [InlineData("C:/x/granite-4.1-3b-Q4_K_M.gguf", "granite 3b")]
+    [InlineData("C:/x/granite-4.0-h-tiny-Q4_K_M.gguf", "granite tiny")]
     [InlineData("custom.gguf", "the model")]
     [InlineData(null, "the model")]
     public void The_starting_model_comes_from_the_file_name(string? file, string expected) => Assert.Equal(expected, Session.ModelFromFile(file));

@@ -91,7 +91,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     public static string ModelFromFile(string? file) =>
         ModelFile().Match(Path.GetFileName(file ?? "")) is { Success: true } m ? $"{m.Groups[1].Value} {m.Groups[2].Value}".ToLowerInvariant() : "the model";
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"^([A-Za-z]+)-[\d.]+-([^-]+)-")] private static partial System.Text.RegularExpressions.Regex ModelFile();
+    [System.Text.RegularExpressions.GeneratedRegex(@"^([A-Za-z]+)-[\d.]+-(?:h-)?([^-]+)-")] private static partial System.Text.RegularExpressions.Regex ModelFile();
     [System.Text.RegularExpressions.GeneratedRegex(@"\s*\b\d+\.\d+\b")] private static partial System.Text.RegularExpressions.Regex ModelVersion();
 
     /// <summary>What the panel around the prompt shows right now.</summary>
