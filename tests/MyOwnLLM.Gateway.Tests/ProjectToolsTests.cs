@@ -90,6 +90,42 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public void A_fragment_or_a_repeated_line_does_not_verify_a_finding()
+    {
+        List<ProjectFile> unit = [new("a.cs", "if (ok)\n{\n    return user.Password;\n}\nlog.Info(\"done\");\nlog.Info(\"done\");\n")];
+
+        var found = ProjectReview.Parse("""
+            {"findings":[
+              {"file":"a.cs","quote":"}","problem":"a brace","severity":"low"},
+              {"file":"a.cs","quote":"user.Password","problem":"part of a line","severity":"high"},
+              {"file":"a.cs","quote":"return user.Password;","problem":"leaks it","severity":"high"},
+              {"file":"a.cs","quote":"log.Info(\"done\");","problem":"twice","severity":"low"},
+              {"file":"a.cs","quote":"=== ((( ))) ===","problem":"no name in it","severity":"low"}]}
+            """, unit)!;
+
+        Assert.False(found[0].Verified); // shorter than a meaningful line
+        Assert.False(found[1].Verified); // under 80% of the line it's in
+        Assert.True(found[2].Verified);
+        Assert.Equal(3, found[2].Line);
+        Assert.Equal("", found[2].Fix); // the fix is optional now
+        Assert.True(found[3].Ambiguous);
+        Assert.False(found[3].Verified);
+        Assert.False(found[4].Verified);
+    }
+
+    [Fact]
+    public async Task An_ambiguous_finding_gets_its_own_section_and_no_empty_fix()
+    {
+        Add("Auth.cs", "log.Info(\"done\");\nlog.Info(\"done\");");
+        _gateway.Complete = (_, _) => Task.FromResult("""{"findings":[{"file":"Auth.cs","quote":"log.Info(\"done\");","problem":"bad","severity":"low"}]}""");
+
+        var text = File.ReadAllText((await Review().RunAsync(_dir, CancellationToken.None))!);
+
+        Assert.Contains("Ambiguous: the quoted line appears more than once (1)", text);
+        Assert.DoesNotContain("**Fix:**", text);
+    }
+
+    [Fact]
     public async Task A_review_writes_a_report_and_the_next_one_only_reads_what_changed()
     {
         var path = Add("Auth.cs", "var sql = 1;");

@@ -6,7 +6,8 @@ using MyOwnLLM.Cli.Terminal;
 
 namespace MyOwnLLM.Cli;
 
-public sealed record Finding(string File, int? Line, string Quote, string Problem, string Severity, string Fix, bool Verified);
+/// <param name="Ambiguous">The quote matches several lines, so which one the finding means isn't known.</param>
+public sealed record Finding(string File, int? Line, string Quote, string Problem, string Severity, string Fix, bool Verified, bool Ambiguous = false);
 
 /// <summary>
 /// Reviews a whole project by small parts, riskiest files first. Each finished part is saved straight away, so a stopped
@@ -17,13 +18,20 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
 {
     public const int DefaultUnitTokens = 2000;
     const int AnswerTokens = 500;
-    const string PromptVersion = "3"; // change it when the prompt changes, so old answers aren't reused
+    const string PromptVersion = "4"; // change it when the prompt changes, so old answers aren't reused
 
+    /// <summary>
+    /// The quote comes first, so the problem is written about a real line. The fix is optional: asking for fixes makes
+    /// reviewers misjudge correct code more often (see reports/Jazari CLI and model enhancements.md, section 2).
+    /// </summary>
     const string Schema = """
         {"type":"object","required":["findings"],"properties":{"findings":{"type":"array","maxItems":5,"items":{"type":"object","additionalProperties":false,
-        "required":["file","quote","problem","severity","fix"],"properties":{"file":{"type":"string","maxLength":200},"quote":{"type":"string","maxLength":300},
+        "required":["file","quote","problem","severity"],"properties":{"file":{"type":"string","maxLength":200},"quote":{"type":"string","minLength":12,"maxLength":300},
         "problem":{"type":"string","maxLength":300},"severity":{"enum":["high","medium","low"]},"fix":{"type":"string","maxLength":400}}}}}}
         """;
+
+    /// <summary>A quote shorter than this, like "}" or "return;", matches too many lines to show anything.</summary>
+    const int MinQuoteChars = 12;
 
     const string Instructions =
         "Review the code above as a senior security-minded engineer. Check every method for: passwords or keys written in " +
@@ -32,7 +40,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         "weak crypto, business rules that can be bypassed, swallowed errors and real bugs. Report only what this code itself " +
         "shows. Never write \"if\" or \"could be compromised\" guesses about code you can't see, and no style remarks. If the " +
         "code is fine, return an empty list. For each problem give the file, one whole line copied exactly from the code as " +
-        "quote, what can go wrong, severity (high means an attacker gains something), and a short fix.";
+        "quote, what can go wrong, and severity (high means an attacker gains something). Add a short fix only when it's clear.";
 
     /// <summary>Returns the report's path, or null when there was nothing to review or the review stopped early.</summary>
     public async Task<string?> RunAsync(string root, CancellationToken ct)
@@ -70,7 +78,9 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
 
         var report = Path.Combine(storeDir, $"{Path.GetFileName(Path.GetFullPath(root).TrimEnd('\\', '/'))}-{DateTime.Now:yyyyMMdd-HHmm}.md");
         File.WriteAllText(report, Report(root, files.Count, skipped, failed, findings));
-        ui.Metadata($"{findings.Count(f => f.Verified)} verified, {findings.Count(f => !f.Verified)} unverified. Report: {report}");
+        var ambiguous = findings.Count(f => f.Ambiguous);
+        ui.Metadata($"{findings.Count(f => f.Verified)} verified, {(ambiguous > 0 ? $"{ambiguous} ambiguous, " : "")}" +
+            $"{findings.Count(f => !f.Verified && !f.Ambiguous)} unverified. Report: {report}");
         return report;
     }
 
@@ -148,24 +158,32 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             using var doc = JsonDocument.Parse(reply);
             return doc.RootElement.GetProperty("findings").EnumerateArray().Select(f => Check(
                 f.GetProperty("file").GetString() ?? "", f.GetProperty("quote").GetString() ?? "", f.GetProperty("problem").GetString() ?? "",
-                f.GetProperty("severity").GetString() ?? "low", f.GetProperty("fix").GetString() ?? "", unit)).ToList();
+                f.GetProperty("severity").GetString() ?? "low", f.TryGetProperty("fix", out var fix) ? fix.GetString() ?? "" : "", unit)).ToList();
         }
         catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException) { return null; }
     }
 
+    /// <summary>
+    /// Verified means the quote is one real line, or at least 80% of one, with a name or keyword in it, and only one line
+    /// matches. A fragment like "}" used to verify anything. A quote that matches several lines is kept as ambiguous.
+    /// </summary>
     static Finding Check(string file, string quote, string problem, string severity, string fix, List<ProjectFile> unit)
     {
         var wanted = Squeeze(quote);
-        // The named file first; the model sometimes names the wrong one of the part.
-        foreach (var candidate in unit.OrderBy(f => f.Path.Equals(file, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
-        {
-            if (wanted.Length == 0) break;
-            var lines = candidate.Text.Split('\n');
-            var at = Array.FindIndex(lines, l => Squeeze(l).Contains(wanted, StringComparison.Ordinal));
-            if (at >= 0) return new(candidate.Path, candidate.FirstLine + at, quote.Trim(), problem, severity, fix, Verified: true);
-        }
+        if (wanted.Length >= MinQuoteChars && Word().IsMatch(wanted))
+            // The named file first; the model sometimes names the wrong one of the part.
+            foreach (var candidate in unit.OrderBy(f => f.Path.Equals(file, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
+            {
+                var lines = candidate.Text.Split('\n');
+                var matches = Enumerable.Range(0, lines.Length).Where(i => Covers(wanted, Squeeze(lines[i]))).Take(2).ToList();
+                if (matches.Count == 1) return new(candidate.Path, candidate.FirstLine + matches[0], quote.Trim(), problem, severity, fix, Verified: true);
+                if (matches.Count > 1) return new(candidate.Path, null, quote.Trim(), problem, severity, fix, Verified: false, Ambiguous: true);
+            }
         return new(file, null, quote.Trim(), problem, severity, fix, Verified: false);
     }
+
+    static bool Covers(string wanted, string line) =>
+        line.Length > 0 && line.Contains(wanted, StringComparison.Ordinal) && wanted.Length * 5 >= line.Length * 4;
 
     static string Squeeze(string text) => Spaces().Replace(text, " ").Trim();
 
@@ -174,17 +192,25 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         var text = new StringBuilder($"# Review of {root}\n\n{DateTime.Now:yyyy-MM-dd HH:mm}. {files} files read, {skipped} skipped");
         text.Append(failed > 0 ? $", {failed} parts failed and will be retried on the next run.\n" : ".\n");
         text.Append("\nThis is a small local model's opinion: check each finding. \"Verified\" only means the quoted line exists.\n");
-        foreach (var (title, verified) in new[] { ("Verified", true), ("Unverified: the quoted line wasn't found", false) })
+        (string Title, Func<Finding, bool> In)[] groups =
+        [
+            ("Verified", f => f.Verified),
+            ("Ambiguous: the quoted line appears more than once", f => f.Ambiguous),
+            ("Unverified: the quoted line wasn't found", f => !f.Verified && !f.Ambiguous),
+        ];
+        foreach (var (title, inGroup) in groups)
         {
-            var group = findings.Where(f => f.Verified == verified).OrderBy(f => Array.IndexOf(["high", "medium", "low"], f.Severity)).ToList();
+            var group = findings.Where(inGroup).OrderBy(f => Array.IndexOf(["high", "medium", "low"], f.Severity)).ToList();
             if (group.Count == 0) continue;
             text.Append($"\n## {title} ({group.Count})\n");
             foreach (var f in group)
-                text.Append($"\n### [{f.Severity}] {f.File}{(f.Line is { } line ? $":{line}" : "")}\n\n{f.Problem}\n\n`{f.Quote.Replace('`', '\'')}`\n\n**Fix:** {f.Fix}\n");
+                text.Append($"\n### [{f.Severity}] {f.File}{(f.Line is { } line ? $":{line}" : "")}\n\n{f.Problem}\n\n`{f.Quote.Replace('`', '\'')}`\n")
+                    .Append(string.IsNullOrWhiteSpace(f.Fix) ? "" : $"\n**Fix:** {f.Fix}\n");
         }
         if (findings.Count == 0) text.Append("\nNo findings.\n");
         return text.ToString();
     }
 
     [GeneratedRegex(@"\s+")] private static partial Regex Spaces();
+    [GeneratedRegex(@"[A-Za-z_]{3,}")] private static partial Regex Word();
 }
