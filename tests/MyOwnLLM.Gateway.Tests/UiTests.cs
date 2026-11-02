@@ -208,7 +208,7 @@ public class UiTests
 
         var rows = Shown(output, 40);
         Assert.Equal("  jazari — ~/MyOwnLLM             main", rows[0]);
-        Assert.Equal(new string('▔', 40), rows[1]); // a thin line under it, never in the terminal's last column
+        Assert.Equal(new string('▔', 38), rows[1]); // a thin line under it, stopping at the right margin
     }
 
     [Fact]

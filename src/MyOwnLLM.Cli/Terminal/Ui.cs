@@ -91,10 +91,12 @@ public sealed class Ui
         var dash = _theme.Glyph('—').ToString();
         Add(columns =>
         {
-            var room = columns - 4 - TextWidth.Of(right) - 2;
+            // Like every row, it keeps clear of the right edge: text there would wrap when the window narrows.
+            var edge = columns - Layout.Margin(columns);
+            var room = edge - 2 - TextWidth.Of(right) - 2;
             var left = new LineBuilder().Add("  jazari ", Tone.Muted).Add(dash, Tone.Inactive).Add(" " + TextWidth.Fit(path, Math.Max(room - 9, 4)), Tone.Muted);
-            var row = left.PadTo(columns - 2 - TextWidth.Of(right)).Add(right, Tone.Muted).Build();
-            var rule = new string(_theme.Edges ? '▔' : _theme.Glyph('─'), columns);
+            var row = left.PadTo(edge - TextWidth.Of(right)).Add(right, Tone.Muted).Build();
+            var rule = new string(_theme.Edges ? '▔' : _theme.Glyph('─'), edge);
             return [row, new Line([new(rule, Tone.Border)])];
         });
     }

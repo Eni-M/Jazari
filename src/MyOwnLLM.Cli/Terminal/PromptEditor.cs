@@ -265,9 +265,12 @@ public static class PromptPanel
 
     static Line Padding() => new([], Surface.Panel);
 
-    /// <summary>The panel's 1 px top border: a one-eighth block along the top of a padding row.</summary>
+    /// <summary>
+    /// The panel's 1 px top border: a one-eighth block along the top of a padding row, stopping at the right margin so a
+    /// narrowing window never has to wrap it. The background still reaches the edge (blank cells don't wrap).
+    /// </summary>
     static Line Edge(Theme theme, int columns) =>
-        theme.Edges ? OnPanel(new LineBuilder().Add(new string('▔', columns), Tone.Border)) : Padding();
+        theme.Edges ? OnPanel(new LineBuilder().Add(new string('▔', columns - Grid.Margin(columns)), Tone.Border)) : Padding();
 
     static Line QuestionRow(Theme theme, string question, int columns)
     {

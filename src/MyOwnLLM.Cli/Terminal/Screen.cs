@@ -71,8 +71,19 @@ public sealed class Screen : IBlockSink
     int _width, _height, _area;
     int _anchorBlock, _anchorRow;
     (int Row, int Column)? _caret;
-    bool _started, _stopping, _pendingResize;
+    bool _started, _stopping;
     long _lastResize = -1000;
+    int _layoutColumns;
+    (int Block, int Row, int Columns) _anchorAt; // where the first visible row was last set, at the width it was set at
+
+    /// <summary>
+    /// While the window is being resized, rows are laid out this many columns narrower than the window. The terminal
+    /// reflows its screen the moment it shrinks, before Jazari can redraw, and any row with text past the new edge
+    /// would wrap and push rows into the scrollback; with this much room, a drag step never reaches the text.
+    /// </summary>
+    const int ResizeSlack = 8;
+    /// <summary>How long after the last size change the window counts as still being resized; then it's laid out at full width once more.</summary>
+    const int SettleMilliseconds = 400;
     Task? _loop;
 
     // Flow mode: rows already printed for good, and the rows still changing under them.
@@ -129,6 +140,7 @@ public sealed class Screen : IBlockSink
         else if (index == _doneBlock) _doneRow = 0;
         _layouts.Remove(_blocks[index]);
         _blocks.RemoveAt(index);
+        _anchorAt = (_anchorBlock, _anchorRow, _layoutColumns);
     }
 
     public bool IsOnScreen(Block block)
@@ -162,6 +174,7 @@ public sealed class Screen : IBlockSink
             _started = true;
             _terminal.Write("\e]0;Jazari\a\e[0m\e[H\e[2J");
             (_width, _height) = _terminal.Size;
+            _layoutColumns = _width - 1;
             _shown = Blank(_height);
         }
         if (_paced) _loop = Task.Run(LoopAsync);
@@ -182,7 +195,7 @@ public sealed class Screen : IBlockSink
         {
             Panel = null;
             Render();
-            var end = Math.Min(Rows(_anchorBlock, _anchorRow, _width - 1).Count, _height - 1);
+            var end = Math.Min(Rows(_anchorBlock, _anchorRow, _layoutColumns).Count, _height - 1);
             _terminal.Write($"\e[0m{Go(end)}\e[J\e[?25h");
             _started = false;
         }
@@ -236,7 +249,9 @@ public sealed class Screen : IBlockSink
             lock (Gate)
             {
                 if (_stopping) return;
-                wait = _pendingResize ? 100 : _blocks.Any(b => b.Timed) ? 1000 - (int)(_clock.ElapsedMilliseconds % 1000) : 100;
+                // The window's size is checked every few milliseconds while it's being resized, so each step is
+                // redrawn right away, and a few times a second otherwise.
+                wait = Resizing ? 8 : Math.Min(33, _blocks.Any(b => b.Timed) ? 1000 - (int)(_clock.ElapsedMilliseconds % 1000) : 33);
             }
             await _wake.WaitAsync(Math.Max(wait, 1));
             // At most about 60 frames a second: a burst of changes draws once.
@@ -292,6 +307,8 @@ public sealed class Screen : IBlockSink
         }
     }
 
+    bool Resizing => _paced && _clock.ElapsedMilliseconds - _lastResize < SettleMilliseconds;
+
     void Retreat(int count, int columns)
     {
         _anchorRow -= count;
@@ -313,20 +330,17 @@ public sealed class Screen : IBlockSink
         var columns = width - 1;
         var frame = new StringBuilder();
 
-        if (width != _width || height != _height)
-        {
-            // While the window is being dragged, lay out at most ten times a second.
-            if (_paced && _clock.ElapsedMilliseconds - _lastResize < 100) { _pendingResize = true; return; }
-            Resize(width, height, frame);
-        }
-        _pendingResize = false;
+        // Every size change is drawn at once. While the window keeps changing, rows keep clear of its edge (see ResizeSlack).
+        if (width != _width || height != _height) _lastResize = _clock.ElapsedMilliseconds;
+        var layout = Resizing ? Math.Min(columns, Math.Max(columns - ResizeSlack, 20)) : columns;
+        if (width != _width || height != _height || layout != _layoutColumns) Resize(width, height, layout, frame);
 
-        var panel = Panel?.Render(columns, height) ?? new PanelFrame([], 0, null);
+        var panel = Panel?.Render(layout, height) ?? new PanelFrame([], 0, null);
         var panelRows = panel.Rows.Count < height ? panel.Rows : panel.Rows.Skip(panel.Rows.Count - (height - 1)).ToList();
         var area = height - Math.Min(panel.Base, panelRows.Count);
         _area = area;
 
-        var doc = Rows(_anchorBlock, _anchorRow, columns);
+        var doc = Rows(_anchorBlock, _anchorRow, layout);
         // Rows that no longer fit leave by real scrolling, so they land in the scrollback; they're drawn first if needed.
         while (doc.Count > area)
         {
@@ -335,7 +349,8 @@ public sealed class Screen : IBlockSink
             frame.Append("\e[0m").Append(Go(height - 1)).Append('\n', count);
             _shown = [.. _shown.Skip(count), .. Blank(count)];
             doc.RemoveRange(0, count);
-            Advance(ref _anchorBlock, ref _anchorRow, count, columns);
+            Advance(ref _anchorBlock, ref _anchorRow, count, layout);
+            _anchorAt = (_anchorBlock, _anchorRow, layout);
         }
 
         var top = height - panelRows.Count;
@@ -361,27 +376,30 @@ public sealed class Screen : IBlockSink
     }
 
     /// <summary>
-    /// The window changed size. A wider or narrower window lays every block out again; the first visible row keeps its
-    /// place in its block by proportion, erring towards showing a row twice rather than losing one. A taller window shows
-    /// rows from the scrollback again, as the terminal does; a shorter one has pushed its top rows into the scrollback.
+    /// The window changed size, or the layout width changed (a resize started or settled). A new width lays every block
+    /// out again; the first visible row keeps its place in its block by proportion, measured from where it was last set,
+    /// so a long drag doesn't drift. A taller window shows rows from the scrollback again, as the terminal does; a
+    /// shorter one has pushed its top rows into the scrollback. The window is cleared (not the scrollback) and redrawn.
     /// </summary>
-    void Resize(int width, int height, StringBuilder frame)
+    void Resize(int width, int height, int layout, StringBuilder frame)
     {
-        var (oldColumns, columns) = (_width - 1, width - 1);
-        if (width != _width && _anchorBlock < _blocks.Count && _anchorRow > 0)
+        if (layout != _layoutColumns && _anchorBlock < _blocks.Count && _anchorRow > 0)
         {
-            var before = Lines(_blocks[_anchorBlock], oldColumns).Count;
-            var after = Lines(_blocks[_anchorBlock], columns).Count;
-            _anchorRow = before == 0 ? 0 : Math.Min(after, _anchorRow * after / before);
+            var (block, row, at) = _anchorAt.Block == _anchorBlock ? _anchorAt : (_anchorBlock, _anchorRow, _layoutColumns);
+            var before = Lines(_blocks[block], at).Count;
+            var after = Lines(_blocks[block], layout).Count;
+            _anchorRow = before == 0 ? 0 : Math.Min(after, row * after / before);
         }
-        var taller = height - _height;
-        if (taller > 0) Retreat(taller, columns);
-        else if (taller < 0) Advance(ref _anchorBlock, ref _anchorRow, -taller, columns);
+        if (_height > 0 && height != _height)
+        {
+            if (height > _height) Retreat(height - _height, layout);
+            else Advance(ref _anchorBlock, ref _anchorRow, _height - height, layout);
+            _anchorAt = (_anchorBlock, _anchorRow, layout);
+        }
         frame.Append("\e[0m\e[H\e[J");
-        (_width, _height) = (width, height);
+        (_width, _height, _layoutColumns) = (width, height, layout);
         _shown = Blank(height);
         _caret = null;
-        _lastResize = _clock.ElapsedMilliseconds;
     }
 
     // -------- flow mode --------

@@ -198,4 +198,30 @@ public class ScreenTests
 
         Assert.Equal("          hello", terminal.Vt.Text(0));
     }
+
+    [Fact]
+    public async Task Dragging_the_window_narrower_never_makes_the_terminal_wrap_a_row()
+    {
+        var terminal = new FakeTerminal(110, 20);
+        var screen = new Screen(terminal, Color, bottom: true, paced: true) { Panel = new TestPanel() };
+        screen.Start();
+        var ui = new Ui(screen, Color, () => 109);
+        ui.Header("~/MyOwnLLM", "main");
+        for (var i = 0; i < 6; i++) ui.Row("why", string.Join(" ", Enumerable.Repeat($"words{i}", 30)));
+        await Task.Delay(150);
+
+        // One column at a time, the way a mouse drag arrives; the terminal reflows each step before Jazari can redraw.
+        for (var width = 110; width >= 50; width--)
+        {
+            terminal.Resize(width, 20);
+            await Task.Delay(15);
+        }
+        await Task.Delay(700); // settled: laid out at the full width once more
+
+        Assert.Equal(0, terminal.Vt.Reflowed);
+        Assert.Equal(0, terminal.Vt.SoftWraps);
+        Assert.Equal("edge", terminal.Vt.Text(16));
+        Assert.True(terminal.Vt.Lines.Max(l => l.Length) > 50 - 8, "after the drag the rows use the full width again");
+        await screen.StopAsync();
+    }
 }

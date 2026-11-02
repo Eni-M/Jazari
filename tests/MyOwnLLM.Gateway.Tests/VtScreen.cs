@@ -52,19 +52,43 @@ public sealed class VtScreen
     /// <summary>Scrollback and screen, top to bottom.</summary>
     public IEnumerable<string> Everything => Scrollback.Concat(Lines);
 
+    /// <summary>Rows Windows Terminal had to wrap when the window narrowed: their text reached past the new edge.</summary>
+    public int Reflowed { get; private set; }
+
+    /// <summary>
+    /// Resizes like Windows Terminal: a row whose text (not its background) reaches past the new width wraps onto extra
+    /// rows, and rows that no longer fit push the top of the screen into the scrollback, keeping the cursor's row.
+    /// </summary>
     public void Resize(int width, int height)
     {
-        var rows = _rows.Select(r => r.Take(width).Concat(Enumerable.Repeat(Cell.Blank, Math.Max(width - r.Length, 0))).ToArray()).ToList();
-        while (rows.Count > height)
+        var rows = new List<Cell[]>();
+        var cursor = 0;
+        Cell[] Fit(IEnumerable<Cell> cells) => cells.Take(width).Concat(Enumerable.Repeat(Cell.Blank, width)).Take(width).ToArray();
+        for (var r = 0; r < _rows.Length; r++)
+        {
+            var cells = _rows[r];
+            var end = Array.FindLastIndex(cells, c => c.Text.Length > 0 && c.Text != " ") + 1;
+            if (end > 0 && end < cells.Length && cells[end].Text.Length == 0) end++; // the second half of a wide character
+            if (r == Row) cursor = rows.Count;
+            if (end > width)
+            {
+                Reflowed++;
+                for (var i = 0; i < end; i += width) rows.Add(Fit(cells.Skip(i)));
+            }
+            else rows.Add(Fit(cells));
+        }
+        while (rows.Count > height && cursor > 0)
         {
             Scrollback.Add(string.Concat(rows[0].Select(c => c.Text)).TrimEnd());
             rows.RemoveAt(0);
-            Row = Math.Max(Row - 1, 0);
+            cursor--;
         }
+        rows = rows.Take(height).ToList();
         while (rows.Count < height) rows.Add(Enumerable.Repeat(Cell.Blank, width).ToArray());
         (Width, Height, _rows, _wrapped) = (width, height, rows.ToArray(), new bool[height]);
-        Row = Math.Min(Row, height - 1);
+        Row = Math.Min(cursor, height - 1);
         Column = Math.Min(Column, width - 1);
+        _pending = false;
     }
 
     public void Write(string text)

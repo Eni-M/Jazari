@@ -6,7 +6,7 @@ namespace MyOwnLLM.Gateway.Tests;
 
 /// <summary>
 /// Replays what the real jazari wrote to a pseudo-terminal, phase by phase (files named "NN-phase-WIDTHxHEIGHT.bin"),
-/// through the terminal emulator, and checks nothing wrapped on its own and every synchronized update was closed. Only
+/// through the terminal emulator, and checks nothing wrapped on its own, no resize made the terminal reflow a row, and every synchronized update was closed. Only
 /// runs when JAZARI_PTY_CAPTURE names a folder of captures; each screen is then also written there as HTML.
 /// </summary>
 public class CaptureReplayTests(ITestOutputHelper output)
@@ -26,12 +26,13 @@ public class CaptureReplayTests(ITestOutputHelper output)
                 else if (vt.Width != width || vt.Height != height) vt.Resize(width, height);
             }
             vt!.Write(Encoding.UTF8.GetString(File.ReadAllBytes(file)));
-            output.WriteLine($"==== {Path.GetFileName(file)}: soft wraps {vt.SoftWraps}, sync depth {vt.SyncDepth}, sync error {vt.SyncError}");
+            output.WriteLine($"==== {Path.GetFileName(file)}: soft wraps {vt.SoftWraps}, rows the terminal reflowed {vt.Reflowed}, sync depth {vt.SyncDepth}, sync error {vt.SyncError}");
             foreach (var line in vt.Lines) output.WriteLine("|" + line);
             File.WriteAllText(Path.ChangeExtension(file, ".html"), vt.ToHtml());
         }
         Assert.NotNull(vt);
         Assert.Equal(0, vt!.SoftWraps);
+        Assert.Equal(0, vt.Reflowed);
         Assert.False(vt.SyncError);
     }
 }
