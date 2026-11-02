@@ -132,7 +132,7 @@ public class ReviewFixTests : IDisposable
         var unit = units.First(u => u.Any(p => p.Text.Contains("line 450 ")));
 
         var finding = Assert.Single(ProjectReview.Parse(
-            """{"findings":[{"file":"Service.cs","quote":"line 450 ","problem":"p","severity":"low","fix":"f"}]}""", unit)!);
+            $$"""{"findings":[{"file":"Service.cs","quote":"line 450 {{new string('y', 40)}}","problem":"p","severity":"low","fix":"f"}]}""", unit)!);
 
         Assert.Equal(450, finding.Line);
     }
