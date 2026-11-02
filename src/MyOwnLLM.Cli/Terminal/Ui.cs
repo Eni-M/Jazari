@@ -164,26 +164,6 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
         WriteLines([(redraw ? "\e[3A\r" : "") + title, progress, "\e[2K" + Cell() + string.Join("   ", row)]);
     }
 
-    /// <summary>Word-wraps to <paramref name="max"/> columns; words longer than a line are split.</summary>
-    public static IReadOnlyList<string> Wrap(string text, int max)
-    {
-        max = Math.Max(max, 8);
-        List<string> lines = [];
-        var current = "";
-        foreach (var word in text.Split(' '))
-        {
-            var w = word;
-            while (w.Length > max)
-            {
-                if (current.Length > 0) { lines.Add(current); current = ""; }
-                lines.Add(w[..max]);
-                w = w[max..];
-            }
-            if (current.Length == 0) current = w;
-            else if (current.Length + 1 + w.Length <= max) current += " " + w;
-            else { lines.Add(current); current = w; }
-        }
-        lines.Add(current);
-        return lines;
-    }
+    /// <summary>Word-wraps to <paramref name="max"/> columns (at least 8); words longer than a line are split between characters.</summary>
+    public static IReadOnlyList<string> Wrap(string text, int max) => TextWidth.Wrap(text, Math.Max(max, 8));
 }

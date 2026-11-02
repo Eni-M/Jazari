@@ -160,15 +160,19 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
         var (prefix, body) = Parts(line);
         body = body.Replace("**", "");
         var room = Body - prefix.Length;
-        return (prefix, Ui.Wrap(body, body.Any(ConsoleText.IsWide) ? room / 2 : room));
+        return (prefix, Ui.Wrap(body, room));
     }
 
     /// <summary>Code keeps every space, so it's cut by columns instead of wrapped at words.</summary>
     static List<string> Split(string line, int room)
     {
-        if (line.Any(ConsoleText.IsWide)) room /= 2;
         List<string> rows = [];
-        for (var i = 0; i < line.Length; i += room) rows.Add(line.Substring(i, Math.Min(room, line.Length - i)));
+        for (var rest = line; rest.Length > 0;)
+        {
+            var (head, tail) = TextWidth.Take(rest, Math.Max(room, 1));
+            rows.Add(head);
+            rest = tail;
+        }
         if (rows.Count == 0) rows.Add("");
         return rows;
     }

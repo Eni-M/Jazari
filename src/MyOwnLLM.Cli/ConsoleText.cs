@@ -20,12 +20,6 @@ public static partial class ConsoleText
     [System.Runtime.InteropServices.DllImport("kernel32.dll")] private static extern bool GetConsoleMode(nint handle, out uint mode);
     [System.Runtime.InteropServices.DllImport("kernel32.dll")] private static extern bool SetConsoleMode(nint handle, uint mode);
 
-    /// <summary>A character that takes two terminal columns.</summary>
-    public static bool IsWide(char c) =>
-        c is >= 'ᄀ' and <= 'ᅟ' or >= '⺀' and <= '꓏' or >= '가' and <= '힣'
-            or >= '豈' and <= '﫿' or >= '︰' and <= '﹏' or >= '＀' and <= '｠' or >= '￠' and <= '￦'
-        || char.IsSurrogate(c);
-
     /// <summary>
     /// A ``` line, for the screen and /copy alike. Ordinal: a culture comparison ignores zero-width characters, so a
     /// hidden "\u200B```" would count as a fence.

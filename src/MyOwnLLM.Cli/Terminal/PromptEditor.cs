@@ -191,8 +191,9 @@ public sealed class PromptBuffer(Func<string> directory, IEnumerable<string>? hi
         Refresh();
     }
 
-    int Before(int at) => at <= 0 ? 0 : at >= 2 && char.IsLowSurrogate(Text[at - 1]) ? at - 2 : at - 1;
-    int After(int at) => at >= Text.Length ? Text.Length : at + 1 < Text.Length && char.IsHighSurrogate(Text[at]) ? at + 2 : at + 1;
+    // By grapheme cluster: an emoji with its skin tone or a letter with its accent moves and deletes as one.
+    int Before(int at) => at <= 0 ? 0 : TextWidth.Previous(Text, at);
+    int After(int at) => TextWidth.Next(Text, at);
     int LineStart() => Caret == 0 ? 0 : Text.LastIndexOf('\n', Caret - 1) + 1;
     int LineEnd() => Text.IndexOf('\n', Caret) is var i and >= 0 ? i : Text.Length;
 
@@ -276,19 +277,21 @@ public static class PromptPanel
         var rows = new List<string>();
         var row = new StringBuilder();
         var (column, caretRow, caretColumn) = (0, 0, 0);
-        for (var i = 0; i <= text.Length; i++)
+        var clusters = TextWidth.Clusters(text).ToList();
+        for (var n = 0; n <= clusters.Count; n++)
         {
-            if (i == caret) (caretRow, caretColumn) = (rows.Count, column);
-            if (i == text.Length) break;
-            var c = text[i];
-            if (c == '\n')
+            var i = n < clusters.Count ? clusters[n].Start : text.Length;
+            if (i == caret || n > 0 && caret > clusters[n - 1].Start && caret < i) (caretRow, caretColumn) = (rows.Count, column);
+            if (n == clusters.Count) break;
+            var (start, length) = clusters[n];
+            if (text[start] == '\n')
             {
                 rows.Add(row.ToString());
                 row.Clear();
                 column = 0;
                 continue;
             }
-            var width = char.IsLowSurrogate(c) ? 0 : ConsoleText.IsWide(c) ? 2 : 1;
+            var width = TextWidth.Cluster(text, start, length);
             if (column + width > room)
             {
                 rows.Add(row.ToString());
@@ -296,7 +299,7 @@ public static class PromptPanel
                 column = 0;
                 if (i == caret) (caretRow, caretColumn) = (rows.Count, 0);
             }
-            row.Append(c);
+            row.Append(text, start, length);
             column += width;
         }
         rows.Add(row.ToString());
