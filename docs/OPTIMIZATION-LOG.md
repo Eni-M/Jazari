@@ -247,7 +247,7 @@ The panel now sits at the bottom of the window. It's drawn at a fixed position w
 
 ## Context and outside sources (2026-11-02)
 
-Eni-M brought a set of sources, with the must "properly utilize context windows, so the AI doesn't get dumb". Full write-up, with what to use and skip: `reports/Local inference sources for Jazari.md`. Scripts and raw results: `research_notes/Local inference sources/`. Nothing is built yet.
+Eni-M brought a set of sources, with the must "properly utilize context windows, so the AI doesn't get dumb". Full write-up, with what to use and skip: `reports/Local inference sources for Jazari.md`. Scripts and raw results: `research_notes/Local inference sources/`. Built on `feat/conversation-memory` and pushed to `main` on 2026-11-02, with the memory line of the gate failed and the regression check not run: see the results below.
 
 Measured on H-Tiny with a temporary server, one run each:
 
@@ -255,6 +255,19 @@ Measured on H-Tiny with a temporary server, one run each:
 - **Accuracy doesn't:** 12/12 invented facts in a short conversation, 9/12 at 12,700 tokens (swapped similar values), 12/12 with the facts listed right before the question, for about 4 s of reading. Facts removed by a history cut became confident wrong answers.
 - **History cuts are cheap on this build:** 11 s with the cache shifted, 228 s from scratch, same score. "Hybrids can't KV-shift" in earlier notes is wrong here.
 - **Memory is in the checkpoints:** 55 MiB each, up to 32, and the process reached 9.9 GB. `-ctxcp 8` still answered a retried question in about 1 s.
+
+Recall test through the real gateway, before (`1f72651`) and after (`6de629b`), H-Tiny Q4_K_M on the T480, one run each:
+
+| | Before | After | Gate | Result |
+|---|---|---|---|---|
+| `short` | 12/12 | 12/12 | 12/12 | Pass |
+| `deep` | 9/12 | 12/12 | at least 11/12 | Pass |
+| `cut` | 8/12 | 12/12 | at least 10/12 | Pass |
+| `median_s` short / deep / cut | 2.05 / 1.95 / 1.8 | 2.25 / 2.9 / 2.25 | at most 30 | Pass |
+| `working_set_mib` | 8,767 | 8,711 | at most 7,231 | **Fail**, 56 MiB lower, not 1,536 |
+| Regression, 37/45 and limits | | not run | | **Not run** |
+
+Eni-M chose to push to `main` before a 17:00 deadline whatever the result, and will pick it up from `docs/HANDOFF-task-6.md`. `ORD` and `CUS` with ignore-case also match "order" and "customer": one baseline `deep` answer ("prefix CUS-" for order ids) scored right only because of that, so the true baseline `deep` is 8/12. No after answer depends on it. None of the 72 answers echoes the "From earlier" heading. Also new in the after `short` run: 5 of 12 answers add an invented "in an ASP.NET Core application", where the baseline's add nothing like it. Those answers are still right, and the cause isn't known.
 
 Plan (`docs/superpowers/plans/2026-11-02-conversation-memory.md`): search the conversation the CLI already sends, and put the best lines inside the question, no model summaries; say when history is cut; freeze the project note per conversation; fewer checkpoints. ISTA-DASLab publishes GSQ-refined Qwen3 4B and Qwen3.5 4B GGUFs that run on our build, untested here. GSQ itself needs far more GPU than Colab's free tier and doesn't support Granite. Training from scratch is not worth it.
 

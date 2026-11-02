@@ -1,0 +1,244 @@
+{
+ "label": "tiny-after",
+ "model": "granite-4.0-h-tiny-Q4_K_M.gguf",
+ "threads": 4,
+ "short": {
+  "score": 12,
+  "of": 12,
+  "median_s": 2.25,
+  "answers": [
+   {
+    "question": "How many times does the refund service retry?",
+    "answer": "The refund service retries 3 times before giving up.",
+    "right": true,
+    "seconds": 2.5
+   },
+   {
+    "question": "How long are invoices kept?",
+    "answer": "Invoices are kept for 7 years in an ASP.NET Core application.",
+    "right": true,
+    "seconds": 3.0
+   },
+   {
+    "question": "Which port does the staging database listen on?",
+    "answer": "The staging database listens on port 5433.",
+    "right": true,
+    "seconds": 2.2
+   },
+   {
+    "question": "What prefix do order ids start with?",
+    "answer": "Order IDs start with the prefix \"ORD-\".",
+    "right": true,
+    "seconds": 2.0
+   },
+   {
+    "question": "What is the payment timeout?",
+    "answer": "The payment timeout is set to 45 seconds in the ASP.NET Core application.",
+    "right": true,
+    "seconds": 2.6
+   },
+   {
+    "question": "On which day are deployments frozen?",
+    "answer": "Deployments are frozen on Fridays.",
+    "right": true,
+    "seconds": 1.7
+   },
+   {
+    "question": "How many times does the email service retry?",
+    "answer": "The email service retries 5 times before giving up.",
+    "right": true,
+    "seconds": 2.1
+   },
+   {
+    "question": "How long are audit logs kept?",
+    "answer": "Audit logs are kept for 2 years in an ASP.NET Core application.",
+    "right": true,
+    "seconds": 2.5
+   },
+   {
+    "question": "Which port does the production database listen on?",
+    "answer": "The production database listens on port 6432.",
+    "right": true,
+    "seconds": 2.1
+   },
+   {
+    "question": "What prefix do customer ids start with?",
+    "answer": "Customer IDs start with the prefix \"CUS-\".",
+    "right": true,
+    "seconds": 2.0
+   },
+   {
+    "question": "What is the login timeout?",
+    "answer": "The login timeout is set to 20 seconds in the ASP.NET Core application.",
+    "right": true,
+    "seconds": 2.8
+   },
+   {
+    "question": "On which day do backups run?",
+    "answer": "Backups run on Sundays in an ASP.NET Core application.",
+    "right": true,
+    "seconds": 2.3
+   }
+  ]
+ },
+ "deep": {
+  "score": 12,
+  "of": 12,
+  "median_s": 2.9,
+  "answers": [
+   {
+    "question": "How many times does the refund service retry?",
+    "answer": "The refund service retries 3 times before giving up.",
+    "right": true,
+    "seconds": 4.0
+   },
+   {
+    "question": "How long are invoices kept?",
+    "answer": "Invoices are kept for 7 years.",
+    "right": true,
+    "seconds": 2.4
+   },
+   {
+    "question": "Which port does the staging database listen on?",
+    "answer": "The staging database listens on port 5433.",
+    "right": true,
+    "seconds": 3.0
+   },
+   {
+    "question": "What prefix do order ids start with?",
+    "answer": "Order ids start with the prefix ORD-.",
+    "right": true,
+    "seconds": 2.8
+   },
+   {
+    "question": "What is the payment timeout?",
+    "answer": "The payment timeout is 45 seconds.",
+    "right": true,
+    "seconds": 5.1
+   },
+   {
+    "question": "On which day are deployments frozen?",
+    "answer": "Deployments are frozen on Fridays.",
+    "right": true,
+    "seconds": 2.1
+   },
+   {
+    "question": "How many times does the email service retry?",
+    "answer": "The email service retries 5 times before giving up.",
+    "right": true,
+    "seconds": 3.9
+   },
+   {
+    "question": "How long are audit logs kept?",
+    "answer": "Audit logs are kept for 2 years.",
+    "right": true,
+    "seconds": 2.5
+   },
+   {
+    "question": "Which port does the production database listen on?",
+    "answer": "The production database listens on port 6432.",
+    "right": true,
+    "seconds": 3.0
+   },
+   {
+    "question": "What prefix do customer ids start with?",
+    "answer": "Customer ids start with the prefix CUS-.",
+    "right": true,
+    "seconds": 2.8
+   },
+   {
+    "question": "What is the login timeout?",
+    "answer": "The login timeout is 20 seconds.",
+    "right": true,
+    "seconds": 5.7
+   },
+   {
+    "question": "On which day do backups run?",
+    "answer": "Backups run on Sundays.",
+    "right": true,
+    "seconds": 1.6
+   }
+  ]
+ },
+ "cut": {
+  "score": 12,
+  "of": 12,
+  "median_s": 2.25,
+  "answers": [
+   {
+    "question": "How many times does the refund service retry?",
+    "answer": "The refund service retries 3 times before giving up.",
+    "right": true,
+    "seconds": 239.3
+   },
+   {
+    "question": "How long are invoices kept?",
+    "answer": "Invoices are kept for 7 years.",
+    "right": true,
+    "seconds": 2.0
+   },
+   {
+    "question": "Which port does the staging database listen on?",
+    "answer": "The staging database listens on port 5433.",
+    "right": true,
+    "seconds": 2.4
+   },
+   {
+    "question": "What prefix do order ids start with?",
+    "answer": "Order ids start with the prefix ORD-.",
+    "right": true,
+    "seconds": 2.1
+   },
+   {
+    "question": "What is the payment timeout?",
+    "answer": "The payment timeout is 45 seconds.",
+    "right": true,
+    "seconds": 4.0
+   },
+   {
+    "question": "On which day are deployments frozen?",
+    "answer": "Deployments are frozen on Fridays.",
+    "right": true,
+    "seconds": 1.6
+   },
+   {
+    "question": "How many times does the email service retry?",
+    "answer": "The email service retries 5 times before giving up.",
+    "right": true,
+    "seconds": 3.0
+   },
+   {
+    "question": "How long are audit logs kept?",
+    "answer": "Audit logs are kept for 2 years.",
+    "right": true,
+    "seconds": 1.8
+   },
+   {
+    "question": "Which port does the production database listen on?",
+    "answer": "The production database listens on port 6432.",
+    "right": true,
+    "seconds": 2.3
+   },
+   {
+    "question": "What prefix do customer ids start with?",
+    "answer": "Customer ids start with the prefix CUS-.",
+    "right": true,
+    "seconds": 2.2
+   },
+   {
+    "question": "What is the login timeout?",
+    "answer": "The login timeout is 20 seconds. This can be seen in the line `timeout.CancelAfter(TimeSpan.FromSeconds(20));` within the provided code snippet.",
+    "right": true,
+    "seconds": 6.7
+   },
+   {
+    "question": "On which day do backups run?",
+    "answer": "Backups run on Sundays.",
+    "right": true,
+    "seconds": 1.3
+   }
+  ]
+ },
+ "deep_tokens": 14261,
+ "working_set_mib": 8711
+}

@@ -10,15 +10,15 @@ Evidence tags: **[measured]** run on this T480 today; **[theirs]** the source's 
 
 ## What to do, in order
 
-Each item ends in a yes or no from the test set or the recall test. Nothing here is built yet.
+Each item ends in a yes or no from the test set or the recall test. Items 1-5 are built (2026-11-02). Results: `docs/OPTIMIZATION-LOG.md`.
 
 | # | Change | Why | Cost | Keep it if |
 |---|---|---|---|---|
-| 1 | **Conversation memory:** search the conversation with BM25 and put the best-matching old lines (up to about 250 tokens) right before each question | Fixes both the depth errors and the cut errors, see "Context" | Small: one gateway class, no storage | Recall stays at or near 12/12 at depth and after a cut, using real search rather than a hand-made list |
-| 2 | **Say when history is cut,** with a `cut` row | Today's cut is silent [repo], and the model then invents answers [measured] | Very small | Always |
-| 3 | **Keep the prompt's start stable:** freeze the project note per conversation | A changed note forces a re-read of everything after it. History cuts don't [measured] | Small | Follow-up after a note change stays under 30 s |
-| 4 | **Cut memory use:** `-ctxcp 8 --cache-ram 1024` | The server reached 9.9 GB, mostly checkpoints and saved prompts [measured] | One line in `Tuning.ServerArgs` | Retried questions still answer in about 1 s, and memory falls |
-| 5 | **Add the recall test to `eval/`** | The current test set never goes deep, so it can't see this problem | Small | Always |
+| 1 | Done. **Conversation memory:** search the conversation with BM25 and put the best-matching old lines (up to about 250 tokens) right before each question | Fixes both the depth errors and the cut errors, see "Context" | Small: one gateway class, no storage | Recall stays at or near 12/12 at depth and after a cut, using real search rather than a hand-made list |
+| 2 | Done. **Say when history is cut,** with a `cut` row | Today's cut is silent [repo], and the model then invents answers [measured] | Very small | Always |
+| 3 | Done. **Keep the prompt's start stable:** freeze the project note per conversation | A changed note forces a re-read of everything after it. History cuts don't [measured] | Small | Follow-up after a note change stays under 30 s |
+| 4 | Built, but its keep-it test failed: 8,767 to 8,711 MiB, not 1.5 GB lower. **Cut memory use:** `-ctxcp 8 --cache-ram 1024` | The server reached 9.9 GB, mostly checkpoints and saved prompts [measured] | One line in `Tuning.ServerArgs` | Retried questions still answer in about 1 s, and memory falls |
+| 5 | Done. **Add the recall test to `eval/`** | The current test set never goes deep, so it can't see this problem | Small | Always |
 | 6 | **Test ISTA's GSQ files** on the test set: Qwen3 4B Q2_K and Q3_K_M, Qwen3.5 4B Q2_K_XL | Qwen3 4B was the most accurate but too slow. These are smaller and need no training | 5.7 GB download, then hours of eval | Beats H-Tiny's 37/45 inside the time limits |
 | 7 | **Law book gating:** decide "nothing relevant" from evidence, not a score threshold | reame measured that similarity scores can't detect absence [theirs]. The spec's "matches well enough" needs this | Part of the law book work | Fewer wrong sources on questions the book can't answer |
 | 8 | **Answer check:** flag file paths, API names and links in an answer that aren't in anything Jazari read | Anti-invention, in code. Doesn't catch swapped values | Small | Flags real inventions without much noise |
