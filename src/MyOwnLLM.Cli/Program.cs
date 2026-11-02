@@ -73,7 +73,7 @@ async Task<bool> LlamaReady(CancellationToken ct)
     catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { return false; }
 }
 // Tuning only ever runs when asked: a start uses what was measured, or safe CPU settings.
-Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine()).ServerArgs(c.Model));
+Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), c.Model).ServerArgs(c.Model));
 Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.FallBack(DeviceTuner.ReadMachine()).ServerArgs(c.Model));
 // A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run. It's kept only if the
 // gateway answering here accepts it: a 401 from some other server on the port mustn't replace a working key.
@@ -100,7 +100,8 @@ if (cli.Command == "session")
 {
     startupUi.TakeOverScreen();
     var ui = startupUi;
-    var tuning = DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine());
+    var tuning = DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), config?.Model);
+    var measured = DeviceTuner.IsMeasured(Tuning.DefaultPath, config?.Model);
     // The panel prompt needs a real console; pipes and some IDE terminals get plain line input instead.
     var piped = Console.IsInputRedirected || Console.IsOutputRedirected;
     var editor = piped ? null : new PromptEditor(ui, Directory.GetCurrentDirectory);
@@ -121,12 +122,12 @@ if (cli.Command == "session")
             await StartServersAsync(new Ui(report, theme, Columns), quiet: true);
             return (key is not null, report.ToString());
         }
-        await InputLoop.RunInteractiveAsync(interactive, ui, version, directory, editor, Start, updateAvailable, measured: Tuning.Load(Tuning.DefaultPath) is not null);
+        await InputLoop.RunInteractiveAsync(interactive, ui, version, directory, editor, Start, updateAvailable, measured);
         return 0;
     }
     await StartServersAsync(ui, quiet: false);
     await InputLoop.RunAsync(interactive, ui, version, directory, new TextLineReader(Console.In),
-        hasKey: key is not null, updateAvailable: updateAvailable, runningOn: Tuning.Load(Tuning.DefaultPath)?.Summary(theme.Glyph('·')));
+        hasKey: key is not null, updateAvailable: updateAvailable, runningOn: measured ? tuning.Summary(theme.Glyph('·')) : null);
     return 0;
 }
 await StartServersAsync(startupUi, quiet: false);

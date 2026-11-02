@@ -165,6 +165,13 @@ def wait_until_ready(server, port=PORT, seconds=180):
     raise ServerDidNotStart(f"llama-server wasn't ready after {seconds} s")
 
 
+def save_failure(label, reason, folder=os.path.join(HERE, "results")):
+    """A setup that can't load is reported as failed, and an older result can't stand in for it."""
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, f"{label}.json"), "w", encoding="utf-8") as f:
+        json.dump({"label": label, "failed": reason}, f, indent=1)
+
+
 def chat(messages, max_tokens=MAX_TOKENS, json_schema=None, port=PORT):
     body = {"messages": messages, "max_tokens": max_tokens, "cache_prompt": True, "stream": False, "temperature": TEMPERATURE}
     if json_schema:
@@ -205,6 +212,7 @@ def main():
         try:
             wait_until_ready(server)
         except ServerDidNotStart as e:
+            save_failure(a.label, str(e))
             sys.exit(f"{a.label}: {e}")
         answers = run_questions(questions, lambda q: chat([{"role": "system", "content": system}, {"role": "user", "content": q["question"]}]))
         times = [x["seconds"] for x in answers]

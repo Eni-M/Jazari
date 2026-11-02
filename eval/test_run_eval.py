@@ -1,8 +1,9 @@
 import os, socket, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import argparse, json
-from run_eval import PortInUse, conversation, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, server_args, start_server, system_prompt
+import argparse, json, tempfile
+from compare import by_category, table
+from run_eval import PortInUse, conversation, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, save_failure, server_args, start_server, system_prompt
 
 PROMPT_BUILDER = os.path.join(HERE, "..", "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
 Q1 = {"id": "a", "category": "api", "question": "boom", "must_have": [["x"]], "must_not": []}
@@ -47,6 +48,23 @@ def replying(*replies):
         calls.append({"messages": list(messages), "max_tokens": max_tokens, "json_schema": json_schema})
         return replies[min(len(calls) - 1, len(replies) - 1)]
     return ask, calls
+
+
+class FailureTests(unittest.TestCase):
+    def test_a_setup_that_cannot_load_replaces_its_old_result(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "x.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"label": "x", "score": 45}, f)
+            save_failure("x", "would not load", folder)
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"label": "x", "failed": "would not load"})
+
+    def test_the_comparison_lists_a_failed_setup(self):
+        rows = table([{"label": "broken", "failed": "would not load"}])
+        self.assertIn("broken", rows)
+        self.assertIn("would not load", rows)
+        self.assertEqual(by_category([{"label": "broken", "failed": "would not load"}]), "")
 
 
 class ServerArgsTests(unittest.TestCase):

@@ -34,10 +34,11 @@ public class DeviceTunerTests : IDisposable
 
     [Theory]
     [InlineData(15443, 40)] // Iris Xe, shared memory: the whole model
-    [InlineData(1900, 18)]  // T480's MX150, 2 GB: part of it
-    [InlineData(500, 1)]    // too little to be worth measuring
+    [InlineData(4675, 40)]  // just enough for the whole of H-Tiny and its small cache
+    [InlineData(1900, 14)]  // T480's MX150, 2 GB: part of it
+    [InlineData(500, 0)]    // too little to be worth measuring
     public void Gpu_layers_are_what_fits_in_free_memory(int freeMiB, int layers) =>
-        Assert.Equal(layers, DeviceTuner.LayersThatFit(freeMiB, modelMiB: 2002, contextTokens: 16384));
+        Assert.Equal(layers, DeviceTuner.LayersThatFit(freeMiB, modelMiB: 4035, contextTokens: 16384));
 
     [Fact]
     public async Task A_small_gpu_is_measured_with_part_of_the_model()
@@ -77,7 +78,8 @@ public class DeviceTunerTests : IDisposable
         var measured = await Tuner(runner).MeasureAsync(Config(), Laptop, path, CancellationToken.None);
 
         Assert.Equal(("none", 6, true), (measured.Device, measured.Threads, measured.FlashAttention));
-        Assert.Equal(measured, DeviceTuner.ForStart(path, Laptop));
+        Assert.Equal(measured, DeviceTuner.ForStart(path, Laptop, Config().Model));
+        Assert.True(DeviceTuner.IsMeasured(path, Config().Model));
     }
 
     [Fact]
@@ -85,8 +87,20 @@ public class DeviceTunerTests : IDisposable
     {
         var path = Path.Combine(_dir, "none yet.json");
 
-        Assert.Equal(DeviceTuner.FallBack(Laptop), DeviceTuner.ForStart(path, Laptop));
+        Assert.Equal(DeviceTuner.FallBack(Laptop), DeviceTuner.ForStart(path, Laptop, "model.gguf"));
         Assert.False(File.Exists(path)); // and nothing was saved: the update's question is still open
+    }
+
+    [Theory]
+    [InlineData("granite-4.1-3b-Q4_K_M.gguf")] // settings measured on the previous model
+    [InlineData(null)] // saved before settings named their model
+    public void Settings_measured_on_another_model_are_not_used(string? measuredOn)
+    {
+        var path = Path.Combine(_dir, "old.json");
+        (Tuning.Default("f", 8, 16L << 30) with { Threads = 8, Device = "Vulkan1", GpuLayers = 18, ModelFile = measuredOn }).Save(path);
+
+        Assert.Equal(DeviceTuner.FallBack(Laptop), DeviceTuner.ForStart(path, Laptop, @"C:\models\granite-4.0-h-tiny-Q4_K_M.gguf"));
+        Assert.False(DeviceTuner.IsMeasured(path, @"C:\models\granite-4.0-h-tiny-Q4_K_M.gguf"));
     }
 
     [Fact]

@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from score import rescore, score, pick
 
 QUESTION = {"must_have": [["AddScoped", "Scoped"]], "must_not": ["AddSingleton"]}
-GOOD = {"label": "a", "score": 30, "plain_p50_s": 20, "read_first_s": 100, "followup_s": 25, "edit_ok": True, "review_ok": True}
+GOOD = {"label": "a", "score": 30, "plain_p50_s": 20, "read_first_s": 100, "followup_s": 25, "edit_ok": True, "review_ok": True, "turn_times_s": [10, 10, 10, 10, 10, 10]}
 
 
 class ScoreTests(unittest.TestCase):
@@ -55,6 +55,18 @@ class PickTests(unittest.TestCase):
     def test_pick_rejects_a_model_where_edit_or_review_breaks(self):
         self.assertIsNone(pick([{**GOOD, "edit_ok": False}]))
         self.assertIsNone(pick([{**GOOD, "review_ok": False}]))
+
+    def test_pick_rejects_a_model_that_slows_down_over_a_conversation(self):
+        self.assertIsNone(pick([{**GOOD, "turn_times_s": [7.3, 40.5, 45.1, 83.0, 128.6, 143.7]}]))
+
+    def test_pick_rejects_an_unfinished_conversation(self):
+        self.assertIsNone(pick([{**GOOD, "turn_times_s": [10, 10]}]))
+
+    def test_pick_skips_a_setup_that_failed_to_load(self):
+        self.assertEqual(pick([{"label": "broken", "failed": "would not load"}, GOOD])["label"], "a")
+
+    def test_rescore_leaves_a_failed_setup_alone(self):
+        self.assertEqual(rescore({"label": "broken", "failed": "would not load"}, [])["failed"], "would not load")
 
     def test_pick_treats_unmeasured_scenarios_as_failing(self):
         self.assertIsNone(pick([{**GOOD, "followup_s": None}]))

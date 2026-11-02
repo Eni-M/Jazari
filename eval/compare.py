@@ -16,7 +16,10 @@ def load():
 
 def table(results):
     rows = [f'{"setup":<12}{"score":>7}{"median":>8}{"longest":>9}{"/read":>7}{"follow":>8}  {"edit":<6}{"review":<7}later turns']
-    for r in sorted(results, key=lambda r: -r["score"]):
+    for r in sorted(results, key=lambda r: -r.get("score", -1)):
+        if "failed" in r:
+            rows.append(f'{r["label"]:<12}failed: {r["failed"]}')
+            continue
         turns = r.get("turn_times_s") or []
         rows.append(f'{r["label"]:<12}{r["score"]:>4}/{r["total"]:<2}{r["plain_p50_s"]:>7.0f}s{r["plain_max_s"]:>8.0f}s'
                     f'{str(r["read_first_s"]):>7}{str(r["followup_s"]):>8}  {str(r["edit_ok"]):<6}{str(r["review_ok"]):<7}{turns}')
@@ -26,6 +29,8 @@ def table(results):
 def by_category(results):
     rows = []
     for r in results:
+        if "failed" in r:
+            continue
         scores = {}
         for a in r["answers"]:
             passed, total = scores.get(a["category"], (0, 0))

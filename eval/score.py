@@ -3,6 +3,8 @@
 PLAIN_LIMIT_S = 30
 READ_FIRST_LIMIT_S = 120
 FOLLOWUP_LIMIT_S = 30
+CONVERSATION_TURNS = 6
+TURN_LIMIT_S = 60  # hard turns may take longer than 30 s; a model that keeps slowing down over a conversation may not
 
 
 def score(answer, question):
@@ -15,7 +17,9 @@ def score(answer, question):
 
 def _within_limits(result):
     timed = [(result.get("plain_p50_s"), PLAIN_LIMIT_S), (result.get("read_first_s"), READ_FIRST_LIMIT_S), (result.get("followup_s"), FOLLOWUP_LIMIT_S)]
-    return all(seconds is not None and seconds <= limit for seconds, limit in timed) and result.get("edit_ok") and result.get("review_ok")
+    turns = result.get("turn_times_s") or []
+    steady = len(turns) == CONVERSATION_TURNS and all(seconds <= TURN_LIMIT_S for seconds in turns)
+    return all(seconds is not None and seconds <= limit for seconds, limit in timed) and steady and result.get("edit_ok") and result.get("review_ok")
 
 
 def pick(results):
@@ -26,6 +30,8 @@ def pick(results):
 
 def rescore(result, questions):
     """Scores saved answers again after a check was corrected, without running the model."""
+    if "failed" in result:
+        return result
     by_id = {q["id"]: q for q in questions}
     for answer in result["answers"]:
         if answer["id"] in by_id:

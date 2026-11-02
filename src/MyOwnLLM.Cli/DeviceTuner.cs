@@ -9,12 +9,12 @@ namespace MyOwnLLM.Cli;
 /// <summary>A GPU llama.cpp can use, as <c>llama-server --list-devices</c> reports it.</summary>
 public sealed record GpuDevice(string Id, string Name, int FreeMiB);
 
-/// <summary>What the PC has, read once at start; the fingerprint says when tuning must run again.</summary>
+/// <summary>What the PC has, read once at start; saved with the settings measured on it.</summary>
 public sealed record Machine(string CpuName, int LogicalCores, long RamBytes);
 
 /// <summary>
 /// Finds the fastest llama-server settings for whatever PC Jazari runs on, by measuring instead of guessing:
-/// CPU at a few thread counts, and each GPU that has room for the whole model, each with flash attention off and on.
+/// CPU at half its threads, and each GPU with room for enough of the model, each with flash attention off and on.
 /// The winner is the one that finishes a typical turn soonest: reading a 2,000-token prompt and writing 300 tokens.
 /// Anything that fails (llama-bench missing or blocked by Windows, a GPU driver crash) just leaves that option out,
 /// and with nothing measured the safe default stays.
@@ -24,8 +24,17 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
     const int TypicalPromptTokens = 2000, TypicalAnswerTokens = 300;
     readonly Func<string, long?> _fileSize = fileSize ?? (path => File.Exists(path) ? new FileInfo(path).Length : null);
 
-    /// <summary>What a start runs on: the saved settings, or safe CPU settings until the user asks for a measurement. Never measures.</summary>
-    public static Tuning ForStart(string path, Machine machine) => Tuning.Load(path) ?? FallBack(machine);
+    /// <summary>
+    /// What a start runs on: the settings measured on this model, or safe CPU settings until the user asks for a
+    /// measurement. Never measures. Settings from another model don't carry over: thread counts and GPU layers measured
+    /// on a 2 GB model can run slowly or fail to load on a 4 GB one.
+    /// </summary>
+    public static Tuning ForStart(string path, Machine machine, string? model) =>
+        IsMeasured(path, model) ? Tuning.Load(path)! : FallBack(machine);
+
+    /// <summary>Whether the saved settings were measured on this model.</summary>
+    public static bool IsMeasured(string path, string? model) =>
+        Tuning.Load(path)?.ModelFile is { } measuredOn && string.Equals(measuredOn, Path.GetFileName(model), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Measures this PC (a few minutes) and saves the result. Only when the user asked: it takes the whole machine.</summary>
     public async Task<Tuning> MeasureAsync(JazariConfig config, Machine machine, string path, CancellationToken ct)
@@ -33,7 +42,7 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         var gpus = await ListGpusAsync(config.LlamaServer, ct) ?? [];
         var fingerprint = Fingerprint(machine, gpus, config, _fileSize);
         if (!ui.Live) ui.Metadata("Finding the fastest settings for this PC. This takes a few minutes.");
-        var tuning = await TuneAsync(config, machine, gpus, fingerprint, ct);
+        var tuning = await TuneAsync(config, machine, gpus, fingerprint, ct) with { ModelFile = Path.GetFileName(config.Model) };
         try { tuning.Save(path); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { ui.Metadata($"Couldn't save the settings ({e.Message}); Jazari stays on the ones it has."); }
         return tuning;
@@ -101,7 +110,7 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         (t.Device == "none" ? $"CPU, {t.Threads} threads" : t.GpuLayers < ModelLayers ? $"GPU {t.Device}, {t.GpuLayers} layers" : $"GPU {t.Device}")
         + (t.FlashAttention ? ", flash attention" : "");
 
-    const int ModelLayers = 40; // Granite 4.1 3B
+    const int ModelLayers = 40; // Granite 4.0-H Tiny
     const int MinUsefulLayers = 8; // fewer moves too little work to the GPU to pay for the copying
 
     /// <summary>
@@ -110,7 +119,9 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
     /// </summary>
     public static int LayersThatFit(int freeMiB, int modelMiB, int contextTokens)
     {
-        var cacheMiB = contextTokens * 80 / 1024; // 80 KiB a token on Granite 4.1 3B
+        // About 8 KiB a token on Granite 4.0-H Tiny: only 4 of its 40 layers use attention (from its GGUF metadata, where the
+        // same sum gives the 3B's measured 80 KiB).
+        var cacheMiB = contextTokens * 8 / 1024;
         if (freeMiB >= modelMiB + cacheMiB + 512) return ModelLayers;
         var perLayer = (double)(modelMiB + cacheMiB) / ModelLayers;
         return Math.Clamp((int)((freeMiB - 400) / perLayer), 0, ModelLayers);
