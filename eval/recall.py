@@ -48,7 +48,7 @@ def gateway_env(data_dir, llama_port, port):
 def llama_args(llama, model, threads, context):
     # Tuning.ServerArgs's settings for a T480 CPU run.
     return [llama, "-m", model, "-dev", "none", "-ngl", "0", "-t", str(threads), "--poll", "0", "-fa", "off", "-c", str(context),
-            "--cache-ram", "2048", "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(LLAMA_PORT)]
+            "--cache-ram", "1024", "-ctxcp", "8", "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(LLAMA_PORT)]
 
 
 def filler(chunk=CHUNK):

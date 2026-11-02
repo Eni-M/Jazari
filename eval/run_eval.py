@@ -185,7 +185,7 @@ def chat(messages, max_tokens=MAX_TOKENS, json_schema=None, port=PORT):
 def server_args(a):
     # The same settings as Tuning.ServerArgs.
     return [a.llama, "-m", a.model, "-dev", a.device, "-ngl", str(a.gpu_layers), "-t", str(a.threads), "--poll", "0", "-fa", "on",
-            "-c", "16384", "--cache-ram", "2048", "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(PORT)] + ([] if a.reasoning == "auto" else ["--reasoning", a.reasoning])
+            "-c", "16384", "--cache-ram", "1024", "-ctxcp", "8", "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(PORT)] + ([] if a.reasoning == "auto" else ["--reasoning", a.reasoning])
 
 
 def main():

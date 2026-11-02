@@ -79,6 +79,11 @@ class ServerArgsTests(unittest.TestCase):
     def test_thinking_is_left_to_the_model_by_default(self):
         self.assertNotIn("--reasoning", self.args())
 
+    def test_memory_is_kept_small_as_in_jazari(self):
+        args = self.args()
+        self.assertEqual(args[args.index("-ctxcp") + 1], "8")
+        self.assertEqual(args[args.index("--cache-ram") + 1], "1024")
+
 
 class ScenarioTests(unittest.TestCase):
     def test_read_context_is_about_2000_tokens_of_real_code(self):

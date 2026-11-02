@@ -54,14 +54,34 @@ public class DeviceTunerTests : IDisposable
     [Fact]
     public void Default_settings_fit_the_ram()
     {
-        Assert.Equal((4, 16384, 2048), (Tuning.Default("x", 8, 16L << 30) is var big ? (big.Threads, big.ContextTokens, big.CacheRamMiB) : default));
-        Assert.Equal((2, 8192, 1024), (Tuning.Default("x", 4, 8L << 30) is var small ? (small.Threads, small.ContextTokens, small.CacheRamMiB) : default));
+        Assert.Equal((4, 16384), (Tuning.Default("x", 8, 16L << 30) is var big ? (big.Threads, big.ContextTokens) : default));
+        Assert.Equal((2, 8192), (Tuning.Default("x", 4, 8L << 30) is var small ? (small.Threads, small.ContextTokens) : default));
+    }
+
+    [Fact]
+    public void Server_args_keep_memory_small()
+    {
+        var args = new Tuning("f", "Vulkan0", 4, 99, true, 16384).ServerArgs("m.gguf");
+
+        Assert.Equal("8", args[Array.IndexOf(args, "-ctxcp") + 1]);
+        Assert.Equal("1024", args[Array.IndexOf(args, "--cache-ram") + 1]);
+    }
+
+    [Fact]
+    public void An_older_tuning_file_still_loads()
+    {
+        var path = Path.Combine(_dir, "old-tuning.json");
+        File.WriteAllText(path, """{"fingerprint":"f","device":"Vulkan0","threads":4,"gpuLayers":99,"flashAttention":true,"contextTokens":16384,"cacheRamMiB":2048,"answerPerSecond":14.9,"modelFile":"m.gguf"}""");
+
+        var loaded = Tuning.Load(path);
+
+        Assert.Equal(new Tuning("f", "Vulkan0", 4, 99, true, 16384, AnswerPerSecond: 14.9, ModelFile: "m.gguf"), loaded);
     }
 
     [Fact]
     public void Server_args_carry_the_tuned_settings()
     {
-        var args = new Tuning("f", "Vulkan0", 4, 99, true, 16384, 2048).ServerArgs("m.gguf");
+        var args = new Tuning("f", "Vulkan0", 4, 99, true, 16384).ServerArgs("m.gguf");
 
         Assert.Equal("Vulkan0", args[Array.IndexOf(args, "-dev") + 1]);
         Assert.Equal("99", args[Array.IndexOf(args, "-ngl") + 1]);

@@ -9,17 +9,25 @@ namespace MyOwnLLM.Cli;
 /// ever happens when the user asks: <c>jazari tune</c>, or yes to the question at the end of <c>jazari update</c>.
 /// </summary>
 public sealed partial record Tuning(
-    string Fingerprint, string Device, int Threads, int GpuLayers, bool FlashAttention, int ContextTokens, int CacheRamMiB,
+    string Fingerprint, string Device, int Threads, int GpuLayers, bool FlashAttention, int ContextTokens,
     double PromptPerSecond = 0, double AnswerPerSecond = 0, string? DeviceName = null, string? ModelFile = null)
 {
+    /// <summary>
+    /// Prompts kept in RAM for reuse, with at most 8 checkpoints per conversation (-ctxcp 8). On Granite 4.0-H Tiny a
+    /// checkpoint is 55 MiB of Mamba state, one about every 512 tokens up to llama-server's default of 32, and a saved
+    /// prompt with 32 of them was 1.9 GB: the server reached 9.9 GB on a 16 GB laptop. A retried question used only the
+    /// latest checkpoint and still took about 1 s with 8. Not part of the fingerprint, so no PC re-tunes for it.
+    /// </summary>
+    public const int CacheRamMiB = 1024;
+
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "tuning.json");
 
     /// <summary>
     /// What to run before anything is measured, or when measuring can't run: CPU only, half the logical cores (see
-    /// DeviceTuner.ThreadCounts), and a context and prompt cache sized to the RAM.
+    /// DeviceTuner.ThreadCounts), and a context sized to the RAM.
     /// </summary>
     public static Tuning Default(string fingerprint, int logicalCores, long ramBytes) =>
-        new(fingerprint, "none", Math.Max(1, logicalCores / 2), 0, false, ContextFor(ramBytes), ramBytes < 12L << 30 ? 1024 : 2048);
+        new(fingerprint, "none", Math.Max(1, logicalCores / 2), 0, false, ContextFor(ramBytes));
 
     /// <summary>16k tokens of context are fine with 12 GB of RAM or more; below that, 8k leaves room for a 4 GB model and everything else.</summary>
     public static int ContextFor(long ramBytes) => ramBytes < 12L << 30 ? 8192 : 16384;
@@ -38,7 +46,7 @@ public sealed partial record Tuning(
     public string[] ServerArgs(string model) =>
     [
         "-m", model, "-dev", Device, "-ngl", GpuLayers.ToString(), "-t", Threads.ToString(), "--poll", "0",
-        "-fa", FlashAttention ? "on" : "off", "-c", ContextTokens.ToString(), "--cache-ram", CacheRamMiB.ToString(),
+        "-fa", FlashAttention ? "on" : "off", "-c", ContextTokens.ToString(), "--cache-ram", CacheRamMiB.ToString(), "-ctxcp", "8",
         "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", "8080",
     ];
 
