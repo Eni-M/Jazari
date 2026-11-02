@@ -38,18 +38,14 @@ public static class Welcome
         ui.Wordmark(version);
     }
 
-    /// <summary>
-    /// The servers have answered or given up. <paramref name="directlyBelowWordmark"/>: nothing was printed since the
-    /// opening, so "ready in 4 s" can replace the version; otherwise it goes on a new row.
-    /// </summary>
-    public static void Opened(Ui ui, ConnectionState state, TimeSpan took, bool directlyBelowWordmark, bool measured)
+    /// <summary>The servers have answered or given up. One row says so: "ready in 4 s" replaces the version, even with a question typed meanwhile below it.</summary>
+    public static void Opened(Ui ui, ConnectionState state, TimeSpan took, int wordmarkRow, bool measured)
     {
         if (state == ConnectionState.Available)
         {
-            // Up past the blank row the prompt left under the wordmark.
-            if (directlyBelowWordmark) ui.Output.Write("\e[2A\r\e[2K");
-            ui.Wordmark($"ready in {Math.Max(took.TotalSeconds, 1):0} s");
-            if (!measured) ui.Metadata("On safe CPU settings. jazari tune measures this PC for the fastest ones.");
+            ui.ReplaceWordmark(wordmarkRow, $"ready in {Math.Max(took.TotalSeconds, 1):0} s");
+            if (measured) return;
+            ui.Metadata("On safe CPU settings. jazari tune measures this PC for the fastest ones.");
             ui.Blank();
             return;
         }

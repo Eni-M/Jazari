@@ -239,8 +239,17 @@ public class PromptEditorTests
         var info = new PanelInfo("a-rather-long-file-name-for-a-chip.cs", "Enter sends · / commands", "granite 3b · iris xe · 14 tok/s", (4100, 16384));
 
         foreach (var width in new[] { 120, 60, 40, 20 })
-            Assert.All(Draw(buffer, info, width).Rows.Select(Plain), r => Assert.True(r.Length <= width, $"{r.Length} > {width}: '{r}'"));
+            Assert.All(Draw(buffer, info, width).Rows.Skip(1).Select(Plain), r => Assert.True(r.Length <= width, $"{r.Length} > {width}: '{r}'"));
     }
+
+    [Theory]
+    [InlineData(5, 3, 40, 0, 37)] // a short conversation: the panel still sits at the bottom
+    [InlineData(37, 3, 40, 0, 37)] // the conversation just reaches it
+    [InlineData(39, 3, 40, 2, 37)] // past it: the conversation scrolls up
+    [InlineData(39, 8, 40, 7, 32)] // a menu makes the panel taller
+    [InlineData(0, 50, 40, 0, 0)] // a panel taller than the window starts at the top
+    public void The_panel_is_placed_at_the_bottom_of_the_window(int conversationRow, int rows, int height, int scroll, int top) =>
+        Assert.Equal((scroll, top), PromptPanel.Place(conversationRow, rows, height));
 
     [Fact]
     public void Menu_sits_above_the_prompt_and_describes_each_command()

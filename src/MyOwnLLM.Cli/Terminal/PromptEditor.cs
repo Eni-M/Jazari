@@ -319,6 +319,16 @@ public static class PromptPanel
             + dot + theme.Paint(status, Tone.Muted) + new string(' ', gap) + meter.Item1);
     }
 
+    /// <summary>
+    /// Where the panel goes: at the bottom of the window, like the design. A conversation that has reached it scrolls up
+    /// first, by real scrolling, so what leaves the window lands in the terminal's scrollback.
+    /// </summary>
+    public static (int Scroll, int Top) Place(int conversationRow, int panelRows, int screenRows)
+    {
+        var top = Math.Max(screenRows - panelRows, 0);
+        return (Math.Max(conversationRow - top, 0), top);
+    }
+
     /// <summary>Ten cells and "4.1k of 16k".</summary>
     static (string Text, int Length) Meter(Theme theme, int used, int total)
     {
@@ -345,20 +355,21 @@ public sealed class PromptEditor : ILineReader
     readonly Queue<Action> _above = new();
     bool _reading;
     bool _nothingPrinted; // the last prompt left nothing behind, so the next needs no blank row above it
-    int _caretRow; // the panel row the cursor is on; nothing drawn is -1
+    int _conversationRow; // the window row the conversation carries on from, once the panel is gone
     PanelInfo? _drawnWith;
-    int _drawnWidth;
+    int _drawnWidth, _drawnHeight;
 
     /// <summary>What the panel shows; read again while waiting for keys, so a server coming up shows without a key press.</summary>
     public Func<PanelInfo> Panel { get; set; } = () => new(null, "", "");
 
-    public PromptEditor(Ui ui, Func<string> directory)
+    public PromptEditor(Ui ui, Func<string> directory, string? historyFile = null)
     {
         _ui = ui;
-        _historyFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "history");
+        _historyFile = historyFile ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "history");
         _buffer = new PromptBuffer(directory, LoadHistory(_historyFile));
-        _caretRow = -1;
     }
+
+    static int WindowRow => Console.CursorTop - Console.WindowTop;
 
     /// <summary>Base64, one entry a line: a typed line break can't split an entry.</summary>
     static IEnumerable<string> LoadHistory(string path)
@@ -399,6 +410,7 @@ public sealed class PromptEditor : ILineReader
     {
         if (!_nothingPrinted) _ui.Blank();
         _nothingPrinted = false;
+        _conversationRow = WindowRow;
         var treated = Console.TreatControlCAsInput;
         Console.TreatControlCAsInput = true;
         lock (_gate) _reading = true;
@@ -410,7 +422,7 @@ public sealed class PromptEditor : ILineReader
                 DrainAbove();
                 if (!Console.KeyAvailable)
                 {
-                    if (Panel() != _drawnWith || _ui.Width != _drawnWidth) Render();
+                    if (Panel() != _drawnWith || _ui.Width != _drawnWidth || Console.WindowHeight != _drawnHeight) Render();
                     await Task.Delay(25);
                     continue;
                 }
@@ -460,6 +472,7 @@ public sealed class PromptEditor : ILineReader
             }
             Erase();
             write();
+            _conversationRow = WindowRow;
             if (draw) Render();
         }
     }
@@ -468,39 +481,32 @@ public sealed class PromptEditor : ILineReader
     {
         var info = Panel();
         var drawn = PromptPanel.Draw(_ui, _buffer, info, Console.WindowHeight);
+        Show(drawn.Rows, drawn.CaretRow, drawn.CaretColumn);
+        (_drawnWith, _drawnWidth, _drawnHeight) = (info, _ui.Width, Console.WindowHeight);
+    }
+
+    static string Go(int row, int column = 0) => $"\e[{row + 1};{column + 1}H";
+
+    /// <summary>Draws the panel at the bottom of the window, whatever was drawn before.</summary>
+    void Show(List<string> rows, int caretRow, int caretColumn)
+    {
+        var height = Console.WindowHeight;
+        _conversationRow = Math.Min(_conversationRow, height - 1); // the window may have shrunk
+        var (scroll, top) = PromptPanel.Place(_conversationRow, rows.Count, height);
         var screen = new StringBuilder("\e[?25l");
-        AppendErase(screen);
-        screen.AppendJoin("\r\n", drawn.Rows);
-        Place(screen, drawn.Rows.Count, drawn.CaretRow, drawn.CaretColumn);
-        screen.Append("\e[?25h");
+        screen.Append(Go(_conversationRow)).Append("\e[J");
+        if (scroll > 0)
+        {
+            screen.Append(Go(height - 1)).Append('\n', scroll);
+            _conversationRow -= scroll;
+        }
+        screen.Append(Go(top)).AppendJoin("\r\n", rows);
+        screen.Append(Go(top + caretRow, caretColumn)).Append("\e[?25h");
         _ui.Output.Write(screen);
-        _caretRow = drawn.CaretRow;
-        (_drawnWith, _drawnWidth) = (info, _ui.Width);
     }
 
-    static void Place(StringBuilder screen, int rows, int caretRow, int caretColumn)
-    {
-        var up = rows - 1 - caretRow;
-        if (up > 0) screen.Append($"\e[{up}A");
-        screen.Append('\r');
-        if (caretColumn > 0) screen.Append($"\e[{caretColumn}C");
-    }
-
-    void AppendErase(StringBuilder screen)
-    {
-        if (_caretRow < 0) return;
-        if (_caretRow > 0) screen.Append($"\e[{_caretRow}A");
-        screen.Append("\r\e[J");
-    }
-
-    /// <summary>Takes the panel off the screen, leaving the cursor where it began.</summary>
-    void Erase()
-    {
-        var screen = new StringBuilder();
-        AppendErase(screen);
-        _ui.Output.Write(screen);
-        _caretRow = -1;
-    }
+    /// <summary>Takes the panel off the screen, leaving the cursor where the conversation carries on.</summary>
+    void Erase() => _ui.Output.Write(Go(_conversationRow) + "\e[J");
 
     /// <summary>The panel asking a yes/no question ("? Apply this change?  y apply  n skip"). Anything but y is no.</summary>
     public bool Ask(string question)
@@ -510,10 +516,8 @@ public sealed class PromptEditor : ILineReader
         var row = _ui.Cell("?", Tone.Accent) + theme.Paint(ConsoleText.Sanitize(question) + "   ", Tone.Primary)
             + theme.On(Surface.Accent, theme.Paint(" y  apply ", Tone.Ink)) + "  " + theme.On(Surface.Selected, theme.Paint(" n  skip ", Tone.Secondary));
         var drawn = PromptPanel.Draw(_ui, new PromptBuffer(() => ""), info, Console.WindowHeight);
-        var screen = new StringBuilder();
-        screen.Append(_ui.Rule()).Append("\r\n").Append(theme.Band(Surface.Panel, row)).Append("\r\n").Append(drawn.Rows[^1]);
-        screen.Append("\e[1A\r");
-        _ui.Output.Write(screen);
+        _conversationRow = WindowRow;
+        Show([_ui.Rule(), theme.Band(Surface.Panel, row), drawn.Rows[^1]], 1, 0);
 
         var treated = Console.TreatControlCAsInput;
         Console.TreatControlCAsInput = true;
@@ -523,7 +527,7 @@ public sealed class PromptEditor : ILineReader
             {
                 var key = Console.ReadKey(intercept: true);
                 if (key.Key is not (ConsoleKey.Y or ConsoleKey.N or ConsoleKey.Escape) && !(key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))) continue;
-                _ui.Output.Write("\e[1A\r\e[J");
+                Erase();
                 return key.Key == ConsoleKey.Y;
             }
         }

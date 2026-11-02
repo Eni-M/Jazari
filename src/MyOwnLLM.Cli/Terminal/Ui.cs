@@ -57,13 +57,19 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
         output.WriteLine();
     }
 
-    public string Rule() => theme.Paint(new string(theme.Glyph('─'), Width), Tone.Line);
+    /// <summary>A thin line edge to edge, like the panel's background. Filling the last column doesn't wrap until the next character, and a line break comes first.</summary>
+    public string Rule() => theme.Paint(new string(theme.Glyph('─'), Width + 1), Tone.Line);
 
     public void Wordmark(string version)
     {
-        if (Live) output.WriteLine(Cell() + theme.Bold("jazari") + theme.Paint("  " + ConsoleText.Sanitize(version), Tone.Muted));
+        if (Live) output.WriteLine(LiveWordmark(version));
         else output.WriteLine($"{theme.Paint(Name, Tone.Primary)}  {theme.Paint(ConsoleText.Sanitize(version), Tone.Muted)}");
     }
+
+    string LiveWordmark(string text) => Cell() + theme.Bold("jazari") + theme.Paint("  " + ConsoleText.Sanitize(text), Tone.Muted);
+
+    /// <summary>Rewrites the wordmark's row wherever the cursor is, and leaves the cursor there: "0.3.0" becomes "ready in 4 s".</summary>
+    public void ReplaceWordmark(int windowRow, string text) => output.Write($"\e7\e[{windowRow + 1};1H\e[2K{LiveWordmark(text)}\e8");
 
     public void Label(string text)
     {

@@ -196,7 +196,7 @@ public class UiTests
 
         var rows = Clean(output);
         Assert.Equal("jazari — ~/MyOwnLLM                 main", rows[0]);
-        Assert.Equal(new string('─', 40), rows[1]);
+        Assert.Equal(new string('─', 41), rows[1]); // edge to edge: the width is one short of the terminal's
     }
 
     [Fact]

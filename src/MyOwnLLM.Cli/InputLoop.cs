@@ -28,7 +28,7 @@ public static class InputLoop
         var state = hasKey ? await session.ConnectAsync(CancellationToken.None) : ConnectionState.NoKey;
         Welcome.Render(ui, version, session.ModelName, directory, state, runningOn);
         ui.Blank();
-        await LoopAsync(session, ui, reader, updateAvailable, Task.CompletedTask, () => { });
+        await LoopAsync(session, ui, reader, updateAvailable, Task.CompletedTask);
     }
 
     /// <param name="start">Starts the servers; whatever it reported is printed once it's done. Returns whether there's a key.</param>
@@ -39,8 +39,8 @@ public static class InputLoop
         var clock = System.Diagnostics.Stopwatch.StartNew();
         editor.Panel = session.Panel;
         Welcome.Opening(ui, version, directory);
+        var wordmarkRow = Console.CursorTop - Console.WindowTop - 1;
 
-        var untouched = true; // nothing printed since the wordmark
         async Task OpenAsync()
         {
             ConnectionState state;
@@ -59,18 +59,15 @@ public static class InputLoop
             editor.Post(() =>
             {
                 ui.Output.Write(report);
-                Welcome.Opened(ui, state, clock.Elapsed, untouched && report.Length == 0, measured);
-                untouched = false;
+                Welcome.Opened(ui, state, clock.Elapsed, wordmarkRow, measured);
             });
         }
 
-        var opening = OpenAsync();
-        await LoopAsync(session, ui, editor, updateAvailable, opening, () => untouched = false);
+        await LoopAsync(session, ui, editor, updateAvailable, OpenAsync());
     }
 
     /// <param name="opening">Finishes when the servers are up; a question typed sooner waits for it.</param>
-    /// <param name="onInput">Called when a line was read, before anything is done with it.</param>
-    static async Task LoopAsync(Session session, Ui ui, ILineReader reader, Task<bool>? updateAvailable, Task opening, Action onInput)
+    static async Task LoopAsync(Session session, Ui ui, ILineReader reader, Task<bool>? updateAvailable, Task opening)
     {
 
         // While an answer streams nobody is reading keys, so Ctrl+C arrives as a console signal: stop the answer.
@@ -97,7 +94,6 @@ public static class InputLoop
                     noticeShown = true;
                 }
                 var (ok, text) = await reader.ReadAsync();
-                onInput();
                 if (!ok)
                 {
                     if (!string.IsNullOrEmpty(text)) { lastEmptyCancel = null; continue; }
