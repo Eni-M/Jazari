@@ -71,6 +71,69 @@ public class PromptBuilderTests
     }
 
     [Fact]
+    public void Pinned_lines_go_inside_the_question_message()
+    {
+        var messages = PromptBuilder.Build(new PromptParts(null, null, ConversationSearchTests.HistoryWithAllFacts(), "What is the payment timeout?"), 16384, 512);
+
+        Assert.StartsWith("From earlier in this conversation:\n", messages[^1].Content);
+        Assert.Contains("45 seconds", messages[^1].Content);
+        Assert.EndsWith("\n\nWhat is the payment timeout?", messages[^1].Content);
+    }
+
+    [Fact]
+    public void A_line_lost_to_the_cut_is_still_pinned()
+    {
+        var history = ConversationSearchTests.History("The payment timeout is 45 seconds.");
+        history.AddRange(BigPairs(6));
+
+        var messages = PromptBuilder.Build(new PromptParts(null, null, history, "What is the payment timeout?"), 16384, 512, out var dropped);
+
+        Assert.True(dropped > 0);
+        Assert.DoesNotContain(messages.SkipLast(1), m => m.Content.Contains("45 seconds"));
+        Assert.Contains("The payment timeout is 45 seconds.", messages[^1].Content);
+    }
+
+    [Fact]
+    public void Dropped_messages_are_counted()
+    {
+        PromptBuilder.Build(new PromptParts(null, null, BigPairs(10), "QUESTION"), 16384, 512, out var dropped);
+        PromptBuilder.Build(new PromptParts(null, null, BigPairs(2), "QUESTION"), 16384, 512, out var none);
+
+        Assert.True(dropped > 0);
+        Assert.Equal(0, dropped % 8);
+        Assert.Equal(0, none);
+    }
+
+    [Fact]
+    public void The_history_itself_is_unchanged_by_pinning()
+    {
+        var history = ConversationSearchTests.HistoryWithAllFacts();
+
+        var pinned = PromptBuilder.Build(new PromptParts("NOTE", "CTX", history, "What is the payment timeout?"), 16384, 512);
+        var plain = PromptBuilder.Build(new PromptParts("NOTE", "CTX", history, "Tell me a joke."), 16384, 512);
+
+        Assert.Equal("Tell me a joke.", plain[^1].Content);
+        Assert.Equal(plain.SkipLast(1), pinned.SkipLast(1));
+    }
+
+    [Fact]
+    public void A_question_that_only_fits_without_the_pin_is_still_asked()
+    {
+        var room = 4 * (16384 - 512 - PromptBuilder.EstimateTokens(PromptBuilder.SystemPrompt)); // characters that just fit
+        var question = "What is the payment timeout? ".PadRight(room, 'x');
+
+        var messages = PromptBuilder.Build(new PromptParts(null, null, ConversationSearchTests.HistoryWithAllFacts(), question), 16384, 512, out _);
+
+        Assert.Equal(question, messages[^1].Content);
+    }
+
+    static List<ChatMessage> BigPairs(int n) => Enumerable.Range(0, n).SelectMany(i => new ChatMessage[]
+    {
+        new("user", $"q{i} " + new string('u', 8000)),
+        new("assistant", $"a{i} " + new string('a', 8000)),
+    }).ToList();
+
+    [Fact]
     public void SystemPrompt_names_Jazari() => Assert.StartsWith("You are Jazari", PromptBuilder.SystemPrompt);
 
     [Fact]
