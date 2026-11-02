@@ -98,9 +98,9 @@ public class ConversationSearchTests
     [Fact]
     public void A_very_long_line_is_skipped()
     {
-        var pin = ConversationSearch.Pin(History("The payment timeout is 45 seconds. " + new string('x', 300)), "What is the payment timeout?");
+        var pin = ConversationSearch.Pin(History("The payment timeout is 45 seconds. " + new string('x', 300), "The payment timeout is 30 seconds."), "What is the payment timeout?");
 
-        Assert.True(pin is null || !pin.Contains("45 seconds"));
+        Assert.Equal("The payment timeout is 30 seconds.", pin); // the short line is found; the long one never is
     }
 
     [Fact]

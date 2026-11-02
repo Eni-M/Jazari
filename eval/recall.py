@@ -116,6 +116,14 @@ def working_set_mib(pid):
     return parse_working_set(out)
 
 
+def launch(args, port, **popen):
+    """start_server, with a missing or blocked program reported like a server that didn't start."""
+    try:
+        return start_server(args, port, **popen)
+    except OSError as e:
+        raise ServerDidNotStart(f"couldn't start {args[0]}: {e}")
+
+
 def add_key(env, folder):
     """A key in the temporary folder's own keys.json, from the first line add-key prints."""
     out = subprocess.run(["dotnet", GATEWAY_DLL, "add-key"], env=env, cwd=folder, capture_output=True, text=True)
@@ -172,9 +180,9 @@ def main():
     running = []
 
     def start(context):
-        llama = start_server(llama_args(a.llama, a.model, a.threads, context), LLAMA_PORT)
+        llama = launch(llama_args(a.llama, a.model, a.threads, context), LLAMA_PORT)
         running.append(llama)
-        gateway = start_server(["dotnet", GATEWAY_DLL], GATEWAY_PORT, env=env, cwd=folder)
+        gateway = launch(["dotnet", GATEWAY_DLL], GATEWAY_PORT, env=env, cwd=folder)
         running.append(gateway)
         wait_until_ready(llama, LLAMA_PORT)
         wait_for_gateway(gateway, key)

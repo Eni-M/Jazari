@@ -1,7 +1,7 @@
 import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from recall import CHUNK, FACTS, conversation, estimated_tokens, exam, filler, gateway_env, is_right, llama_args, parse_working_set
+from recall import CHUNK, FACTS, ServerDidNotStart, conversation, estimated_tokens, exam, filler, gateway_env, is_right, launch, llama_args, parse_working_set
 
 
 def replying(answer_for=lambda messages: "ok"):
@@ -40,6 +40,11 @@ class HarnessTests(unittest.TestCase):
         server = llama_args("spike/bin/llama-server.exe", "m.gguf", 4, 16384)[0]
         self.assertTrue(os.path.isabs(server))
         self.assertEqual(server, os.path.abspath(os.path.join("spike", "bin", "llama-server.exe")))
+
+    def test_a_missing_server_program_is_reported_as_not_started(self):
+        with self.assertRaises(ServerDidNotStart) as caught:
+            launch([os.path.join(HERE, "no-such-llama-server.exe")], 59999)
+        self.assertIn("no-such-llama-server.exe", str(caught.exception))
 
     def test_filler_is_this_repos_code_in_full_chunks_without_generated_files(self):
         chunks = filler()
