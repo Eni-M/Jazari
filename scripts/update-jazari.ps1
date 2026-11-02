@@ -166,11 +166,7 @@ if (-not $Reexec) {
     }
 
     try {
-        # Windows sometimes refuses to recreate a file just deleted ("unable to create file: File exists"); a second try works.
-        foreach ($try in 1..3) {
-            try { Invoke-Git reset --hard origin/main | Out-Null; break }
-            catch { if ($try -eq 3) { throw }; Start-Sleep -Seconds 3 }
-        }
+        Invoke-Git reset --hard origin/main | Out-Null
         Invoke-Git clean -fd | Out-Null
     }
     catch {

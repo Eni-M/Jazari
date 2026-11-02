@@ -120,7 +120,7 @@ General-CRM was measured for size only and is otherwise off limits.
 
 ## Traps
 
-- **Claude Desktop redirects `AppData`.** Anything run from a Claude Desktop session writes `%APPDATA%` and `%LOCALAPPDATA%` into `...\Packages\Claude_pzs8sxrjxfjjc\LocalCache`. To read the real files from there, use `\\localhost\C$\Users\enim\AppData\...`.
+- **Claude Desktop redirects `AppData`.** Anything run from a Claude Desktop session writes `%APPDATA%` and `%LOCALAPPDATA%` into `...\Packages\Claude_pzs8sxrjxfjjc\LocalCache`. To read the real files from there, use `\\localhost\C$\Users\enim\AppData\...`; plain `%LOCALAPPDATA%` paths can show a stale private copy instead. It isn't a clean split either: changes can land in the real files, so a git command there can leave a folder half in each.
 - **Compiler servers from a Claude session can catch builds from other terminals.** Build with `--disable-build-servers`, or run `dotnet build-server shutdown` when finished.
 - **`llama-server --version` prints `build 11982`, not `b11982`.**
 
@@ -223,7 +223,7 @@ A full install into a temporary folder on this PC, then `jazari update` the way 
 ## Canvas interface and opt-in tuning (2026-11-02)
 
 - **Tuning only runs when asked.** A start uses the saved settings, or safe CPU settings when nothing was measured. `jazari update` installs the files first, then asks; `jazari tune` measures any time.
-- **Update failure found on this PC:** `git reset --hard` in the source copy failed with `unable to create file ...: File exists`, leaving Jazari 35 commits behind, and the same command worked when run again. The updater now tries three times. The cause wasn't established.
+- **Mistake to not repeat:** the session ran `jazari update` and the Jazari app from inside Claude Desktop, against the rule below in "Traps". Through the redirected `AppData` it saw a stale copy of the install and reported the real, up-to-date install as 35 commits behind. Its `git reset --hard` then deleted tracked files from the real source copy and recreated them only in the redirected one (`unable to create file ...: File exists` on the first try), which left the real `jazari update` saying its updater was missing. The installer, run from Eni-M's own terminal, repairs that.
 - **The interface follows the Jazari CLI Interface canvas**, which replaces the spec's "monochrome, no boxes" with its accent color and backgrounds: a gutter of short labels (time, `copy 1`, `read`, `why`, `fix`, `cut`), the panel around the prompt (command menu above it; file chip, hint, model, device, speed and context meter below it), a `?` panel for /edit, type-ahead while the servers start, and a live tuning block. Piped output is unchanged.
 - PrettyPrompt is gone: it can't draw below the input or put the menu above it. `Terminal/PromptEditor.cs` replaces it, and reads the old history file.
 - Deliberately not like the canvas: the header and panel are printed inline instead of pinned to the window. Text scrolled out of a terminal's scroll margins never reaches its scrollback, so pinning would lose the conversation. The canvas's window background also isn't painted: the terminal's own shows.

@@ -313,6 +313,19 @@ public class PromptEditorTests
     public void The_starting_model_comes_from_the_file_name(string? file, string expected) => Assert.Equal(expected, Session.ModelFromFile(file));
 
     [Fact]
+    public void A_git_file_is_never_followed()
+    {
+        var dir = Directory.CreateTempSubdirectory("jazari worktree").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, ".git"), @"gitdir: \\attacker.example\share");
+
+            Assert.Null(Welcome.Branch(dir));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public void Branch_is_read_from_the_repository_head()
     {
         var dir = Directory.CreateTempSubdirectory("jazari branch").FullName;

@@ -93,7 +93,11 @@ public static class Welcome
         ],
     };
 
-    /// <summary>The checked-out branch, read from the repository's HEAD file; null outside a repository or on a detached HEAD.</summary>
+    /// <summary>
+    /// The checked-out branch, read from the repository's HEAD file; null outside a repository, on a detached HEAD, or in
+    /// a linked worktree. A worktree's .git is a file naming another folder, and following it isn't safe: in a cloned
+    /// repository it could name a network share, and Windows would send the user's credentials there just from opening Jazari.
+    /// </summary>
     public static string? Branch(string directory)
     {
         try
@@ -101,10 +105,8 @@ public static class Welcome
             for (var dir = new DirectoryInfo(directory); dir is not null; dir = dir.Parent)
             {
                 var git = Path.Combine(dir.FullName, ".git");
-                // A linked worktree's .git is a file naming the real folder.
-                if (File.Exists(git) && File.ReadAllText(git).Trim() is var link && link.StartsWith("gitdir: ", StringComparison.Ordinal))
-                    git = Path.GetFullPath(link["gitdir: ".Length..], dir.FullName);
-                else if (!Directory.Exists(git)) continue;
+                if (File.Exists(git)) return null;
+                if (!Directory.Exists(git)) continue;
                 var head = File.ReadAllText(Path.Combine(git, "HEAD")).Trim();
                 return head.StartsWith("ref: refs/heads/", StringComparison.Ordinal) ? head["ref: refs/heads/".Length..] : null;
             }
