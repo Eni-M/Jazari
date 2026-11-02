@@ -1,17 +1,15 @@
 """Recall test: twelve invented facts asked back in a short conversation, deep in a long one, and after the gateway cuts
 history, all through the real gateway (port 5099, its own temporary data folder) and a temporary llama-server (port
 8099). Writes eval/results/recall/<label>.json. The facts are invented and stay out of training data."""
-import argparse, collections, json, os, re, shutil, statistics, subprocess, sys, tempfile, time, urllib.error, urllib.request
+import argparse, collections, json, os, re, shutil, statistics, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from run_eval import PortInUse, ServerDidNotStart, save_failure, start_server, wait_until_ready
+from gateway import (GATEWAY_DLL, GATEWAY_PORT, LLAMA_PORT, REPO, PortInUse, ServerDidNotStart, add_key, build_gateway, gateway_chat, gateway_env,
+                     launch, stop, wait_for_gateway)
+from run_eval import save_failure, wait_until_ready
 
-REPO = os.path.join(HERE, "..")
-GATEWAY_PROJECT = os.path.join(REPO, "src", "MyOwnLLM.Gateway")
-GATEWAY_DLL = os.path.join(GATEWAY_PROJECT, "bin", "Release", "net10.0", "MyOwnLLM.Gateway.dll")
 RESULTS = os.path.join(HERE, "results", "recall")  # a subfolder, so compare.py doesn't take a result for a candidate
-LLAMA_PORT, GATEWAY_PORT = 8099, 5099
 CHUNK = 4460  # characters of this repo's C# after each fact in the deep conversation: about 12,700 tokens in all
 MAX_TOKENS = 40
 # At 16384 the deep conversation fits whole. At 10240 the gateway cuts 4 question/answer pairs, taking facts 1-4 with them.
@@ -38,11 +36,6 @@ FACTS = [
 
 def is_right(answer, want):
     return bool(re.search(want, answer, re.I))
-
-
-def gateway_env(data_dir, llama_port, port):
-    """The gateway's settings, pointed at the temporary server and folder, so the installed Jazari's data is never touched."""
-    return {**os.environ, "Gateway__LlamaUrl": f"http://127.0.0.1:{llama_port}", "Gateway__Port": str(port), "Gateway__DataDir": data_dir}
 
 
 def llama_args(llama, model, threads, context):
@@ -116,55 +109,6 @@ def working_set_mib(pid):
     return parse_working_set(out)
 
 
-def launch(args, port, **popen):
-    """start_server, with a missing or blocked program reported like a server that didn't start."""
-    try:
-        return start_server(args, port, **popen)
-    except OSError as e:
-        raise ServerDidNotStart(f"couldn't start {args[0]}: {e}")
-
-
-def add_key(env, folder):
-    """A key in the temporary folder's own keys.json, from the first line add-key prints."""
-    out = subprocess.run(["dotnet", GATEWAY_DLL, "add-key"], env=env, cwd=folder, capture_output=True, text=True)
-    if out.returncode != 0 or not out.stdout.strip():
-        raise ServerDidNotStart(f"the gateway's add-key failed: {out.stderr.strip() or out.returncode}")
-    return out.stdout.splitlines()[0].strip()
-
-
-def wait_for_gateway(gateway, key, seconds=60):
-    deadline = time.time() + seconds
-    while time.time() < deadline:
-        if gateway.poll() is not None:
-            raise ServerDidNotStart(f"the gateway stopped with exit code {gateway.returncode}")
-        try:
-            request = urllib.request.Request(f"http://127.0.0.1:{GATEWAY_PORT}/v1/info", headers={"Authorization": f"Bearer {key}"})
-            urllib.request.urlopen(request, timeout=2).close()
-            return
-        except urllib.error.HTTPError as e:
-            raise ServerDidNotStart(f"the gateway answered {e.code} to its own key")
-        except (urllib.error.URLError, OSError):
-            time.sleep(1)
-    raise ServerDidNotStart(f"the gateway wasn't ready after {seconds} s")
-
-
-def gateway_chat(key, messages):
-    """What the CLI sends, without a project folder: no project note goes into the prompt."""
-    body = {"messages": messages, "max_tokens": MAX_TOKENS, "stream": False}
-    request = urllib.request.Request(f"http://127.0.0.1:{GATEWAY_PORT}/v1/chat/completions", json.dumps(body).encode(),
-                                     {"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
-    with urllib.request.urlopen(request, timeout=1800) as response:
-        return json.load(response)["choices"][0]["message"]["content"] or ""
-
-
-def stop(processes):
-    for p in processes:
-        if p.poll() is None:
-            p.kill()
-        p.wait()
-    processes.clear()
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--label", required=True)
@@ -173,8 +117,10 @@ def main():
     parser.add_argument("--llama", default=os.path.join(os.environ.get("LOCALAPPDATA", ""), "Jazari", "llama", "llama-server.exe"))
     a = parser.parse_args()
 
-    if subprocess.run(["dotnet", "build", GATEWAY_PROJECT, "-c", "Release", "--disable-build-servers"]).returncode != 0:
-        sys.exit("the gateway didn't build")
+    try:
+        build_gateway()
+    except ServerDidNotStart as e:
+        sys.exit(str(e))
     folder = tempfile.mkdtemp(prefix="jazari-recall-")
     env = gateway_env(folder, LLAMA_PORT, GATEWAY_PORT)
     running = []
@@ -190,7 +136,7 @@ def main():
 
     try:
         key = add_key(env, folder)
-        ask = lambda messages: gateway_chat(key, messages)
+        ask = lambda messages: gateway_chat(key, messages, MAX_TOKENS)
         llama = start(DEEP_CONTEXT)
         print("short: facts only", flush=True)
         short = exam(ask, conversation(ask))

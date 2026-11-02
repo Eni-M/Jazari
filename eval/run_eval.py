@@ -1,23 +1,17 @@
 """Runs the test set against a model through a temporary llama-server on port 8099, and saves the scored answers."""
-import argparse, json, os, re, socket, statistics, subprocess, sys, time, urllib.error, urllib.request
+import argparse, json, os, re, shutil, statistics, sys, tempfile, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from score import score
+from gateway import (GATEWAY_DLL, GATEWAY_PORT, PortInUse, ServerDidNotStart, add_key, build_gateway, gateway_chat, gateway_env, launch,
+                     search_law, start_server, stop, wait_for_gateway)
 
 PORT = 8099
 REPO = os.path.join(HERE, "..")
 PROMPT_BUILDER = os.path.join(REPO, "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
 MAX_TOKENS = 512  # the gateway's DefaultChatTokens
 TEMPERATURE = 0.2  # the gateway's CodeTemperature
-
-
-class PortInUse(Exception):
-    pass
-
-
-class ServerDidNotStart(Exception):
-    pass
 
 
 def _constant(source_path, name):
@@ -144,13 +138,19 @@ def run_questions(questions, ask):
     return answers
 
 
-def start_server(args, port=PORT, **popen):
-    """`popen` goes to subprocess.Popen: recall.py starts its gateway with its own settings and folder."""
-    with socket.socket() as probe:
-        probe.settimeout(1)
-        if probe.connect_ex(("127.0.0.1", port)) == 0:
-            raise PortInUse(f"port {port} is in use: stop whatever is on it, then run this again")
-    return subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen)
+def plain_through_gateway(gateway_ask):
+    """A question as the CLI sends it: the user's words alone. The gateway adds the system prompt, and the law book's passage."""
+    return lambda q: gateway_ask([{"role": "user", "content": q["question"]}])
+
+
+def with_passages(answers, find):
+    """Notes the law book addresses each question was given, so a wrong answer can be traced to its passage. None: unknown."""
+    for answer in answers:
+        try:
+            answer["passages"] = [p["url"] for p in find(answer["question"])]
+        except Exception:  # the lookup is a note on the run, not part of it
+            answer["passages"] = None
+    return answers
 
 
 def wait_until_ready(server, port=PORT, seconds=180):
@@ -199,36 +199,67 @@ def main():
     parser.add_argument("--scenarios", action="store_true", help="also time /read, /edit, /review and a conversation")
     parser.add_argument("--limit", type=int, help="only the first N questions, for a quick check")
     parser.add_argument("--llama", default=os.path.join(os.environ.get("LOCALAPPDATA", ""), "Jazari", "llama", "llama-server.exe"))
+    parser.add_argument("--law-book", help="send the plain questions through a temporary gateway (port 5099, its own data folder) "
+                        "that searches this law book file; the scenarios stay as they are")
     a = parser.parse_args()
+    if a.law_book:
+        if not os.path.isfile(a.law_book):
+            sys.exit(f"no law book at {a.law_book}: build it with py -I lawbook/build.py")
+        try:
+            build_gateway()
+        except ServerDidNotStart as e:
+            sys.exit(str(e))
 
     with open(os.path.join(HERE, "questions.json"), encoding="utf-8") as f:
         questions = json.load(f)[: a.limit]
     system = system_prompt()
 
     try:
-        server = start_server(server_args(a))
+        server = start_server(server_args(a), PORT)
     except PortInUse as e:
         sys.exit(str(e))
+    gateway, folder = [], None
     try:
         try:
+            ask = lambda q: chat([{"role": "system", "content": system}, {"role": "user", "content": q["question"]}])
+            if a.law_book:
+                folder = tempfile.mkdtemp(prefix="jazari-eval-")
+                env = gateway_env(folder, PORT, GATEWAY_PORT, a.law_book)
+                key = add_key(env, folder)
+                gateway.append(launch(["dotnet", GATEWAY_DLL], GATEWAY_PORT, env=env, cwd=folder))
+                ask = plain_through_gateway(lambda messages: gateway_chat(key, messages, MAX_TOKENS))
             wait_until_ready(server)
+            if gateway:
+                wait_for_gateway(gateway[0], key)
+        except PortInUse as e:
+            sys.exit(str(e))
         except ServerDidNotStart as e:
             save_failure(a.label, str(e))
             sys.exit(f"{a.label}: {e}")
-        answers = run_questions(questions, lambda q: chat([{"role": "system", "content": system}, {"role": "user", "content": q["question"]}]))
+        answers = run_questions(questions, ask)
+        if a.law_book:
+            with_passages(answers, lambda question: search_law(env, folder, question))
         times = [x["seconds"] for x in answers]
         result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "device": a.device, "gpu_layers": a.gpu_layers,
+                  "law_book": os.path.abspath(a.law_book) if a.law_book else None,
                   "score": sum(x["passed"] for x in answers), "total": len(answers), "plain_p50_s": statistics.median(times), "plain_max_s": max(times),
                   "read_first_s": None, "followup_s": None, "edit_ok": None, "review_ok": None, "answers": answers}
         if a.scenarios:
             result.update(run_scenarios(chat, system))
     finally:
+        stop(gateway)
         server.kill()
         server.wait()
+        if folder:
+            shutil.rmtree(folder, ignore_errors=True)
     os.makedirs(os.path.join(HERE, "results"), exist_ok=True)
     with open(os.path.join(HERE, "results", f"{a.label}.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
     print(f'{a.label}: {result["score"]}/{result["total"]}, median {result["plain_p50_s"]} s, longest {result["plain_max_s"]} s')
+    if a.law_book:
+        used = [x for x in answers if x.get("passages")]
+        print(f'{len(used)} questions were given a passage; {sum(not x["passed"] for x in used)} of them still failed: '
+              + (", ".join(x["id"] for x in used if not x["passed"]) or "none"))
 
 
 if __name__ == "__main__":

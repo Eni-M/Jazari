@@ -3,7 +3,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import argparse, json, tempfile
 from compare import by_category, table
-from run_eval import PortInUse, conversation, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, save_failure, server_args, start_server, system_prompt
+from run_eval import PortInUse, conversation, plain_through_gateway, with_passages, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, save_failure, server_args, start_server, system_prompt
 
 PROMPT_BUILDER = os.path.join(HERE, "..", "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
 Q1 = {"id": "a", "category": "api", "question": "boom", "must_have": [["x"]], "must_not": []}
@@ -144,6 +144,36 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(len(times), 6)
         self.assertEqual(len(calls), 6)
         self.assertGreater(len(calls[5]["messages"]), len(calls[0]["messages"]) + 8)
+
+
+
+class LawBookRunTests(unittest.TestCase):
+    def test_gateway_env_carries_the_law_book(self):
+        from gateway import gateway_env
+        self.assertEqual(gateway_env("dir", 8099, 5099, law_book="x.db")["Gateway__LawBookFile"], os.path.abspath("x.db"))
+
+    def test_without_a_law_book_the_gateway_gets_no_setting(self):
+        from gateway import gateway_env
+        self.assertNotIn("Gateway__LawBookFile", gateway_env("dir", 8099, 5099))
+
+    def test_each_answer_records_the_passages_it_was_given(self):
+        answers = [{"question": "covered?"}, {"question": "trap?"}]
+        found = {"covered?": [{"title": "T", "url": "https://learn.microsoft.com/a#b", "text": "x"}], "trap?": []}
+        with_passages(answers, found.get)
+        self.assertEqual(answers[0]["passages"], ["https://learn.microsoft.com/a#b"])
+        self.assertEqual(answers[1]["passages"], [])
+
+    def test_a_failed_lookup_is_noted_not_fatal(self):
+        def broken(_): raise RuntimeError("no dotnet")
+        answers = [{"question": "q"}]
+        with_passages(answers, broken)
+        self.assertIsNone(answers[0]["passages"])
+
+    def test_the_plain_question_goes_to_the_gateway_alone(self):
+        sent = []
+        ask = plain_through_gateway(lambda messages: sent.append(messages) or "ok")
+        self.assertEqual(ask({"question": "Q?"}), "ok")
+        self.assertEqual(sent, [[{"role": "user", "content": "Q?"}]])  # the gateway adds the system prompt itself
 
 
 if __name__ == "__main__":
