@@ -2,7 +2,8 @@ using MyOwnLLM.Gateway.Llama;
 
 namespace MyOwnLLM.Gateway.Prompt;
 
-public sealed record PromptParts(string? StateNote, string? RepoContext, IReadOnlyList<ChatMessage> History, string Question);
+/// <param name="Passages">The law book's passages for the question, if any.</param>
+public sealed record PromptParts(string? StateNote, string? RepoContext, IReadOnlyList<ChatMessage> History, string Question, IReadOnlyList<Passage>? Passages = null);
 
 public sealed class InputTooLargeException(int estimated, int limit)
     : Exception($"input too large (~{estimated} tokens, limit {limit})")
@@ -30,25 +31,33 @@ public static class PromptBuilder
         "closing summary. If you don't know, say you don't know; never make up links, names or products.";
 
     public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens) =>
-        Build(parts, contextTokens, maxOutputTokens, out _);
+        Build(parts, contextTokens, maxOutputTokens, out _, out _);
+
+    public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens, out int droppedMessages) =>
+        Build(parts, contextTokens, maxOutputTokens, out droppedMessages, out _);
 
     /// <param name="droppedMessages">How many of the oldest history messages didn't fit.</param>
-    public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens, out int droppedMessages)
+    /// <param name="usedPassages">Whether the law book's passages went in, so the answer can name its source.</param>
+    public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens, out int droppedMessages, out bool usedPassages)
     {
         List<ChatMessage> fixedStart = [new("system", SystemPrompt)];
         if (parts.StateNote is { Length: > 0 } note) fixedStart.Add(new("system", "Notes on this project, possibly out of date. Use them only when asked about the project, and never repeat them otherwise:\n" + note));
         if (parts.RepoContext is { Length: > 0 } context) fixedStart.Add(new("system", "Relevant code:\n" + context));
 
-        // The user's matching earlier lines go inside the question, never into history, so the prompt's start stays cached.
-        // The whole history is searched, so a line the cut below drops is still found.
+        // The law book's passages and the user's matching earlier lines go inside the question, never into history, so the
+        // prompt's start stays cached. The whole history is searched, so a line the cut below drops is still found.
         var pin = ConversationSearch.Pin(parts.History, parts.Question);
-        var question = new ChatMessage("user", pin is null ? parts.Question : "From earlier in this conversation:\n" + pin + "\n\n" + parts.Question);
+        var docs = parts.Passages is { Count: > 0 } passages ? string.Join("\n\n", passages.Select(p => p.Text)) : null;
+        var question = new ChatMessage("user",
+            (docs is null ? "" : "From the .NET docs:\n" + docs + "\n\n") +
+            (pin is null ? "" : "From earlier in this conversation:\n" + pin + "\n\n") + parts.Question);
+        usedPassages = docs is not null;
 
         var limit = contextTokens - maxOutputTokens;
         var fixedTokens = fixedStart.Sum(m => EstimateTokens(m.Content));
         var required = fixedTokens + EstimateTokens(question.Content);
-        if (required > limit && pin is not null) // only the pin is too much: ask without it rather than refuse
-            (question, required) = (new("user", parts.Question), fixedTokens + EstimateTokens(parts.Question));
+        if (required > limit && (pin ?? docs) is not null) // only the additions are too much: ask without them rather than refuse
+            (question, required, usedPassages) = (new("user", parts.Question), fixedTokens + EstimateTokens(parts.Question), false);
         if (required > limit) throw new InputTooLargeException(required, limit);
 
         // Long conversations: drop the oldest history until it fits. The cut moves in steps of DropStep messages counted from

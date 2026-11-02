@@ -127,6 +127,62 @@ public class PromptBuilderTests
         Assert.Equal(question, messages[^1].Content);
     }
 
+    [Fact]
+    public void Passages_go_inside_the_question_message()
+    {
+        var messages = PromptBuilder.Build(new PromptParts(null, null, [], "Q", [new("T", "u", "PASSAGE")]), 16384, 512);
+        Assert.Equal("From the .NET docs:\nPASSAGE\n\nQ", messages[^1].Content);
+    }
+
+    [Fact]
+    public void Two_passages_are_parted_by_a_blank_line()
+    {
+        var messages = PromptBuilder.Build(new PromptParts(null, null, [], "Q", [new("T", "u", "ONE"), new("T", "v", "TWO")]), 16384, 512);
+        Assert.Equal("From the .NET docs:\nONE\n\nTWO\n\nQ", messages[^1].Content);
+    }
+
+    [Fact]
+    public void Passages_come_before_earlier_lines()
+    {
+        var parts = new PromptParts(null, null, ConversationSearchTests.HistoryWithAllFacts(), "What is the payment timeout?", [new("T", "u", "PASSAGE")]);
+
+        var question = PromptBuilder.Build(parts, 16384, 512)[^1].Content;
+
+        Assert.StartsWith("From the .NET docs:\nPASSAGE\n\nFrom earlier in this conversation:\n", question);
+        Assert.Contains("45 seconds", question);
+        Assert.EndsWith("\n\nWhat is the payment timeout?", question);
+    }
+
+    [Fact]
+    public void Passages_leave_the_history_alone()
+    {
+        var history = ConversationSearchTests.HistoryWithAllFacts();
+        var plain = PromptBuilder.Build(new PromptParts("NOTE", "CTX", history, "Q"), 16384, 512);
+        var withDocs = PromptBuilder.Build(new PromptParts("NOTE", "CTX", history, "Q", [new("T", "u", "PASSAGE")]), 16384, 512);
+        Assert.Equal(plain.SkipLast(1), withDocs.SkipLast(1));
+    }
+
+    [Fact]
+    public void Passages_that_do_not_fit_are_left_out()
+    {
+        var room = 4 * (16384 - 512 - PromptBuilder.EstimateTokens(PromptBuilder.SystemPrompt)); // characters that just fit
+        var question = "Q ".PadRight(room, 'x');
+
+        var messages = PromptBuilder.Build(new PromptParts(null, null, [], question, [new("T", "u", "PASSAGE")]), 16384, 512, out _, out var used);
+
+        Assert.Equal(question, messages[^1].Content);
+        Assert.False(used);
+    }
+
+    [Fact]
+    public void Says_whether_the_passages_went_in()
+    {
+        PromptBuilder.Build(new PromptParts(null, null, [], "Q", [new("T", "u", "PASSAGE")]), 16384, 512, out _, out var used);
+        PromptBuilder.Build(new PromptParts(null, null, [], "Q"), 16384, 512, out _, out var none);
+        Assert.True(used);
+        Assert.False(none);
+    }
+
     static List<ChatMessage> BigPairs(int n) => Enumerable.Range(0, n).SelectMany(i => new ChatMessage[]
     {
         new("user", $"q{i} " + new string('u', 8000)),
