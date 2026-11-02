@@ -11,9 +11,13 @@ public sealed record Replacement(string Search, string Replace);
 /// </summary>
 public static class FileEdit
 {
+    /// <summary>
+    /// The length caps bound a model that loops inside a string: without them it writes until it runs out of tokens and
+    /// the reply never closes, the slowest possible failure.
+    /// </summary>
     public const string Schema = """
         {"type":"object","required":["edits"],"properties":{"edits":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object",
-        "required":["search","replace"],"properties":{"search":{"type":"string"},"replace":{"type":"string"}}}}}}
+        "required":["search","replace"],"properties":{"search":{"type":"string","maxLength":1500},"replace":{"type":"string","maxLength":3000}}}}}}
         """;
 
     public const string Instructions =
