@@ -442,6 +442,12 @@ public sealed class PromptEditor : ILineReader
     /// <summary>An answer or command is running, so Enter queues.</summary>
     public bool Busy { get; set; }
 
+    /// <summary>How many rows the conversation has on screen: the window less the panel's rows below it.</summary>
+    public int ConversationRows
+    {
+        get { lock (_gate) return Math.Max(Console.WindowHeight - (_drawn?.Count ?? 0), 1); }
+    }
+
     public PromptEditor(Ui ui, ConversationWriter conversation, Func<string> directory, string? historyFile = null)
     {
         _ui = ui;

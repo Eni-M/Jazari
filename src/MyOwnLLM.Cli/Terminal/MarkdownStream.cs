@@ -8,7 +8,9 @@ namespace MyOwnLLM.Cli.Terminal;
 /// arrive, each row is word-wrapped as it fills and redrawn once with its styling. In plain mode (no color / piped) only
 /// finished lines are written, with no gutter.
 /// </summary>
-public sealed partial class MarkdownStream(TextWriter output, Theme theme, int width, int screenRows = 24)
+/// <param name="visibleRows">How many conversation rows are on screen when the answer ends: the window less the panel
+/// below it. Without it, <paramref name="screenRows"/>.</param>
+public sealed partial class MarkdownStream(TextWriter output, Theme theme, int width, int screenRows = 24, Func<int>? visibleRows = null)
 {
     enum State { Text, InFence }
 
@@ -45,13 +47,14 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
     }
 
     /// <summary>
-    /// Puts the answer's time in the gutter beside its first row, now that it's known. An answer taller than the screen
-    /// has scrolled that row away, and a code block on the first row has "copy 1" there, so then the time goes on a row of its own.
+    /// Puts the answer's time in the gutter beside its first row, now that it's known. An answer taller than the space above
+    /// the panel has scrolled that row away, and a code block on the first row has "copy 1" there, so then the time goes on
+    /// a row of its own.
     /// </summary>
     public void StampTime(string time)
     {
         if (!Live) return;
-        if (_rows == 0 || _startsWithCode || _rows >= screenRows - 1) { output.WriteLine(_ui.Cell(time)); return; }
+        if (_rows == 0 || _startsWithCode || _rows >= (visibleRows?.Invoke() ?? screenRows) - 1) { output.WriteLine(_ui.Cell(time)); return; }
         output.Write($"\e[{_rows}A\r{_ui.Cell(time)}\e[{_rows}B\r");
     }
 

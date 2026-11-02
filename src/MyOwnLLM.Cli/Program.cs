@@ -109,7 +109,8 @@ if (cli.Command == "session")
     var ui = new Ui(sessionOutput, theme, Columns);
     var editor = conversation is null ? null : new PromptEditor(ui, conversation, Directory.GetCurrentDirectory);
     // In a real terminal the prompt puts the "› question" row on screen; piped input isn't echoed, so Jazari prints it.
-    var interactive = new Session(gateway, ui, () => new MarkdownStream(sessionOutput, theme, Columns(), ScreenRows()), directory)
+    var interactive = new Session(gateway, ui, () => new MarkdownStream(sessionOutput, theme, Columns(), ScreenRows(),
+        editor is null ? null : () => editor.ConversationRows), directory)
     {
         EchoQuestions = piped,
         Tuning = tuning,

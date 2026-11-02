@@ -243,4 +243,18 @@ public class MarkdownStreamTests
         Assert.DoesNotMatch(@"\e\[\d+A", output.ToString());
         Assert.Contains("3.2s", Screen(output.ToString())[^1]);
     }
+
+    [Fact]
+    public void The_panel_below_counts_against_the_rows_the_answer_has()
+    {
+        // 30 rows of window, but the panel takes 28 of them: a 4-row answer has scrolled its first row away.
+        var output = new StringWriter();
+        var stream = new MarkdownStream(output, new Theme(ColorMode.TrueColor, true), 80, screenRows: 30, visibleRows: () => 2);
+        stream.Write("1\n2\n3\n4\n");
+        stream.Complete();
+
+        stream.StampTime("3.2s");
+
+        Assert.DoesNotMatch(@"\e\[\d+A", output.ToString());
+    }
 }
