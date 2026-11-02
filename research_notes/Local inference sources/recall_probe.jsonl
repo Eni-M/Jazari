@@ -1,0 +1,86 @@
+{"exam": "A short conversation, facts only", "fact": 0, "ok": true, "answer": "The refund service retries 3 times before giving up.", "read": 19, "cached": 384, "read_s": 0.8, "write_tok_s": 11.4}
+{"exam": "A short conversation, facts only", "fact": 1, "ok": true, "answer": "Invoices are kept for 7 years.", "read": 14, "cached": 386, "read_s": 0.7, "write_tok_s": 11.7}
+{"exam": "A short conversation, facts only", "fact": 2, "ok": true, "answer": "The staging database listens on port 5433.", "read": 17, "cached": 386, "read_s": 0.6, "write_tok_s": 11.1}
+{"exam": "A short conversation, facts only", "fact": 3, "ok": true, "answer": "Order IDs start with the prefix \"ORD-\".", "read": 16, "cached": 386, "read_s": 0.6, "write_tok_s": 11.4}
+{"exam": "A short conversation, facts only", "fact": 4, "ok": true, "answer": "The payment timeout is 45 seconds.", "read": 14, "cached": 386, "read_s": 0.6, "write_tok_s": 11.6}
+{"exam": "A short conversation, facts only", "fact": 5, "ok": true, "answer": "Deployments are frozen on Fridays.", "read": 15, "cached": 386, "read_s": 0.6, "write_tok_s": 11.4}
+{"exam": "A short conversation, facts only", "fact": 6, "ok": true, "answer": "The email service retries 5 times before giving up.", "read": 17, "cached": 386, "read_s": 0.7, "write_tok_s": 11.3}
+{"exam": "A short conversation, facts only", "fact": 7, "ok": true, "answer": "Audit logs are kept for 2 years.", "read": 15, "cached": 386, "read_s": 0.6, "write_tok_s": 11.0}
+{"exam": "A short conversation, facts only", "fact": 8, "ok": true, "answer": "The production database listens on port 6432.", "read": 17, "cached": 386, "read_s": 0.7, "write_tok_s": 11.1}
+{"exam": "A short conversation, facts only", "fact": 9, "ok": true, "answer": "Customer IDs start with the prefix \"CUS-\".", "read": 16, "cached": 386, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "A short conversation, facts only", "fact": 10, "ok": true, "answer": "The login timeout is 20 seconds.", "read": 14, "cached": 386, "read_s": 0.6, "write_tok_s": 10.2}
+{"exam": "A short conversation, facts only", "fact": 11, "ok": true, "answer": "Backups run on Sundays.", "read": 15, "cached": 386, "read_s": 0.6, "write_tok_s": 11.4}
+{"exam": "A short conversation, facts only", "score": 12, "of": 12}
+{"note": "deep conversation built", "tokens": 12752, "working_set_mib": 9565}
+{"exam": "B deep conversation, nothing pinned", "fact": 0, "ok": true, "answer": "The refund service retries 3 times before giving up.", "read": 19, "cached": 12752, "read_s": 0.9, "write_tok_s": 9.0}
+{"exam": "B deep conversation, nothing pinned", "fact": 1, "ok": false, "answer": "Invoices are kept for 2 years.", "read": 14, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.6}
+{"exam": "B deep conversation, nothing pinned", "fact": 2, "ok": true, "answer": "The staging database listens on port 5433.", "read": 17, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "B deep conversation, nothing pinned", "fact": 3, "ok": true, "answer": "Order ids start with the prefix \"ORD-\".", "read": 16, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.9}
+{"exam": "B deep conversation, nothing pinned", "fact": 4, "ok": false, "answer": "The payment timeout is 20 seconds.", "read": 14, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.8}
+{"exam": "B deep conversation, nothing pinned", "fact": 5, "ok": false, "answer": "Deployments are frozen on Sundays.", "read": 15, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "B deep conversation, nothing pinned", "fact": 6, "ok": true, "answer": "The email service retries 5 times before giving up.", "read": 17, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.7}
+{"exam": "B deep conversation, nothing pinned", "fact": 7, "ok": true, "answer": "Audit logs are kept for 2 years.", "read": 15, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.8}
+{"exam": "B deep conversation, nothing pinned", "fact": 8, "ok": true, "answer": "The production database listens on port 6432.", "read": 17, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.7}
+{"exam": "B deep conversation, nothing pinned", "fact": 9, "ok": true, "answer": "Customer ids start with the prefix CUS-.", "read": 16, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.8}
+{"exam": "B deep conversation, nothing pinned", "fact": 10, "ok": true, "answer": "The login timeout is 20 seconds.", "read": 14, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.9}
+{"exam": "B deep conversation, nothing pinned", "fact": 11, "ok": true, "answer": "Backups run on Sundays.", "read": 15, "cached": 12754, "read_s": 0.7, "write_tok_s": 9.4}
+{"exam": "B deep conversation, nothing pinned", "score": 9, "of": 12}
+{"exam": "C deep, label: value list pinned before the question", "fact": 0, "ok": true, "answer": "The refund service retries 3 times.", "read": 104, "cached": 12754, "read_s": 3.4, "write_tok_s": 9.8}
+{"exam": "C deep, label: value list pinned before the question", "fact": 1, "ok": true, "answer": "Invoices are kept for 7 years.", "read": 14, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "C deep, label: value list pinned before the question", "fact": 2, "ok": true, "answer": "The staging database listens on port 5433.", "read": 17, "cached": 12841, "read_s": 0.8, "write_tok_s": 9.8}
+{"exam": "C deep, label: value list pinned before the question", "fact": 3, "ok": true, "answer": "Order ids start with the prefix \"ORD-\".", "read": 16, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.7}
+{"exam": "C deep, label: value list pinned before the question", "fact": 4, "ok": true, "answer": "The payment timeout is 45 seconds.", "read": 14, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "C deep, label: value list pinned before the question", "fact": 5, "ok": true, "answer": "Deployments are frozen on Fridays.", "read": 15, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.7}
+{"exam": "C deep, label: value list pinned before the question", "fact": 6, "ok": true, "answer": "The email service retries 5 times.", "read": 17, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "C deep, label: value list pinned before the question", "fact": 7, "ok": true, "answer": "Audit logs are kept for 2 years.", "read": 15, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "C deep, label: value list pinned before the question", "fact": 8, "ok": true, "answer": "The production database listens on port 6432.", "read": 17, "cached": 12841, "read_s": 0.8, "write_tok_s": 9.7}
+{"exam": "C deep, label: value list pinned before the question", "fact": 9, "ok": true, "answer": "Customer ids start with the prefix CUS-.", "read": 16, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.7}
+{"exam": "C deep, label: value list pinned before the question", "fact": 10, "ok": true, "answer": "The login timeout is 20 seconds.", "read": 14, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "C deep, label: value list pinned before the question", "fact": 11, "ok": true, "answer": "Backups run on Sundays.", "read": 15, "cached": 12841, "read_s": 0.7, "write_tok_s": 9.4}
+{"exam": "C deep, label: value list pinned before the question", "score": 12, "of": 12}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 0, "ok": true, "answer": "The refund service retries 3 times before giving up.", "read": 131, "cached": 12754, "read_s": 4.2, "write_tok_s": 9.7}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 1, "ok": true, "answer": "Invoices are kept for 7 years.", "read": 14, "cached": 12868, "read_s": 0.7, "write_tok_s": 9.5}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 2, "ok": true, "answer": "The staging database listens on port 5433.", "read": 17, "cached": 12868, "read_s": 0.8, "write_tok_s": 9.4}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 3, "ok": true, "answer": "Order ids start with the prefix \"ORD-\".", "read": 16, "cached": 12868, "read_s": 0.8, "write_tok_s": 9.7}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 4, "ok": true, "answer": "The payment timeout is 45 seconds.", "read": 14, "cached": 12868, "read_s": 0.7, "write_tok_s": 9.2}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 5, "ok": true, "answer": "Deployments are frozen on Fridays.", "read": 15, "cached": 12868, "read_s": 0.7, "write_tok_s": 8.9}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 6, "ok": true, "answer": "The email service retries 5 times before giving up.", "read": 17, "cached": 12868, "read_s": 0.8, "write_tok_s": 9.6}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 7, "ok": true, "answer": "Audit logs are kept for 2 years.", "read": 15, "cached": 12868, "read_s": 0.8, "write_tok_s": 9.6}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 8, "ok": true, "answer": "The production database listens on port 6432.", "read": 17, "cached": 12868, "read_s": 0.7, "write_tok_s": 9.2}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 9, "ok": true, "answer": "Customer ids start with the prefix CUS-.", "read": 16, "cached": 12868, "read_s": 0.7, "write_tok_s": 9.6}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 10, "ok": true, "answer": "The login timeout is 20 seconds.", "read": 14, "cached": 12868, "read_s": 0.7, "write_tok_s": 9.6}
+{"exam": "D deep, same facts as prose pinned before the question", "fact": 11, "ok": true, "answer": "Backups run on Sundays.", "read": 15, "cached": 12868, "read_s": 0.7, "write_tok_s": 9.4}
+{"exam": "D deep, same facts as prose pinned before the question", "score": 12, "of": 12}
+{"exam": "E after cutting four pairs, kept facts", "fact": 0, "ok": false, "answer": "The payment timeout is 20 seconds.", "read": 355, "cached": 8206, "read_s": 11.4, "write_tok_s": 9.8}
+{"exam": "E after cutting four pairs, kept facts", "fact": 1, "ok": false, "answer": "Deployments are frozen on Sundays.", "read": 15, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.0}
+{"exam": "E after cutting four pairs, kept facts", "fact": 2, "ok": true, "answer": "The email service retries 5 times before giving up.", "read": 17, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.1}
+{"exam": "E after cutting four pairs, kept facts", "fact": 3, "ok": true, "answer": "Audit logs are kept for 2 years.", "read": 15, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.1}
+{"exam": "E after cutting four pairs, kept facts", "fact": 4, "ok": true, "answer": "The production database listens on port 6432.", "read": 17, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.1}
+{"exam": "E after cutting four pairs, kept facts", "fact": 5, "ok": true, "answer": "Customer ids start with the prefix CUS-.", "read": 16, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.1}
+{"exam": "E after cutting four pairs, kept facts", "fact": 6, "ok": true, "answer": "The login timeout is 20 seconds.", "read": 14, "cached": 8547, "read_s": 0.6, "write_tok_s": 10.0}
+{"exam": "E after cutting four pairs, kept facts", "fact": 7, "ok": true, "answer": "Backups run on Sundays.", "read": 15, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.1}
+{"exam": "E after cutting four pairs, kept facts", "score": 6, "of": 8}
+{"exam": "F after cutting four pairs, cut facts", "fact": 0, "ok": false, "answer": "The refund service retries 5 times before giving up.", "read": 17, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.3}
+{"exam": "F after cutting four pairs, cut facts", "fact": 1, "ok": false, "answer": "Invoices are kept for 2 years.", "read": 14, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.0}
+{"exam": "F after cutting four pairs, cut facts", "fact": 2, "ok": false, "answer": "The staging database listens on port 6432.", "read": 17, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.3}
+{"exam": "F after cutting four pairs, cut facts", "fact": 3, "ok": true, "answer": "The prefix for order ids is \"ORD-\".", "read": 16, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.2}
+{"exam": "F after cutting four pairs, cut facts", "score": 1, "of": 4}
+{"note": "peak", "working_set_mib": 9961}
+{"exam": "G cut conversation read fresh, kept facts", "fact": 0, "ok": false, "answer": "The payment timeout is 20 seconds.", "read": 8561, "cached": 0, "read_s": 227.9, "write_tok_s": 10.6}
+{"exam": "G cut conversation read fresh, kept facts", "fact": 1, "ok": false, "answer": "Deployments are frozen on Sundays.", "read": 15, "cached": 8547, "read_s": 0.6, "write_tok_s": 10.7}
+{"exam": "G cut conversation read fresh, kept facts", "fact": 2, "ok": true, "answer": "The email service retries 5 times before giving up.", "read": 17, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.6}
+{"exam": "G cut conversation read fresh, kept facts", "fact": 3, "ok": true, "answer": "Audit logs are kept for 2 years.", "read": 15, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.7}
+{"exam": "G cut conversation read fresh, kept facts", "fact": 4, "ok": true, "answer": "The production database listens on port 6432.", "read": 17, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.6}
+{"exam": "G cut conversation read fresh, kept facts", "fact": 5, "ok": true, "answer": "Customer ids start with the prefix \"CUS-\".", "read": 16, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.7}
+{"exam": "G cut conversation read fresh, kept facts", "fact": 6, "ok": true, "answer": "The login timeout is 20 seconds.", "read": 14, "cached": 8547, "read_s": 0.6, "write_tok_s": 10.6}
+{"exam": "G cut conversation read fresh, kept facts", "fact": 7, "ok": true, "answer": "Backups run on Sundays.", "read": 15, "cached": 8547, "read_s": 0.6, "write_tok_s": 10.4}
+{"exam": "G cut conversation read fresh, kept facts", "score": 6, "of": 8}
+{"exam": "H cut conversation read fresh, cut facts", "fact": 0, "ok": false, "answer": "The code does not provide information on how many times the refund service retries.", "read": 17, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.5}
+{"exam": "H cut conversation read fresh, cut facts", "fact": 1, "ok": false, "answer": "Invoices are kept for 2 years.", "read": 14, "cached": 8547, "read_s": 0.6, "write_tok_s": 10.7}
+{"exam": "H cut conversation read fresh, cut facts", "fact": 2, "ok": false, "answer": "The staging database listens on port 6432.", "read": 17, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.6}
+{"exam": "H cut conversation read fresh, cut facts", "fact": 3, "ok": true, "answer": "The order ids start with the prefix \"ORD-\".", "read": 16, "cached": 8547, "read_s": 0.7, "write_tok_s": 10.7}
+{"exam": "H cut conversation read fresh, cut facts", "score": 1, "of": 4}
+{"note": "ctxcp 8 after build", "working_set_mib": 7315}
+{"note": "ctxcp 8 new question", "read": 17, "cached": 6567, "read_s": 1.1, "working_set_mib": 7464}
+{"note": "ctxcp 8 new question", "read": 15, "cached": 6569, "read_s": 0.9, "working_set_mib": 7464}
+{"done": true}

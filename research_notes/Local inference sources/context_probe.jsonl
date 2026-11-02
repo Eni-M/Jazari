@@ -1,0 +1,23 @@
+{"run": "cms-default", "step": "grow 1k", "total_tokens": 1104, "read_tokens": 1104, "from_cache": 0, "read_s": 30.6, "read_tok_s": 36.1, "write_tok_s": 11.45, "wall_s": 34.7}
+{"run": "cms-default", "step": "grow 2k", "total_tokens": 2088, "read_tokens": 937, "from_cache": 1151, "read_s": 22.3, "read_tok_s": 42.0, "write_tok_s": 11.63, "wall_s": 26.4}
+{"run": "cms-default", "step": "grow 3k", "total_tokens": 3151, "read_tokens": 1016, "from_cache": 2135, "read_s": 27.5, "read_tok_s": 37.0, "write_tok_s": 9.54, "wall_s": 32.4}
+{"run": "cms-default", "step": "grow 4k", "total_tokens": 4293, "read_tokens": 1095, "from_cache": 3198, "read_s": 28.1, "read_tok_s": 38.9, "write_tok_s": 11.28, "wall_s": 32.3}
+{"run": "cms-default", "step": "grow 5k", "total_tokens": 5455, "read_tokens": 1115, "from_cache": 4340, "read_s": 27.5, "read_tok_s": 40.6, "write_tok_s": 10.86, "wall_s": 31.8}
+{"run": "cms-default", "step": "grow 6k", "total_tokens": 6698, "read_tokens": 1196, "from_cache": 5502, "read_s": 31.7, "read_tok_s": 37.7, "write_tok_s": 10.97, "wall_s": 36.0}
+{"run": "cms-default", "step": "new question, same history", "total_tokens": 6763, "read_tokens": 18, "from_cache": 6745, "read_s": 0.8, "read_tok_s": 21.7, "write_tok_s": 9.95, "wall_s": 5.6}
+{"run": "cms-default", "step": "another new question", "total_tokens": 6763, "read_tokens": 15, "from_cache": 6748, "read_s": 0.7, "read_tok_s": 21.4, "write_tok_s": 10.87, "wall_s": 5.1}
+{"run": "cms-default", "step": "append after retries", "total_tokens": 7788, "read_tokens": 1040, "from_cache": 6748, "read_s": 26.7, "read_tok_s": 39.0, "write_tok_s": 11.14, "wall_s": 30.9}
+{"run": "cms-default", "step": "after cutting the oldest pair", "total_tokens": 7793, "read_tokens": 1082, "from_cache": 6711, "read_s": 27.3, "read_tok_s": 39.7, "write_tok_s": 11.28, "wall_s": 32.3}
+{"run": "cms-default", "step": "append after the cut", "total_tokens": 8871, "read_tokens": 1031, "from_cache": 7840, "read_s": 25.7, "read_tok_s": 40.1, "write_tok_s": 10.9, "wall_s": 30.1}
+{"run": "cms-default", "step": "deep, about 13k", "total_tokens": 14837, "read_tokens": 5919, "from_cache": 8918, "read_s": 156.1, "read_tok_s": 37.9, "write_tok_s": 10.61, "wall_s": 160.6}
+{"run": "cms-default", "step": "short follow-up at 13k", "total_tokens": 14906, "read_tokens": 22, "from_cache": 14884, "read_s": 0.9, "read_tok_s": 24.2, "write_tok_s": 10.64, "wall_s": 5.4}
+{"run": "cms-1024", "step": "grow 1k", "total_tokens": 1104, "read_tokens": 1104, "from_cache": 0, "read_s": 23.9, "read_tok_s": 46.2, "write_tok_s": 12.77, "wall_s": 27.6}
+{"run": "cms-1024", "step": "grow 2k", "total_tokens": 2088, "read_tokens": 937, "from_cache": 1151, "read_s": 20.3, "read_tok_s": 46.2, "write_tok_s": 12.69, "wall_s": 24.0}
+{"run": "cms-1024", "step": "grow 3k", "total_tokens": 3151, "read_tokens": 1016, "from_cache": 2135, "read_s": 22.4, "read_tok_s": 45.4, "write_tok_s": 12.19, "wall_s": 26.3}
+{"run": "cms-1024", "step": "grow 4k", "total_tokens": 4293, "read_tokens": 1095, "from_cache": 3198, "read_s": 24.7, "read_tok_s": 44.4, "write_tok_s": 12.3, "wall_s": 28.5}
+{"run": "cms-1024", "step": "grow 5k", "total_tokens": 5455, "read_tokens": 1115, "from_cache": 4340, "read_s": 25.5, "read_tok_s": 43.7, "write_tok_s": 11.91, "wall_s": 29.5}
+{"run": "cms-1024", "step": "grow 6k", "total_tokens": 6698, "read_tokens": 1196, "from_cache": 5502, "read_s": 27.9, "read_tok_s": 42.9, "write_tok_s": 11.98, "wall_s": 31.8}
+{"run": "cms-1024", "step": "new question, same history", "total_tokens": 6763, "read_tokens": 18, "from_cache": 6745, "read_s": 0.7, "read_tok_s": 25.4, "write_tok_s": 11.94, "wall_s": 4.7}
+{"run": "cms-1024", "step": "another new question", "total_tokens": 6763, "read_tokens": 15, "from_cache": 6748, "read_s": 0.6, "read_tok_s": 27.2, "write_tok_s": 11.97, "wall_s": 4.5}
+{"run": "cms-1024", "step": "append after retries", "total_tokens": 7788, "read_tokens": 1040, "from_cache": 6748, "read_s": 24.1, "read_tok_s": 43.2, "write_tok_s": 11.83, "wall_s": 28.1}
+{"done": true}

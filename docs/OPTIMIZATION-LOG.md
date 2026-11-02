@@ -245,6 +245,19 @@ The panel now sits at the bottom of the window. It's drawn at a fixed position w
 
 `eval/` runs 45 C#/.NET questions plus `/read`, `/edit`, `/review` and a conversation against any model. Granite 4.0-H Tiny on the CPU won under the agreed limits: 37/45, typically 8 s an answer, 47 s for the first answer after `/read`, 12 s for a follow-up. Qwen3 4B scored higher, 41/45, but missed the limits, at 23 s typically and 153 s after `/read`. Compare them again once the law book exists. CPU threads are now capped at half: on the T480 that wrote faster than all 8. Full results: `docs/superpowers/specs/2026-11-02-model-choice-results.md`.
 
+## Context and outside sources (2026-11-02)
+
+Eni-M brought a set of sources, with the must "properly utilize context windows, so the AI doesn't get dumb". Full write-up, with what to use and skip: `reports/Local inference sources for Jazari.md`. Scripts and raw results: `research_notes/Local inference sources/`. Nothing is built yet.
+
+Measured on H-Tiny with a temporary server, one run each:
+
+- **Speed holds at depth:** 11.45 tok/s writing at 1,100 tokens, 10.61 at 14,800. Only 4 of its 40 layers use attention: 128 MiB of cache at `-c 16384`.
+- **Accuracy doesn't:** 12/12 invented facts in a short conversation, 9/12 at 12,700 tokens (swapped similar values), 12/12 with the facts listed right before the question, for about 4 s of reading. Facts removed by a history cut became confident wrong answers.
+- **History cuts are cheap on this build:** 11 s with the cache shifted, 228 s from scratch, same score. "Hybrids can't KV-shift" in earlier notes is wrong here.
+- **Memory is in the checkpoints:** 55 MiB each, up to 32, and the process reached 9.9 GB. `-ctxcp 8` still answered a retried question in about 1 s.
+
+Plan (`docs/superpowers/plans/2026-11-02-conversation-memory.md`): search the conversation the CLI already sends, and put the best lines inside the question, no model summaries; say when history is cut; freeze the project note per conversation; fewer checkpoints. ISTA-DASLab publishes GSQ-refined Qwen3 4B and Qwen3.5 4B GGUFs that run on our build, untested here. GSQ itself needs far more GPU than Colab's free tier and doesn't support Granite. Training from scratch is not worth it.
+
 ## Interface: a panel that stays (2026-11-02)
 
 The panel stays at the bottom from start to exit. Keys are read the whole time, conversation text is drawn above the panel, and only rows that changed are redrawn, so typing doesn't flicker. Questions sent during an answer wait in a visible queue. Answers flow at a steady pace through `TextPacer`, after holding the first words for up to 1.5 s. Ctrl+C stops the answer and drops the queue.
