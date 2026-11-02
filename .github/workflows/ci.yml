@@ -1,0 +1,63 @@
+# Builds Jazari and runs every test on each push and pull request.
+# Windows only: Jazari targets Windows, and some launcher tests check Windows paths (C:\...).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch cancels the older run, to save Actions minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    name: .NET build and tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore MyOwnLLM.slnx
+
+      - name: Build
+        run: dotnet build MyOwnLLM.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test MyOwnLLM.slnx --no-build --configuration Release --logger "trx;LogFileName=results.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: TestResults
+          retention-days: 7
+
+  eval:
+    name: Eval script tests (Python)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Standard library only: the tests need no model and no packages.
+      - name: Test
+        run: python -m unittest discover -s eval -p "test_*.py" -v
