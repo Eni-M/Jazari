@@ -37,23 +37,29 @@ public static class ChatEndpoints
         return group;
     }
 
-    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, ModelLimits Limits);
+    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, ModelLimits Limits, ConversationNotes Notes);
 
     static Services Resolve(HttpContext http) => new(
         http.RequestServices.GetRequiredService<ILlamaClient>(), http.RequestServices.GetRequiredService<RequestQueue>(),
         http.RequestServices.GetRequiredService<ProjectStateStore>(), http.RequestServices.GetRequiredService<InteractionLog>(),
-        http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<ModelLimits>());
+        http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<ModelLimits>(),
+        http.RequestServices.GetRequiredService<ConversationNotes>());
 
     static async Task<string?> NoteFor(Services s, string? project) =>
         project is not null && GitSummary.IsRepo(project) ? await s.State.GetAsync(project) : null;
+
+    /// <summary>The note as the conversation began with it, so an update mid-conversation doesn't force a re-read (see <see cref="ConversationNotes"/>).</summary>
+    static async Task<string?> ConversationNoteFor(Services s, string? project, bool newConversation) =>
+        project is null ? null : s.Notes.For(project, newConversation, await NoteFor(s, project));
 
     static Task Chat(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
         var project = ProjectPath(http);
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultChatTokens, 1, MaxChatTokens);
         var question = request.Messages.LastOrDefault()?.Content ?? "";
-        var note = await NoteFor(s, project);
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages.SkipLast(1).ToList(), question), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens);
+        var history = request.Messages.SkipLast(1).ToList();
+        var note = await ConversationNoteFor(s, project, history.Count == 0);
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens);
         var watch = Stopwatch.StartNew();
 
         string answer;
@@ -124,7 +130,7 @@ public static class ChatEndpoints
     static Task Warm(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
         var project = ProjectPath(http);
-        var note = await NoteFor(s, project);
+        var note = await ConversationNoteFor(s, project, request.Messages.Count == 0);
         var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, ""), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
         await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, 1, t), http.RequestAborted);
         http.Response.StatusCode = StatusCodes.Status204NoContent;

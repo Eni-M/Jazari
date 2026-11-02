@@ -225,6 +225,78 @@ public class EndpointTests : IDisposable
         Assert.Equal(repo, sent.Contains("NOTE: invented task"));
     }
 
+    string NewRepo()
+    {
+        var project = Directory.CreateDirectory(Path.Combine(_dir, "repo-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        return project;
+    }
+
+    Task SetNote(string project, string note) =>
+        _factory.Services.GetRequiredService<MyOwnLLM.Gateway.State.ProjectStateStore>().SetAsync(project, note);
+
+    /// <summary>Posts <paramref name="turns"/> as the conversation, in the project, and returns what reached the model.</summary>
+    async Task<IReadOnlyList<ChatMessage>> InProject(string path, string project, params string[] turns)
+    {
+        var messages = turns.Select((t, i) => new { role = i % 2 == 0 ? "user" : "assistant", content = t }).ToArray();
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(new { messages }) };
+        request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project));
+        (await _client.SendAsync(request)).EnsureSuccessStatusCode();
+        return _llama.Calls.Last().Messages;
+    }
+
+    [Fact]
+    public async Task A_note_updated_mid_conversation_stays_out_of_the_prompt()
+    {
+        var project = NewRepo();
+        await SetNote(project, "NOTE A");
+        await InProject("/v1/chat/completions", project, "first?");
+        await SetNote(project, "NOTE B");
+
+        var sent = await InProject("/v1/chat/completions", project, "first?", "answer", "second?");
+
+        Assert.Contains("NOTE A", sent[1].Content);
+        Assert.DoesNotContain("NOTE B", sent[1].Content);
+    }
+
+    [Fact]
+    public async Task A_new_conversation_uses_the_latest_note()
+    {
+        var project = NewRepo();
+        await SetNote(project, "NOTE A");
+        await InProject("/v1/chat/completions", project, "first?");
+        await SetNote(project, "NOTE B");
+        await InProject("/v1/chat/completions", project, "first?", "answer", "second?");
+
+        var sent = await InProject("/v1/chat/completions", project, "fresh start?");
+
+        Assert.Contains("NOTE B", sent[1].Content);
+    }
+
+    [Fact]
+    public async Task After_a_restart_the_conversation_takes_the_current_note()
+    {
+        var project = NewRepo();
+        await SetNote(project, "NOTE NOW");
+
+        var sent = await InProject("/v1/chat/completions", project, "first?", "answer", "second?");
+
+        Assert.Contains("NOTE NOW", sent[1].Content);
+    }
+
+    [Fact]
+    public async Task Warm_uses_the_same_note_as_the_conversation()
+    {
+        var project = NewRepo();
+        await SetNote(project, "NOTE A");
+        await InProject("/v1/chat/completions", project, "first?");
+        await SetNote(project, "NOTE B");
+
+        var sent = await InProject("/v1/warm", project, "first?", "answer");
+
+        Assert.Contains("NOTE A", sent[1].Content);
+    }
+
     [Fact]
     public async Task Status_uses_state_note_and_caps_tokens_at_150()
     {

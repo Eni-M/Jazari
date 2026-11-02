@@ -24,6 +24,7 @@ builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(new ApiKeyStore(options.KeyFile));
 builder.Services.AddSingleton(new LocalDb(options.DbFile));
 builder.Services.AddSingleton<ProjectStateStore>();
+builder.Services.AddSingleton<ConversationNotes>();
 builder.Services.AddSingleton<InteractionLog>();
 builder.Services.AddSingleton<StateNoteUpdater>();
 builder.Services.AddSingleton<RequestQueue>();
