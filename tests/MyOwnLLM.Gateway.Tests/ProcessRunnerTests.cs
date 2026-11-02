@@ -33,7 +33,8 @@ public class ProcessRunnerTests : IDisposable
 
         new ProcessRunner().StartDetached(PowerShell, ["-NoProfile", "-Command", "(Get-Location).Path"], log);
 
-        for (var i = 0; i < 100 && (await ReadShared(log)).Trim().Length == 0; i++) await Task.Delay(100);
+        // Up to 30 s: a cold Windows PowerShell on a busy CI runner once took over 10 s to print anything.
+        for (var i = 0; i < 300 && (await ReadShared(log)).Trim().Length == 0; i++) await Task.Delay(100);
         Assert.Equal(Path.GetDirectoryName(PowerShell)!.TrimEnd('\\'), (await ReadShared(log)).Trim().TrimEnd('\\'), ignoreCase: true);
     }
 

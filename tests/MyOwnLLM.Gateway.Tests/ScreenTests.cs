@@ -159,7 +159,7 @@ public class ScreenTests
     }
 
     [Fact]
-    public void Removing_a_block_takes_its_rows_away_and_two_blank_rows_show_as_one()
+    public async Task Removing_a_block_takes_its_rows_away_and_two_blank_rows_show_as_one()
     {
         var (screen, terminal, _) = Start();
         Say(screen, "question");
@@ -168,19 +168,19 @@ public class ScreenTests
         screen.Append(new BlankBlock());
         Assert.Contains("Thinking", terminal.Vt.Text(2));
 
-        thinking.StopAsync();
+        await thinking.StopAsync();
         Say(screen, "answer");
 
         Assert.Equal(["          question", "", "          answer"], terminal.Vt.Lines.Take(3));
     }
 
     [Fact]
-    public void Stopping_takes_the_panel_away_and_leaves_the_cursor_under_the_conversation()
+    public async Task Stopping_takes_the_panel_away_and_leaves_the_cursor_under_the_conversation()
     {
         var (screen, terminal, _) = Start();
         Say(screen, "hello");
 
-        screen.StopAsync().GetAwaiter().GetResult();
+        await screen.StopAsync();
 
         Assert.Equal("", terminal.Vt.Text(8));
         Assert.Equal(1, terminal.Vt.Row);
