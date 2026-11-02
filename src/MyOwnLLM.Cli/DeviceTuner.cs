@@ -51,7 +51,7 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         var bench = Path.Combine(Path.GetDirectoryName(config.LlamaServer)!, "llama-bench.exe");
         if (_fileSize(bench) is null) return best;
 
-        // CPU threads first, then flash attention only at the best thread count: a slow laptop measures 4 options, not 6.
+        // CPU first, then flash attention at the same thread count.
         var results = new List<(Tuning Settings, double Seconds)>();
         var threads = string.Join(',', ThreadCounts(machine.LogicalCores));
         // Each GPU gets the whole model when it fits, else as many layers as fit: the T480's 2 GB MX150 reads prompts
@@ -116,9 +116,12 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         return Math.Clamp((int)((freeMiB - 400) / perLayer), 0, ModelLayers);
     }
 
-    /// <summary>Half, three quarters and all of the logical cores: memory speed, not core count, usually sets the pace.</summary>
-    public static IEnumerable<int> ThreadCounts(int logicalCores) =>
-        new[] { logicalCores / 2, logicalCores * 3 / 4, logicalCores }.Where(t => t > 0).Distinct();
+    /// <summary>
+    /// Half the logical cores, the only count tried: on the T480 it writes faster than all of them (H-Tiny 10.1 against 6.4 tok/s),
+    /// since memory speed sets the pace, and it leaves the other half for whatever the user is doing. It also made the MX150
+    /// clearly better than the CPU (60 / 6.6 tok/s), where 8 threads left them nearly tied.
+    /// </summary>
+    public static IEnumerable<int> ThreadCounts(int logicalCores) => [Math.Max(1, logicalCores / 2)];
 
     async Task<List<(Tuning, double)>> BenchAsync(string bench, string model, Tuning template, string[] device, string flashAttention, CancellationToken ct)
     {

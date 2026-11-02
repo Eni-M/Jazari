@@ -15,11 +15,11 @@ public sealed partial record Tuning(
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "tuning.json");
 
     /// <summary>
-    /// What to run before anything is measured, or when measuring can't run: CPU only, three threads in four (the
-    /// T480's best was 6 of 8), and a context and prompt cache sized to the RAM.
+    /// What to run before anything is measured, or when measuring can't run: CPU only, half the logical cores (see
+    /// DeviceTuner.ThreadCounts), and a context and prompt cache sized to the RAM.
     /// </summary>
     public static Tuning Default(string fingerprint, int logicalCores, long ramBytes) =>
-        new(fingerprint, "none", Math.Max(1, logicalCores * 3 / 4), 0, false, ContextFor(ramBytes), ramBytes < 12L << 30 ? 1024 : 2048);
+        new(fingerprint, "none", Math.Max(1, logicalCores / 2), 0, false, ContextFor(ramBytes), ramBytes < 12L << 30 ? 1024 : 2048);
 
     /// <summary>16k tokens of context cost about 1.25 GB of cache on Granite 4.1 3B; below 12 GB of RAM, 8k leaves room for everything else.</summary>
     public static int ContextFor(long ramBytes) => ramBytes < 12L << 30 ? 8192 : 16384;

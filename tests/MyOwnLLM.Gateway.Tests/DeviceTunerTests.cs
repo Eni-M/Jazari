@@ -25,11 +25,11 @@ public class DeviceTunerTests : IDisposable
     }
 
     [Theory]
-    [InlineData(8, new[] { 4, 6, 8 })]
-    [InlineData(4, new[] { 2, 3, 4 })]
-    [InlineData(2, new[] { 1, 2 })]
+    [InlineData(8, new[] { 4 })]
+    [InlineData(4, new[] { 2 })]
+    [InlineData(2, new[] { 1 })]
     [InlineData(1, new[] { 1 })]
-    public void Threads_tried_are_half_three_quarters_and_all(int cores, int[] expected) =>
+    public void Threads_stay_at_half_so_the_laptop_stays_usable(int cores, int[] expected) =>
         Assert.Equal(expected, DeviceTuner.ThreadCounts(cores));
 
     [Theory]
@@ -53,8 +53,8 @@ public class DeviceTunerTests : IDisposable
     [Fact]
     public void Default_settings_fit_the_ram()
     {
-        Assert.Equal((6, 16384, 2048), (Tuning.Default("x", 8, 16L << 30) is var big ? (big.Threads, big.ContextTokens, big.CacheRamMiB) : default));
-        Assert.Equal((3, 8192, 1024), (Tuning.Default("x", 4, 8L << 30) is var small ? (small.Threads, small.ContextTokens, small.CacheRamMiB) : default));
+        Assert.Equal((4, 16384, 2048), (Tuning.Default("x", 8, 16L << 30) is var big ? (big.Threads, big.ContextTokens, big.CacheRamMiB) : default));
+        Assert.Equal((2, 8192, 1024), (Tuning.Default("x", 4, 8L << 30) is var small ? (small.Threads, small.ContextTokens, small.CacheRamMiB) : default));
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public class DeviceTunerTests : IDisposable
 
         var text = System.Text.RegularExpressions.Regex.Replace(output.ToString(), "\e\\[[0-9;]*[A-Za-z]", "");
         Assert.Contains("Tuning for this PC", text);
-        Assert.Contains("✓ cpu 4,6,8 threads", text);
+        Assert.Contains("✓ cpu 4 threads", text);
         Assert.Contains("✓ flash attention", text);
         Assert.Contains("✓ iris xe", text);
         Assert.Contains("● pick fastest", text);
@@ -127,7 +127,7 @@ public class DeviceTunerTests : IDisposable
         var tuning = await Tuner(runner)
             .MeasureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
 
-        Assert.Equal(("none", 6), (tuning.Device, tuning.Threads));
+        Assert.Equal(("none", 4), (tuning.Device, tuning.Threads));
         Assert.Contains("safe CPU settings", _output.ToString());
     }
 

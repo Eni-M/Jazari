@@ -312,7 +312,7 @@ public class PromptEditorTests
     {
         Assert.Equal("iris xe", (Tuning.Default("f", 8, 16L << 30) with { Device = "Vulkan0", DeviceName = "Intel(R) Iris(R) Xe Graphics" }).ShortName());
         Assert.Equal("mx150", (Tuning.Default("f", 8, 16L << 30) with { Device = "Vulkan1", DeviceName = "NVIDIA GeForce MX150" }).ShortName());
-        Assert.Equal("cpu 6 threads", Tuning.Default("f", 8, 16L << 30).ShortName());
+        Assert.Equal("cpu 4 threads", Tuning.Default("f", 8, 16L << 30).ShortName());
     }
 
     [Theory]
