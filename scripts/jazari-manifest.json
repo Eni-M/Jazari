@@ -3,5 +3,7 @@
   "llamaZip": "llama-b11982-bin-win-vulkan-x64.zip",
   "modelFile": "granite-4.0-h-tiny-Q4_K_M.gguf",
   "modelUrl": "https://huggingface.co/ibm-granite/granite-4.0-h-tiny-GGUF/resolve/main/granite-4.0-h-tiny-Q4_K_M.gguf",
-  "modelSha256": "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd"
+  "modelSha256": "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd",
+  "lawBookUrl": "",
+  "lawBookSha256": ""
 }
