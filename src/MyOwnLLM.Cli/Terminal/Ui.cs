@@ -23,6 +23,12 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
     public void Blank() => output.WriteLine();
 
     /// <summary>
+    /// Several rows as one write. Above the panel each write is a full cursor, draw and panel cycle, and a terminal without
+    /// synchronized output can paint each one separately, so a 30-row block written row by row could flicker.
+    /// </summary>
+    void WriteLines(IEnumerable<string> lines) => output.Write(string.Concat(lines.Select(l => l + output.NewLine)));
+
+    /// <summary>
     /// Opening the interactive session: name the tab "Jazari" and start on a clean screen (no shell banner or prompt
     /// above). Only in a real terminal; piped output is left alone.
     /// </summary>
@@ -39,7 +45,7 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
     public void Row(string? label, string text, Tone tone = Tone.Primary, Tone labelTone = Tone.Muted)
     {
         var lines = Wrap(ConsoleText.Sanitize(text), Room);
-        for (var i = 0; i < lines.Count; i++) output.WriteLine(Cell(i == 0 ? label : null, labelTone) + theme.Paint(lines[i], tone));
+        WriteLines(lines.Select((line, i) => Cell(i == 0 ? label : null, labelTone) + theme.Paint(line, tone)));
     }
 
     public void Line(string text, Tone tone = Tone.Primary) => Row(null, text, tone);
@@ -52,9 +58,7 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
         var left = $"jazari {theme.Glyph('—')} {ConsoleText.Sanitize(place)}";
         var room = Width - right.Length - 1;
         if (left.Length > room) left = left[..Math.Max(room, 0)];
-        output.WriteLine(theme.Paint(left.PadRight(room + 1) + right, Tone.Muted));
-        output.WriteLine(Rule());
-        output.WriteLine();
+        WriteLines([theme.Paint(left.PadRight(room + 1) + right, Tone.Muted), Rule(), ""]);
     }
 
     /// <summary>A thin line edge to edge, like the panel's background. Filling the last column doesn't wrap until the next character, and a line break comes first.</summary>
@@ -82,12 +86,8 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
     {
         var list = rows.Select(r => (Key: ConsoleText.Sanitize(r.Key), Value: ConsoleText.Sanitize(r.Value))).ToList();
         var column = keyWidth ?? Math.Max(KeyColumn, list.Select(r => r.Key.Length + 2).DefaultIfEmpty(0).Max());
-        foreach (var (key, value) in list)
-        {
-            var lines = Wrap(value, Room - column);
-            output.WriteLine(Cell() + theme.Paint(key.PadRight(column), Tone.Muted) + theme.Paint(lines[0], Tone.Secondary));
-            foreach (var more in lines.Skip(1)) output.WriteLine(Cell() + new string(' ', column) + theme.Paint(more, Tone.Secondary));
-        }
+        WriteLines(list.SelectMany(r => Wrap(r.Value, Room - column).Select((line, i) =>
+            Cell() + theme.Paint(i == 0 ? r.Key.PadRight(column) : new string(' ', column), Tone.Muted) + theme.Paint(line, Tone.Secondary))));
     }
 
     /// <summary>The key column that fits every key in all of <paramref name="groups"/>, so grouped rows line up.</summary>
@@ -96,17 +96,15 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
 
     public void ToolLines(string label, IEnumerable<string> doneSteps)
     {
-        output.WriteLine(theme.Paint("  " + ConsoleText.Sanitize(label).ToUpperInvariant(), Tone.Muted));
-        foreach (var step in doneSteps) output.WriteLine(theme.Paint($"  {theme.Glyph('✓')} {ConsoleText.Sanitize(step)}", Tone.Muted));
+        WriteLines([theme.Paint("  " + ConsoleText.Sanitize(label).ToUpperInvariant(), Tone.Muted),
+            .. doneSteps.Select(step => theme.Paint($"  {theme.Glyph('✓')} {ConsoleText.Sanitize(step)}", Tone.Muted))]);
     }
 
     public void ActionRequired(string what, string command)
     {
         var rule = theme.Paint(theme.Glyph('│').ToString(), Tone.Secondary) + " ";
-        output.WriteLine(rule + "ACTION REQUIRED");
-        output.WriteLine(rule + theme.Paint(ConsoleText.Sanitize(what) + ":", Tone.Secondary));
-        output.WriteLine(rule + ConsoleText.Sanitize(command));
-        output.WriteLine(rule + theme.Paint("[y] Allow once  [n] Deny  [a] Always allow", Tone.Secondary));
+        WriteLines([rule + "ACTION REQUIRED", rule + theme.Paint(ConsoleText.Sanitize(what) + ":", Tone.Secondary),
+            rule + ConsoleText.Sanitize(command), rule + theme.Paint("[y] Allow once  [n] Deny  [a] Always allow", Tone.Secondary)]);
     }
 
     public void Error(string message, string? cause, string? next)
@@ -127,14 +125,12 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
     /// <summary>The user's turn: "› question", continuation lines indented under it.</summary>
     public void UserMessage(string text)
     {
-        var first = true;
-        foreach (var paragraph in ConsoleText.Sanitize(text).Split('\n'))
-            foreach (var line in Wrap(paragraph, Live ? Body : Width - 2))
-            {
-                var marker = first ? theme.Glyph('›').ToString() : null;
-                output.WriteLine(Live ? Cell(marker, Tone.Accent) + theme.Paint(line, Tone.Secondary) : $"{marker ?? " "} {line}");
-                first = false;
-            }
+        var lines = ConsoleText.Sanitize(text).Split('\n').SelectMany(paragraph => Wrap(paragraph, Live ? Body : Width - 2));
+        WriteLines(lines.Select((line, i) =>
+        {
+            var marker = i == 0 ? theme.Glyph('›').ToString() : null;
+            return Live ? Cell(marker, Tone.Accent) + theme.Paint(line, Tone.Secondary) : $"{marker ?? " "} {line}";
+        }));
     }
 
     public void Metadata(string text, string? label = null)
@@ -156,17 +152,16 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
     public void TuneProgress(IReadOnlyList<string> steps, int done, string left, bool redraw)
     {
         if (!Live) return;
-        if (redraw) output.Write("\e[3A\r");
         var dot = theme.Glyph('·');
         const int bar = 44;
         var filled = steps.Count == 0 ? bar : bar * done / steps.Count;
-        output.WriteLine("\e[2K" + Cell("live", Tone.Accent) + theme.Paint("Tuning for this PC ", Tone.Primary) + theme.Paint($"{dot} {left}", Tone.Muted));
-        output.WriteLine("\e[2K" + Cell() + theme.Paint(new string(theme.Glyph('━'), filled), Tone.Accent) + theme.Paint(new string(theme.Glyph('━'), bar - filled), Tone.Line));
+        var title = "\e[2K" + Cell("live", Tone.Accent) + theme.Paint("Tuning for this PC ", Tone.Primary) + theme.Paint($"{dot} {left}", Tone.Muted);
+        var progress = "\e[2K" + Cell() + theme.Paint(new string(theme.Glyph('━'), filled), Tone.Accent) + theme.Paint(new string(theme.Glyph('━'), bar - filled), Tone.Line);
         var row = steps.Select((step, i) =>
             i < done ? theme.Paint(theme.Glyph('✓').ToString(), Tone.Secondary) + theme.Paint(" " + ConsoleText.Sanitize(step), Tone.Muted)
             : i == done ? theme.Paint($"{theme.Glyph('●')} {ConsoleText.Sanitize(step)}", Tone.Primary)
             : theme.Paint($"{theme.Glyph('○')} {ConsoleText.Sanitize(step)}", Tone.Muted));
-        output.WriteLine("\e[2K" + Cell() + string.Join("   ", row));
+        WriteLines([(redraw ? "\e[3A\r" : "") + title, progress, "\e[2K" + Cell() + string.Join("   ", row)]);
     }
 
     /// <summary>Word-wraps to <paramref name="max"/> columns; words longer than a line are split.</summary>

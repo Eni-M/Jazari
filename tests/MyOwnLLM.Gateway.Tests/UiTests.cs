@@ -222,4 +222,23 @@ public class UiTests
         Assert.Contains("✓", Clean(output)[^1]);
         Assert.Contains("● gpu", Clean(output)[^1]);
     }
+
+    sealed class CountingWriter : StringWriter
+    {
+        public int Writes;
+        public override void Write(string? value) { Writes++; base.Write(value); }
+        public override void Write(char value) { Writes++; base.Write(value); }
+    }
+
+    [Fact]
+    public void A_wrapped_row_reaches_the_screen_in_one_write()
+    {
+        var output = new CountingWriter();
+        var ui = new Ui(output, new Theme(ColorMode.TrueColor, unicode: true), 40);
+
+        ui.Row("why", string.Join(' ', Enumerable.Repeat("word", 40)));
+
+        Assert.True(Lines(output).Length > 3);
+        Assert.Equal(1, output.Writes);
+    }
 }

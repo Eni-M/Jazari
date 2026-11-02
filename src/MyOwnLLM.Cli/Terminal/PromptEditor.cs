@@ -603,19 +603,20 @@ public sealed class PromptEditor : ILineReader
         return info with { Queued = queued.Count > 0 ? new QueueRows(queued) : null, Hint = Busy ? $"Enter queues {dot} Ctrl+C stops" : info.Hint };
     }
 
-    void Render()
+    /// <param name="into">Inside a write that's already under way (<see cref="WriteAbove"/>): add the drawing to it instead of writing.</param>
+    void Render(StringBuilder? into = null)
     {
         var info = CurrentInfo();
         var height = Console.WindowHeight;
         if (_question is { } question)
         {
             var footer = PromptPanel.Draw(_ui, new PromptBuffer(() => ""), info with { Hint = "/undo puts it back" }, height).Rows[^1];
-            Show([_ui.Rule(), QuestionRow(question), footer], 1, 0);
+            Show([_ui.Rule(), QuestionRow(question), footer], 1, 0, into);
         }
         else
         {
             var drawn = PromptPanel.Draw(_ui, _buffer, info, height);
-            Show(drawn.Rows, drawn.CaretRow, drawn.CaretColumn);
+            Show(drawn.Rows, drawn.CaretRow, drawn.CaretColumn, into);
         }
         (_drawnWith, _drawnWidth, _drawnHeight) = (info, _ui.Width, height);
     }
@@ -633,7 +634,7 @@ public sealed class PromptEditor : ILineReader
     }
 
     /// <summary>Draws the panel at the bottom of the window, writing only the rows that changed.</summary>
-    void Show(List<string> rows, int caretRow, int caretColumn)
+    void Show(List<string> rows, int caretRow, int caretColumn, StringBuilder? into = null)
     {
         var height = Console.WindowHeight;
         _conversationRow = Math.Min(_conversationRow, height - 1); // the window may have shrunk
@@ -652,7 +653,8 @@ public sealed class PromptEditor : ILineReader
         }
         screen.Append(PromptPanel.Frame(_drawn, _drawnTop, rows, top));
         screen.Append(Go(top + caretRow, caretColumn)).Append("\e[?25h");
-        _out.Write(Sync(screen.ToString()));
+        if (into is not null) into.Append(screen); // the caller's synchronized block is still open
+        else _out.Write(Sync(screen.ToString()));
         (_drawn, _drawnTop) = (rows, top);
     }
 
@@ -672,16 +674,20 @@ public sealed class PromptEditor : ILineReader
                 _drawn = null;
             }
             screen.Append(Go(_conversationRow, _conversationColumn)).Append(text);
+            // Two writes inside one synchronized block: the text has to reach the screen before the cursor can be read
+            // back, and the panel and caret then follow in a single write that also closes the block. A nested block
+            // used to close it early, halfway through.
             _out.Write("\e[?2026h" + screen);
             ReadCursor();
-            if (_drawn is null) Render();
+            var rest = new StringBuilder();
+            if (_drawn is null) Render(rest);
             else if (_question is null)
             {
                 var drawn = PromptPanel.Draw(_ui, _buffer, CurrentInfo(), Console.WindowHeight);
-                _out.Write(Go(_drawnTop + drawn.CaretRow, drawn.CaretColumn) + "\e[?25h");
+                rest.Append(Go(_drawnTop + drawn.CaretRow, drawn.CaretColumn)).Append("\e[?25h");
             }
-            else _out.Write(Go(_drawnTop + 1) + "\e[?25h");
-            _out.Write("\e[?2026l");
+            else rest.Append(Go(_drawnTop + 1)).Append("\e[?25h");
+            _out.Write(rest.Append("\e[?2026l").ToString());
         }
     }
 
