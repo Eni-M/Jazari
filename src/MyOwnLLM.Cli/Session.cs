@@ -200,7 +200,10 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            await FinishAsync();
+            // Stopped: what the model wrote but the screen hadn't shown yet is dropped, not poured out after the stop.
+            if (pacer is not null) answer.Length -= await pacer.DiscardAsync();
+            StopThinking();
+            renderer.Complete();
             Stamp(renderer, watch);
             if (answer.Length > 0) Remember(question, answer.ToString());
             ui.Metadata("stopped");
