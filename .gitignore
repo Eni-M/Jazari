@@ -12,3 +12,4 @@ artifacts/
 .idea/
 spike/bin-*/
 spike/dl/
+eval/results/*.json

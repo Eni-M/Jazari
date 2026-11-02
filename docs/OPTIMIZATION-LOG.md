@@ -77,7 +77,7 @@ Plan and status (update as each step finishes):
 ## Rules that still apply (from the design doc, `docs/superpowers/specs/2026-10-30-myownllm-design.md`)
 
 - **General-CRM and other company repositories are never used for data, evaluation or tuning.** Test only on Eni-M's own code (EduCore, EduCoreFront, WareFlow, LearningRoadmap, this repo).
-- Nothing private leaves the laptop. Web research must not quote private code.
+- Nothing private leaves the laptop, with one exception: private repo code may go to Colab, and only Colab, for training (Eni-M, 2026-11-02). Web research must not quote private code.
 - Budget is $0. Paid options can be reported, but must not be needed.
 - The laptop must stay usable while the model runs.
 - Quality floor comes before speed: a faster model that gets worse is a failure.
