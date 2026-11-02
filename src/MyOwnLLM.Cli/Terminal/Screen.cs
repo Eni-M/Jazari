@@ -183,7 +183,7 @@ public sealed class Screen : IBlockSink
             Panel = null;
             Render();
             var end = Math.Min(Rows(_anchorBlock, _anchorRow, _width - 1).Count, _height - 1);
-            _terminal.Write($"\e[?2026l\e[0m{Go(end)}\e[J\e[?25h");
+            _terminal.Write($"\e[0m{Go(end)}\e[J\e[?25h");
             _started = false;
         }
     }

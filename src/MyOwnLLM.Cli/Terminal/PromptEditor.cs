@@ -389,7 +389,7 @@ public static class PromptPanel
         row.Add(status, Tone.Muted);
         if (meter is { } used)
         {
-            var filled = Math.Clamp(used.Used * 10 / used.Total, used.Used > 0 ? 1 : 0, 10);
+            var filled = Math.Clamp((int)Math.Round(used.Used * 10.0 / used.Total, MidpointRounding.AwayFromZero), used.Used > 0 ? 1 : 0, 10);
             var cell = theme.Glyph('■');
             row.Add("  ").Add(new string(cell, filled), Tone.Secondary).Add(new string(cell, 10 - filled), Tone.MeterEmpty).Add(numbers, Tone.Muted);
         }

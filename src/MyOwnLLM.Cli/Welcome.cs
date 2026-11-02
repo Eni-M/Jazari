@@ -50,7 +50,8 @@ public static class Welcome
             return;
         }
         var (message, cause, fix, then) = Problem(state);
-        // The fix is a command to type, shown in a box like code.
+        // Set apart from the wordmark, and the fix is a command to type, shown in a box like code.
+        if (ui.Live) ui.Blank();
         ui.Error(message, cause, fix, nextIsCommand: true);
         ui.Metadata(then);
         ui.Blank();
