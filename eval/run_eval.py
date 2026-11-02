@@ -6,7 +6,8 @@ sys.path.insert(0, HERE)
 from score import score
 
 PORT = 8099
-PROMPT_BUILDER = os.path.join(HERE, "..", "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
+REPO = os.path.join(HERE, "..")
+PROMPT_BUILDER = os.path.join(REPO, "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
 MAX_TOKENS = 512  # the gateway's DefaultChatTokens
 TEMPERATURE = 0.2  # the gateway's CodeTemperature
 
@@ -19,11 +20,14 @@ class ServerDidNotStart(Exception):
     pass
 
 
-def system_prompt(source_path=PROMPT_BUILDER):
-    """PromptBuilder.SystemPrompt: its string literals joined, without the comments above them."""
+def _constant(source_path, name):
+    """A C# string constant: a raw \"\"\" string, or string literals joined with +, without comments between them."""
     with open(source_path, encoding="utf-8") as f:
         source = f.read()
-    start = re.search(r"const string SystemPrompt\s*=", source).end()
+    raw = re.search(rf'const string {name}\s*=\s*"""(.*?)"""', source, re.S)
+    if raw:
+        return raw.group(1).strip()
+    start = re.search(rf"const string {name}\s*=", source).end()
     parts = []
     for line in source[start:].splitlines():
         text = line.strip()
@@ -32,7 +36,96 @@ def system_prompt(source_path=PROMPT_BUILDER):
         parts.append(text)
         if text.endswith(";"):
             break
-    return "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', " ".join(parts)))
+    return "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', " ".join(parts))).replace("\\n", "\n").replace('\\"', '"')
+
+
+def system_prompt(source_path=PROMPT_BUILDER):
+    return _constant(source_path, "SystemPrompt")
+
+
+def csharp_string(cli_file, name):
+    return _constant(os.path.join(REPO, "src", "MyOwnLLM.Cli", cli_file), name)
+
+
+def _files(paths):
+    parts = []
+    for path in paths:
+        with open(os.path.join(REPO, path), encoding="utf-8-sig") as f:
+            parts.append(f"--- {os.path.basename(path)} ---\n{f.read()}\n")
+    return "".join(parts)
+
+
+def read_context(limit=8000):
+    """About 2,000 tokens of real code, cut the way /read stops at a limit. Jazari's own code, so nothing private is involved."""
+    return _files(["src/MyOwnLLM.Gateway/Queue/RequestQueue.cs", "src/MyOwnLLM.Gateway/State/StateNoteUpdater.cs"])[:limit]
+
+
+def _timed(call):
+    started = time.time()
+    return call(), round(time.time() - started, 1)
+
+
+def read_scenario(ask, system, code):
+    """What /read then two questions cost. The gateway sends the code as a system message after the system prompt."""
+    messages = [{"role": "system", "content": system}, {"role": "system", "content": "Relevant code:\n" + code},
+                {"role": "user", "content": "What does this code do when the queue is full?"}]
+    answer, first_s = _timed(lambda: ask(messages))
+    messages = messages + [{"role": "assistant", "content": answer}, {"role": "user", "content": "Which class should I change to raise that limit?"}]
+    _, followup_s = _timed(lambda: ask(messages))
+    return first_s, followup_s
+
+
+def edit_scenario(ask, system, file_text, request='Change the user name it compares against from "admin" to "root".'):
+    messages = [{"role": "system", "content": system}, {"role": "system", "content": f"Relevant code:\n--- file ---\n{file_text}"},
+                {"role": "user", "content": csharp_string("FileEdit.cs", "Instructions") + request}]
+    reply = ask(messages, 1000, csharp_string("FileEdit.cs", "Schema"))
+    try:
+        edits = json.loads(reply)["edits"]
+        return bool(edits) and all(file_text.count(e["search"]) == 1 for e in edits)
+    except (ValueError, KeyError, TypeError):
+        return False
+
+
+def review_scenario(ask, system):
+    """One /review part: the fixture with planted bugs. It must at least report the hardcoded password."""
+    fixture = [f"spike/review-test/{name}.cs" for name in ["AuthService", "EmailSender", "Order", "OrderRepository", "Program", "RefundController"]]
+    messages = [{"role": "system", "content": system}, {"role": "system", "content": "Relevant code:\n" + _files(fixture)},
+                {"role": "user", "content": csharp_string("ProjectReview.cs", "Instructions")}]
+    reply = ask(messages, 500, csharp_string("ProjectReview.cs", "Schema"))
+    try:
+        return any("password" in f"{f['problem']} {f['quote']}".lower() for f in json.loads(reply)["findings"])
+    except (ValueError, KeyError, TypeError):
+        return False
+
+
+def conversation(ask, system):
+    """Six turns on one topic; the times show whether later turns get slower."""
+    turns = ["What is dependency injection?", "How do I register a service for it in ASP.NET Core?", "What does scoped mean there?",
+             "Can a singleton use a scoped service?", "How do I get a scoped service inside a BackgroundService?", "Show a short example of that."]
+    messages = [{"role": "system", "content": system}]
+    times = []
+    for turn in turns:
+        messages = messages + [{"role": "user", "content": turn}]
+        answer, seconds = _timed(lambda: ask(messages))
+        messages = messages + [{"role": "assistant", "content": answer}]
+        times.append(seconds)
+    return times
+
+
+def run_scenarios(ask, system):
+    """Each scenario on its own: one that breaks is recorded as failed and the rest still run."""
+    def attempt(name, call, failed):
+        print(f"scenario: {name}", flush=True)
+        try:
+            return call()
+        except Exception as e:
+            print(f"scenario {name} failed: {e}", flush=True)
+            return failed
+    first_s, followup_s = attempt("read", lambda: read_scenario(ask, system, read_context()), (None, None))
+    with open(os.path.join(REPO, "spike", "review-test", "AuthService.cs"), encoding="utf-8-sig") as f:
+        auth = f.read()
+    return {"read_first_s": first_s, "followup_s": followup_s, "edit_ok": attempt("edit", lambda: edit_scenario(ask, system, auth), False),
+            "review_ok": attempt("review", lambda: review_scenario(ask, system), False), "turn_times_s": attempt("conversation", lambda: conversation(ask, system), [])}
 
 
 def run_questions(questions, ask):
@@ -117,6 +210,8 @@ def main():
         result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "device": a.device, "gpu_layers": a.gpu_layers,
                   "score": sum(x["passed"] for x in answers), "total": len(answers), "plain_p50_s": statistics.median(times), "plain_max_s": max(times),
                   "read_first_s": None, "followup_s": None, "edit_ok": None, "review_ok": None, "answers": answers}
+        if a.scenarios:
+            result.update(run_scenarios(chat, system))
     finally:
         server.kill()
         server.wait()
