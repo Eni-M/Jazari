@@ -159,6 +159,23 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task Stream_final_event_says_how_many_turns_were_cut()
+    {
+        _llama.ContextTokens = 2048;
+        var messages = Enumerable.Range(0, 10).SelectMany(i => new[]
+        {
+            new { role = "user", content = $"q{i} " + new string('u', 400) },
+            new { role = "assistant", content = $"a{i} " + new string('a', 400) },
+        }).Append(new { role = "user", content = "QUESTION" }).ToArray();
+
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", new { messages, stream = true });
+
+        var final = (await response.Content.ReadAsStringAsync()).Split("\n").Last(l => l.Contains("\"id\":"));
+        var dropped = JsonDocument.Parse(final["data: ".Length..]).RootElement.GetProperty("dropped_turns").GetInt32();
+        Assert.True(dropped > 0);
+    }
+
+    [Fact]
     public async Task Warm_reads_the_conversation_and_context_without_answering()
     {
         var response = await _client.PostAsJsonAsync("/v1/warm", new { messages = new[] { new { role = "user", content = "earlier" } }, context = "class A;" });

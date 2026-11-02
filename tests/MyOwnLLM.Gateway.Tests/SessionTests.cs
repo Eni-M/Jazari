@@ -71,6 +71,45 @@ public class SessionTests
         Assert.Equal([new ChatTurn("user", "hi there"), new ChatTurn("assistant", "Hello")], _session.History);
     }
 
+    static async IAsyncEnumerable<SseChunk> Dropping(int turns)
+    {
+        await Task.Yield();
+        yield return new SseChunk("ok", null, null);
+        yield return new SseChunk(null, "ix-3", null, DroppedTurns: turns);
+    }
+
+    const string NoLongerFit = "no longer fit in the model's memory";
+
+    [Fact]
+    public async Task A_cut_is_mentioned_once_and_again_when_more_goes()
+    {
+        var counts = new Queue<int>([4, 4, 8]);
+        _gateway.Chat = (_, _, _) => Dropping(counts.Dequeue());
+
+        await _session.HandleAsync("one", CancellationToken.None);
+        var first = Text;
+        await _session.HandleAsync("two", CancellationToken.None);
+        var second = Text[first.Length..];
+        await _session.HandleAsync("three", CancellationToken.None);
+        var third = Text[(first.Length + second.Length)..];
+
+        Assert.Contains("The oldest 4 questions no longer fit in the model's memory. Jazari can still look up what you said in them.", first);
+        Assert.DoesNotContain(NoLongerFit, second);
+        Assert.Contains("The oldest 8 questions " + NoLongerFit, third);
+    }
+
+    [Fact]
+    public async Task Clear_starts_counting_again()
+    {
+        _gateway.Chat = (_, _, _) => Dropping(4);
+
+        await _session.HandleAsync("one", CancellationToken.None);
+        await _session.HandleAsync("/clear", CancellationToken.None);
+        await _session.HandleAsync("two", CancellationToken.None);
+
+        Assert.Equal(2, Text.Split(NoLongerFit).Length - 1);
+    }
+
     [Fact]
     public async Task Copy_puts_the_exact_code_on_the_clipboard()
     {

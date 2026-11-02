@@ -9,7 +9,8 @@ public sealed record ReadProgress(int Total, int Cached, int Processed);
 public sealed record AnswerTimings(int PromptTokens, int CachedTokens, double PromptPerSecond, int AnswerTokens, double AnswerPerSecond);
 
 /// <summary>One server-sent event from a streamed chat: a piece of text, reading progress, the final id and numbers, or an error.</summary>
-public sealed record SseChunk(string? Content, string? Id, string? Error, ReadProgress? Progress = null, AnswerTimings? Timings = null, bool CutOff = false)
+/// <param name="DroppedTurns">Questions with their answers that no longer fit the prompt. An older gateway doesn't send it: 0.</param>
+public sealed record SseChunk(string? Content, string? Id, string? Error, ReadProgress? Progress = null, AnswerTimings? Timings = null, bool CutOff = false, int DroppedTurns = 0)
 {
     public static SseChunk? Parse(string line)
     {
@@ -27,6 +28,7 @@ public sealed record SseChunk(string? Content, string? Id, string? Error, ReadPr
             ? new AnswerTimings(t.GetProperty("prompt_tokens").GetInt32(), t.GetProperty("cached_tokens").GetInt32(), t.GetProperty("prompt_per_second").GetDouble(),
                 t.GetProperty("answer_tokens").GetInt32(), t.GetProperty("answer_per_second").GetDouble())
             : null;
-        return new(content, id, null, Timings: timings, CutOff: cutOff);
+        var dropped = root.TryGetProperty("dropped_turns", out var d) && d.TryGetInt32(out var n) ? n : 0;
+        return new(content, id, null, Timings: timings, CutOff: cutOff, DroppedTurns: dropped);
     }
 }

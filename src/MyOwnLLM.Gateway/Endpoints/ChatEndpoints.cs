@@ -59,7 +59,7 @@ public static class ChatEndpoints
         var question = request.Messages.LastOrDefault()?.Content ?? "";
         var history = request.Messages.SkipLast(1).ToList();
         var note = await ConversationNoteFor(s, project, history.Count == 0);
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens);
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages);
         var watch = Stopwatch.StartNew();
 
         string answer;
@@ -95,7 +95,7 @@ public static class ChatEndpoints
                 return;
             }
             id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
-            await WriteEventAsync(http, new { id = $"ix-{id}", choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } }, timings = stats }, http.RequestAborted);
+            await WriteEventAsync(http, new { id = $"ix-{id}", choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } }, timings = stats, dropped_turns = droppedMessages / 2 }, http.RequestAborted);
             await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
         }
         else

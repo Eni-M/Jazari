@@ -57,6 +57,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     string? _chip; // what goes with the next question, short enough for the panel
     bool _reachable = true;
     AnswerTimings? _timings;
+    int _droppedTurns; // questions the prompt no longer holds, as last said; /clear starts again
     string? _lastAnswer; // the id and numbers an answer used to print, for /details
 
     const int MaxReadTokens = 5000; // answers fall from 5.5 to 2.8 tok/s at this size, and keep falling beyond it
@@ -128,7 +129,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/review": return new ProjectReview(gateway, ui, ReviewDir).RunAsync(Resolve(Argument(input) ?? project), ct);
             case "/edit": return Stoppable(() => EditAsync(Argument(input), ct), ct);
             case "/undo": Undo(); break;
-            case "/clear": _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; ui.Metadata("Conversation cleared."); break;
+            case "/clear": _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ui.Metadata("Conversation cleared."); break;
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
             case "/details": Details(); break;
             case "/exit": ExitRequested = true; break;
@@ -160,6 +161,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         string? id = null;
         AnswerTimings? timings = null;
         var cutOff = false;
+        var dropped = 0;
         var watch = Stopwatch.StartNew();
         try
         {
@@ -168,6 +170,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
                 if (chunk.Progress is { } progress) { thinking.Report(progress); continue; }
                 timings = chunk.Timings ?? timings;
                 cutOff |= chunk.CutOff;
+                dropped = Math.Max(dropped, chunk.DroppedTurns);
                 if (chunk.Error is not null)
                 {
                     await FinishAsync();
@@ -197,6 +200,14 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             else ui.Metadata($"{_lastAnswer}{copyHint}");
             if (cutOff && ui.Live) ui.Row("cut", "The answer reached its length limit. Say \"go on\" for the rest.", Tone.Secondary, Tone.Danger);
             else if (cutOff) ui.Metadata("The answer reached its length limit. Say \"go on\" for the rest.");
+            // Once per cut: the gateway still searches the dropped turns (ConversationSearch), so say so too.
+            if (dropped > _droppedTurns)
+            {
+                _droppedTurns = dropped;
+                var text = $"The oldest {dropped} question{(dropped == 1 ? "" : "s")} no longer fit in the model's memory. Jazari can still look up what you said in them.";
+                if (ui.Live) ui.Row("cut", text, Tone.Secondary);
+                else ui.Metadata(text);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
