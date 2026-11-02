@@ -499,6 +499,26 @@ public class EndpointTests : IDisposable
         Assert.Equal(CoveredQuestion, Assert.Single(_llama.Calls).Messages[^1].Content);
     }
 
+    static JsonElement FinalEvent(string body) =>
+        JsonDocument.Parse(body.Split("\n").Last(l => l.Contains("\"id\":"))["data: ".Length..]).RootElement;
+
+    [Fact]
+    public async Task Stream_final_event_names_the_sources()
+    {
+        WriteLawBook();
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(CoveredQuestion, stream: true));
+        var sources = FinalEvent(await response.Content.ReadAsStringAsync()).GetProperty("sources");
+        Assert.Equal(LawBookTests.SmallBook[0].Url, sources[0].GetProperty("url").GetString());
+        Assert.Equal(LawBookTests.SmallBook[0].Title, sources[0].GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Stream_final_event_has_no_sources_without_passages()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(CoveredQuestion, stream: true));
+        Assert.False(FinalEvent(await response.Content.ReadAsStringAsync()).TryGetProperty("sources", out _));
+    }
+
     [Fact]
     public async Task Warm_does_not_search()
     {

@@ -98,6 +98,84 @@ public class SessionTests
         Assert.Contains("The oldest 8 questions " + NoLongerFit, third);
     }
 
+    static async IAsyncEnumerable<SseChunk> Citing(params DocSource[] sources)
+    {
+        await Task.Yield();
+        yield return new SseChunk("Use Results.NotFound().", null, null);
+        yield return new SseChunk(null, "ix-3", null, Sources: sources.Length == 0 ? null : sources);
+    }
+
+    static readonly DocSource Responses = new("Minimal API responses: IResult", "https://learn.microsoft.com/aspnet/core/fundamentals/minimal-apis/responses#iresult");
+
+    /// <summary>A session in a real terminal, and its output without colour codes.</summary>
+    (Session Session, Func<string> Text) Live()
+    {
+        var output = new StringWriter();
+        var theme = new Theme(ColorMode.TrueColor, unicode: true);
+        var session = new Session(_gateway, new Ui(output, theme, 120), () => new MarkdownStream(output, theme, 120), @"C:\Repo");
+        return (session, () => System.Text.RegularExpressions.Regex.Replace(output.ToString(), @"\e\[[0-9;?]*[A-Za-z]|\e\][^\a]*\a", ""));
+    }
+
+    [Fact]
+    public async Task A_source_row_follows_the_answer()
+    {
+        var (session, text) = Live();
+        _gateway.Chat = (_, _, _) => Citing(Responses);
+
+        await session.HandleAsync("not found from a minimal API?", CancellationToken.None);
+
+        // A long address wraps under the text, as every row does. The time goes back up into the answer's gutter: \r parts lines.
+        var lines = text().Split('\n', '\r');
+        var row = Array.FindIndex(lines, l => l.TrimStart().StartsWith("source  "));
+        Assert.Matches(@"^\s*source  Minimal API responses: IResult ·", lines[row]);
+        Assert.Contains(Responses.Url, string.Concat(lines[row..].Take(3).Select(l => l.Trim())));
+        Assert.True(text().IndexOf("Results.NotFound()") < text().IndexOf("source  "));
+    }
+
+    [Fact]
+    public async Task Piped_output_names_the_source_too()
+    {
+        _gateway.Chat = (_, _, _) => Citing(Responses);
+        await _session.HandleAsync("not found from a minimal API?", CancellationToken.None);
+        Assert.Contains($"{Responses.Title} · {Responses.Url}", Text);
+    }
+
+    [Fact]
+    public async Task No_source_row_without_passages()
+    {
+        var (session, text) = Live();
+        _gateway.Chat = (_, _, _) => Citing();
+        await session.HandleAsync("hello", CancellationToken.None);
+        Assert.DoesNotContain("source", text());
+        Assert.DoesNotContain("learn.microsoft.com", text());
+    }
+
+    [Fact]
+    public async Task Two_passages_from_one_page_show_once()
+    {
+        var (session, text) = Live();
+        _gateway.Chat = (_, _, _) => Citing(Responses, Responses with { Title = "Minimal API responses: TypedResults", Url = "https://learn.microsoft.com/aspnet/core/fundamentals/minimal-apis/responses#typedresults" });
+        await session.HandleAsync("not found from a minimal API?", CancellationToken.None);
+        Assert.Single(text().Split('\n'), l => l.Contains("minimal-apis/responses"));
+    }
+
+    [Fact]
+    public async Task Passages_from_two_pages_show_both()
+    {
+        _gateway.Chat = (_, _, _) => Citing(Responses, new DocSource("Records", "https://learn.microsoft.com/dotnet/csharp/fundamentals/types/records"));
+        await _session.HandleAsync("q", CancellationToken.None);
+        Assert.Contains(Responses.Url, Text);
+        Assert.Contains("types/records", Text);
+    }
+
+    [Fact]
+    public async Task The_source_is_not_part_of_the_answer()
+    {
+        _gateway.Chat = (_, _, _) => Citing(Responses);
+        await _session.HandleAsync("not found from a minimal API?", CancellationToken.None);
+        Assert.Equal("Use Results.NotFound().", _session.History[^1].Content);
+    }
+
     [Fact]
     public async Task Clear_starts_counting_again()
     {

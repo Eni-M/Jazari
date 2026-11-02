@@ -99,7 +99,12 @@ public static class ChatEndpoints
                 return;
             }
             id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
-            await WriteEventAsync(http, new { id = $"ix-{id}", choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } }, timings = stats, dropped_turns = droppedMessages / 2 }, http.RequestAborted);
+            var choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } };
+            // sources only when the law book's passages went in, so the CLI names the page the answer drew on.
+            object final = usedPassages
+                ? new { id = $"ix-{id}", choices, timings = stats, dropped_turns = droppedMessages / 2, sources = passages.Select(p => new { title = p.Title, url = p.Url }) }
+                : new { id = $"ix-{id}", choices, timings = stats, dropped_turns = droppedMessages / 2 };
+            await WriteEventAsync(http, final, http.RequestAborted);
             await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
         }
         else
