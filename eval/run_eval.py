@@ -144,12 +144,13 @@ def run_questions(questions, ask):
     return answers
 
 
-def start_server(args, port=PORT):
+def start_server(args, port=PORT, **popen):
+    """`popen` goes to subprocess.Popen: recall.py starts its gateway with its own settings and folder."""
     with socket.socket() as probe:
         probe.settimeout(1)
         if probe.connect_ex(("127.0.0.1", port)) == 0:
             raise PortInUse(f"port {port} is in use: stop whatever is on it, then run this again")
-    return subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen)
 
 
 def wait_until_ready(server, port=PORT, seconds=180):

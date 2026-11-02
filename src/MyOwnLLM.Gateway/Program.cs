@@ -18,7 +18,7 @@ if (args is ["add-key", ..])
     return;
 }
 
-builder.WebHost.UseUrls("http://127.0.0.1:5080");
+builder.WebHost.UseUrls($"http://127.0.0.1:{options.Port}");
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(new ApiKeyStore(options.KeyFile));
