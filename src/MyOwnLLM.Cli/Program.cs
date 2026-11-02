@@ -31,7 +31,8 @@ if (cli.Command == "tune")
 {
     // The model must have the PC to itself while it's measured.
     if (ServerLauncher.StopServers(config!) > 0) Console.WriteLine("Stopped Jazari's servers; they start again with the new settings.");
-    var tuneTheme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001);
+    var tuneTheme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001,
+    edges: ColorModeDetector.DrawsEdges(Environment.GetEnvironmentVariable));
     var tuneUi = new Ui(Console.Out, tuneTheme, Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20));
     await new DeviceTuner(runner, tuneUi).MeasureAsync(config!, DeviceTuner.ReadMachine(), Tuning.DefaultPath, CancellationToken.None);
     return 0;
@@ -58,10 +59,10 @@ if (key is not null) http.DefaultRequestHeaders.Authorization = new Authenticati
 var gateway = new GatewayClient(http);
 
 var version = typeof(CliArgs).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
-var theme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001);
+var theme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001,
+    edges: ColorModeDetector.DrawsEdges(Environment.GetEnvironmentVariable));
 // One less than the terminal's columns, so a full line never makes the terminal wrap (the renderer relies on this).
 int Columns() => Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20);
-int ScreenRows() => Console.IsOutputRedirected ? 24 : Console.WindowHeight;
 var width = Columns();
 var directory = Path.GetFullPath(cli.RepoPath ?? Directory.GetCurrentDirectory());
 
@@ -98,19 +99,18 @@ async Task StartServersAsync(Ui reportTo, bool quiet)
 var startupUi = new Ui(Console.Out, theme, Columns);
 if (cli.Command == "session")
 {
-    startupUi.TakeOverScreen();
     var tuning = DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), config?.Model);
     var measured = DeviceTuner.IsMeasured(Tuning.DefaultPath, config?.Model);
     // The panel prompt needs a real console; pipes and some IDE terminals get plain line input instead.
     var piped = Console.IsInputRedirected || Console.IsOutputRedirected;
-    // The panel stays up during answers, so a real console's conversation is drawn through it.
-    var conversation = piped ? null : new ConversationWriter(Console.Out);
-    TextWriter sessionOutput = (TextWriter?)conversation ?? Console.Out;
-    var ui = new Ui(sessionOutput, theme, Columns);
-    var editor = conversation is null ? null : new PromptEditor(ui, conversation, Directory.GetCurrentDirectory);
+    // A real console gets the screen: it owns the window, draws the conversation and keeps the panel at the bottom.
+    var terminal = piped ? null : new SystemTerminal();
+    var screen = terminal is null ? null : new Screen(terminal, theme, bottom: true, paced: true);
+    var ui = screen is null ? new Ui(Console.Out, theme, Columns) : new Ui(screen, theme, Columns);
+    var editor = screen is null ? null : new PromptEditor(ui, screen, terminal!, Directory.GetCurrentDirectory);
     // In a real terminal the prompt puts the "› question" row on screen; piped input isn't echoed, so Jazari prints it.
-    var interactive = new Session(gateway, ui, () => new MarkdownStream(sessionOutput, theme, Columns(), ScreenRows(),
-        editor is null ? null : () => editor.ConversationRows), directory)
+    var interactive = new Session(gateway, ui,
+        screen is null ? () => new MarkdownStream(Console.Out, theme, Columns()) : () => new MarkdownStream(screen, theme), directory)
     {
         EchoQuestions = piped,
         Tuning = tuning,
@@ -120,11 +120,11 @@ if (cli.Command == "session")
     {
         interactive.StartingModel = Session.ModelFromFile(config?.Model);
         // What starting has to say waits in a buffer: the prompt is open and being typed in meanwhile.
-        async Task<(bool, string)> Start()
+        async Task<(bool, BlockBuffer)> Start()
         {
-            var report = new StringWriter();
+            var report = new BlockBuffer();
             await StartServersAsync(new Ui(report, theme, Columns), quiet: true);
-            return (key is not null, report.ToString());
+            return (key is not null, report);
         }
         await InputLoop.RunInteractiveAsync(interactive, ui, version, directory, editor, Start, updateAvailable, measured);
         return 0;

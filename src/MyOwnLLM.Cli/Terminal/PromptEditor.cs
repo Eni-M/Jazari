@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using Grid = MyOwnLLM.Cli.Terminal.Layout;
 
 namespace MyOwnLLM.Cli.Terminal;
 
@@ -9,9 +11,9 @@ namespace MyOwnLLM.Cli.Terminal;
 /// <param name="Status">Model, device and speed, or "starting granite 3b".</param>
 /// <param name="Meter">Context used of the total, in tokens.</param>
 /// <param name="Offline">The gateway didn't answer: a red dot instead of the status.</param>
-/// <param name="Live">A row that replaces itself above the prompt until it's gone.</param>
 /// <param name="Queued">Questions sent during an answer, waiting their turn.</param>
-public sealed record PanelInfo(string? Chip, string Hint, string Status, (int Used, int Total)? Meter = null, bool Offline = false, string? Live = null, QueueRows? Queued = null);
+/// <param name="Compact">The status for the narrow footer under a question: "granite 3b · 14 tok/s · 6.3k of 16k".</param>
+public sealed record PanelInfo(string? Chip, string Hint, string Status, (int Used, int Total)? Meter = null, bool Offline = false, QueueRows? Queued = null, string? Compact = null);
 
 /// <summary>The waiting questions, compared by what they say, so the panel only redraws when they change.</summary>
 public sealed class QueueRows : List<string>
@@ -96,6 +98,9 @@ public sealed class PromptBuffer(Func<string> directory, IEnumerable<string>? hi
         _closedFor = null;
         Refresh();
     }
+
+    /// <summary>Typed or pasted text, inserted at the caret in one step: a paste costs one completion lookup, not one per character.</summary>
+    public void Type(string text) => Insert(text);
 
     void Insert(string text)
     {
@@ -214,62 +219,76 @@ public sealed class PromptBuffer(Func<string> directory, IEnumerable<string>? hi
     }
 }
 
-/// <summary>Draws the panel: a thin line, the live row, the command menu, the prompt and the line under it. Returns rows, no console.</summary>
+/// <summary>
+/// Draws the panel at the bottom of the window as rows: a thin top edge, the command menu or queue when there is one,
+/// the prompt, the footer and a padding row, all on the panel's background. Four rows keep room for themselves; a menu,
+/// a queue or a multi-line prompt grows upward over the conversation instead of pushing it into the scrollback.
+/// </summary>
 public static class PromptPanel
 {
     const int CommandColumn = 24;
+    const int QueueShown = 3;
+    public const int BaseRows = 4;
 
-    public readonly record struct Drawn(List<string> Rows, int CaretRow, int CaretColumn);
-
-    public static Drawn Draw(Ui ui, PromptBuffer buffer, PanelInfo info, int screenRows)
+    public static PanelFrame Draw(Theme theme, PromptBuffer buffer, PanelInfo info, int columns, int height, string? question = null)
     {
-        var theme = ui.Theme;
-        var rows = new List<string> { ui.Rule() };
-        if (info.Live is { } live) rows.Add(Band(theme, ui.Cell("live", Tone.Accent) + theme.Paint(ConsoleText.Sanitize(live), Tone.Secondary)));
-        var open = buffer.Menu.Items.Count > 0;
-        if (open) rows.AddRange(MenuRows(ui, buffer, screenRows));
-        if (info.Queued is { Count: > 0 } queued) rows.AddRange(QueueRowsFor(ui, queued));
+        var rows = new List<Line> { Edge(theme, columns) };
+        if (question is not null)
+        {
+            rows.Add(QuestionRow(theme, question, columns));
+            rows.Add(Footer(theme, info with { Hint = "/undo puts it back" }, columns, menuOpen: false, compact: true));
+            rows.Add(Padding());
+            return new(rows, BaseRows, null);
+        }
 
-        var room = Math.Max(ui.Width - Ui.Gutter, 8);
+        var open = buffer.Menu.Items.Count > 0;
+        if (open) rows.AddRange(MenuRows(theme, buffer, columns, height));
+        if (info.Queued is { Count: > 0 } queued) rows.AddRange(QueueRowsFor(queued, columns));
+
+        var room = Math.Max(columns - Grid.Gutter - Grid.Margin(columns), 8);
         var (lines, caretRow, caretColumn) = Layout(buffer.Text, buffer.Caret, room);
-        // A paste taller than the window: show the part around the caret, and keep the rest of the panel on screen.
-        var fit = Math.Max(screenRows - rows.Count - 1, 1);
+        // A paste taller than the window: show the part around the caret, and keep the footer on screen.
+        var fit = Math.Max(height - rows.Count - 3, 1);
         var start = Math.Clamp(caretRow - fit + 1, 0, Math.Max(lines.Count - fit, 0));
         var first = rows.Count;
-        var marker = ui.Cell(theme.Glyph('›').ToString(), info.Offline ? Tone.Muted : Tone.Accent);
+        var (marker, text) = info.Offline ? (Tone.Muted, Tone.Muted) : (Tone.Accent, Tone.Primary);
         foreach (var (line, i) in lines.Select((line, i) => (line, i)).Skip(start).Take(fit))
-            rows.Add(Band(theme, (i == start ? marker : ui.Cell()) + theme.Paint(line, info.Offline ? Tone.Muted : Tone.Primary)));
-        rows.Add(Footer(ui, info, open));
-        return new(rows, first + caretRow - start, Ui.Gutter + caretColumn);
+            rows.Add(OnPanel(Grid.Row(i == start ? theme.Glyph('›').ToString() : null, marker, bold: true).Add(line, text)));
+        rows.Add(Footer(theme, info, columns, open, compact: false));
+        rows.Add(Padding());
+        return new(rows, BaseRows, (first + caretRow - start, Grid.Gutter + caretColumn));
     }
 
-    /// <summary>The rows of a frame that aren't already on screen: all of them when it's new or has moved, otherwise only those that changed.</summary>
-    public static string Frame(IReadOnlyList<string>? shown, int shownTop, IReadOnlyList<string> rows, int top)
+    /// <summary>Every piece on the panel's background, and the rest of the row too.</summary>
+    static Line OnPanel(LineBuilder row) =>
+        new(row.Build().Spans.Select(s => s with { Style = s.Style with { Bg = s.Style.Bg ?? Surface.Panel } }).ToList(), Surface.Panel);
+
+    static Line Padding() => new([], Surface.Panel);
+
+    /// <summary>The panel's 1 px top border: a one-eighth block along the top of a padding row.</summary>
+    static Line Edge(Theme theme, int columns) =>
+        theme.Edges ? OnPanel(new LineBuilder().Add(new string('▔', columns), Tone.Border)) : Padding();
+
+    static Line QuestionRow(Theme theme, string question, int columns)
     {
-        var whole = shown is null || shownTop != top || shown.Count != rows.Count;
-        var frame = new StringBuilder();
-        for (var i = 0; i < rows.Count; i++)
-            if (whole || shown![i] != rows[i]) frame.Append(Go(top + i)).Append(rows[i]);
-        return frame.ToString();
+        var apply = " y  apply ";
+        var skip = theme.Edges ? " n  skip " : " n  skip ";
+        var buttons = 2 + TextWidth.Of(apply) + 2 + TextWidth.Of(skip) + (theme.Edges ? 2 : 0);
+        var room = Math.Max(columns - Grid.Gutter - Grid.Margin(columns) - buttons, 8);
+        var row = Grid.Row("?", Tone.Accent, bold: true).Add(TextWidth.Fit(ConsoleText.Sanitize(question), room), Tone.Primary).Add("  ")
+            .Add(apply, new Style(Tone.Ink, Surface.Accent)).Add("  ");
+        if (theme.Edges) row.Add("▕", Tone.ChipBorder).Add(skip, Tone.Secondary).Add("▏", Tone.ChipBorder);
+        else row.Add(skip, new Style(Tone.Secondary, Surface.Selected));
+        return OnPanel(row);
     }
 
-    public static string Go(int row, int column = 0) => $"\e[{row + 1};{column + 1}H";
-
-    const int QueueShown = 3;
-
-    static IEnumerable<string> QueueRowsFor(Ui ui, QueueRows queued)
+    static IEnumerable<Line> QueueRowsFor(QueueRows queued, int columns)
     {
-        var theme = ui.Theme;
-        var room = Math.Max(ui.Width - Ui.Gutter, 8);
+        var room = Math.Max(columns - Grid.Gutter - Grid.Margin(columns), 8);
         foreach (var question in queued.Take(QueueShown))
-        {
-            var text = ConsoleText.Sanitize(question).Replace('\n', ' ');
-            yield return Band(theme, ui.Cell("queue") + theme.Paint(text.Length > room ? text[..(room - 3)] + "..." : text, Tone.Secondary));
-        }
-        if (queued.Count > QueueShown) yield return Band(theme, ui.Cell() + theme.Paint($"and {queued.Count - QueueShown} more", Tone.Muted));
+            yield return OnPanel(Grid.Row("queue").Add(TextWidth.Fit(ConsoleText.Sanitize(question).Replace('\n', ' '), room), Tone.Secondary));
+        if (queued.Count > QueueShown) yield return OnPanel(Grid.Row().Add($"and {queued.Count - QueueShown} more", Tone.Muted));
     }
-
-    static string Band(Theme theme, string row) => theme.Band(Surface.Panel, row);
 
     /// <summary>Where each character lands: rows cut at the terminal's edge and at line breaks, and the row and column of the caret.</summary>
     public static (List<string> Rows, int CaretRow, int CaretColumn) Layout(string text, int caret, int room)
@@ -306,80 +325,75 @@ public static class PromptPanel
         return (rows, caretRow, caretColumn);
     }
 
-    static IEnumerable<string> MenuRows(Ui ui, PromptBuffer buffer, int screenRows)
+    static IEnumerable<Line> MenuRows(Theme theme, PromptBuffer buffer, int columns, int height)
     {
-        var theme = ui.Theme;
         var (start, items) = buffer.Menu;
         var typed = Math.Max(buffer.Caret - start, 0);
-        var room = Math.Min(Math.Max(screenRows - 6, 3), items.Count);
-        var top = Math.Clamp(buffer.Selected - room / 2, 0, items.Count - room);
-        var width = ui.Width - Ui.Gutter - 1;
-        var column = Math.Min(CommandColumn, width);
-        foreach (var (item, index) in items.Select((item, i) => (item, i)).Skip(top).Take(room))
+        var shown = Math.Min(Math.Max(height - 8, 3), items.Count);
+        var top = Math.Clamp(buffer.Selected - shown / 2, 0, items.Count - shown);
+        var width = Math.Max(Math.Min(Grid.Body(columns), columns - Grid.Gutter), 4);
+        var column = Math.Max(Math.Min(CommandColumn, width - 2), 1);
+        foreach (var (item, index) in items.Select((item, i) => (item, i)).Skip(top).Take(shown))
         {
             var entry = Session.Commands.FirstOrDefault(c => c.Command.Split(' ')[0] == item);
             var extra = entry.Command is { } command && command.Contains(' ') ? command[item.Length..] : "";
-            if (item.Length + extra.Length >= column) extra = "";
-            // A file name can be longer than the whole row.
-            var name = ConsoleText.Sanitize(item.Length >= width ? item[..(width - 1)] : item);
-            var shown = Math.Min(typed, name.Length);
-            var gap = Math.Max(column - name.Length - extra.Length, 1);
-            var cell = theme.Paint(name[..shown], Tone.Accent) + theme.Paint(name[shown..], Tone.Primary) + theme.Paint(extra, Tone.Muted) + new string(' ', gap);
-            var left = width - name.Length - extra.Length - gap;
-            var description = entry.What ?? "";
-            if (description.Length > left) description = left > 3 ? description[..(left - 3)] + "..." : "";
+            var name = TextWidth.Fit(ConsoleText.Sanitize(item), width - 2, "");
+            if (TextWidth.Of(name) + TextWidth.Of(extra) >= column) extra = "";
+            var typedPart = name[..Math.Min(typed, name.Length)];
             var selected = index == buffer.Selected;
-            var row = ui.Cell() + theme.On(selected ? Surface.Selected : Surface.Panel, " " + cell + theme.Paint(description, selected ? Tone.Secondary : Tone.Muted));
-            yield return theme.Band(Surface.Panel, row);
+            var surface = selected ? Surface.Selected : Surface.Panel;
+            var row = Grid.Row().Add(" ", new Style(Bg: surface))
+                .Add(typedPart, new Style(Tone.Accent, surface)).Add(name[typedPart.Length..], new Style(Tone.Primary, surface)).Add(extra, new Style(Tone.Muted, surface))
+                .PadTo(Grid.Gutter + 1 + column, new Style(Bg: surface));
+            var description = TextWidth.Fit(entry.What ?? "", Grid.Gutter + width - row.Width - 1);
+            row.Add(description, new Style(selected ? Tone.Secondary : Tone.Muted, surface)).PadTo(Grid.Gutter + width, new Style(Bg: surface));
+            yield return OnPanel(row);
         }
+        if (theme.Edges) yield return OnPanel(Grid.Row().Add(new string('▔', width), Tone.Border));
         var dot = theme.Glyph('·');
         var hint = $"Up and Down choose {dot} Tab completes {dot} Esc closes" + (start == 0 ? $" {dot} all {Session.Commands.Length} commands: /" : "");
-        yield return Band(theme, ui.Cell() + theme.Paint(" " + (hint.Length > width ? hint[..width] : hint), Tone.Muted));
-    }
-
-    static string Footer(Ui ui, PanelInfo info, bool menuOpen)
-    {
-        var theme = ui.Theme;
-        var width = Math.Max(ui.Width - Ui.Gutter, 8);
-        var chip = info.Chip is { Length: > 0 } c ? ConsoleText.Sanitize(c.Length > 28 ? c[..25] + "..." : c) : null;
-        var chipCell = chip is null ? "" : theme.On(Surface.Selected, theme.Paint($" {chip} ", Tone.Secondary)) + " ";
-        var chipLength = chip is null ? 0 : chip.Length + 3;
-        var hint = menuOpen ? "" : ConsoleText.Sanitize(info.Hint);
-
-        var meter = info.Meter is { Total: > 0 } m && !info.Offline ? Meter(theme, m.Used, m.Total) : ("", 0);
-        var status = info.Offline ? " not connected" : ConsoleText.Sanitize(info.Status);
-        var dot = info.Offline ? theme.Paint(theme.Glyph('●').ToString(), Tone.Danger) : "";
-        var statusLength = (info.Offline ? 1 : 0) + status.Length;
-
-        // Narrow terminals lose the least useful parts first.
-        if (chipLength + hint.Length + statusLength + 2 + meter.Item2 + 2 > width) meter = ("", 0);
-        if (chipLength + hint.Length + statusLength + meter.Item2 + 2 > width) hint = "";
-        if (chipLength + statusLength + 2 > width) (chipCell, chipLength) = ("", 0);
-        if (statusLength >= width) (dot, status, statusLength) = ("", status[..(width - 1)], width - 1);
-
-        var gap = meter.Item2 > 0 ? 2 : 0;
-        var pad = Math.Max(width - chipLength - hint.Length - statusLength - gap - meter.Item2, 1);
-        return Band(theme, ui.Cell() + chipCell + theme.Paint(hint, Tone.Muted) + new string(' ', pad)
-            + dot + theme.Paint(status, Tone.Muted) + new string(' ', gap) + meter.Item1);
+        yield return OnPanel(Grid.Row().Add(" " + TextWidth.Fit(hint, width - 1), Tone.Muted));
     }
 
     /// <summary>
-    /// Where the panel goes: at the bottom of the window, like the design. A conversation that has reached it scrolls up
-    /// first, by real scrolling, so what leaves the window lands in the terminal's scrollback.
+    /// The row under the prompt: what goes with the next question and the hint on the left; model, device, speed and the
+    /// context meter on the right. While the menu is open only the status shows; under a question the status is compact.
+    /// Narrow terminals lose the least useful parts first.
     /// </summary>
-    public static (int Scroll, int Top) Place(int conversationRow, int panelRows, int screenRows)
+    static Line Footer(Theme theme, PanelInfo info, int columns, bool menuOpen, bool compact)
     {
-        var top = Math.Max(screenRows - panelRows, 0);
-        return (Math.Max(conversationRow - top, 0), top);
-    }
+        var width = Math.Max(columns - Grid.Gutter - Grid.Margin(columns), 8);
+        var chip = !menuOpen && info.Chip is { Length: > 0 } c ? TextWidth.Fit(ConsoleText.Sanitize(c), 28) : null;
+        var chipWidth = chip is null ? 0 : TextWidth.Of(chip) + (theme.Edges ? 4 : 2) + 1;
+        var hint = menuOpen ? "" : ConsoleText.Sanitize(info.Hint);
+        var status = info.Offline ? "not connected" : ConsoleText.Sanitize(compact ? info.Compact ?? info.Status : info.Status);
+        var statusWidth = TextWidth.Of(status) + (info.Offline ? 2 : 0);
+        var meter = !menuOpen && !compact && !info.Offline && info.Meter is { Total: > 0 } m ? m : ((int Used, int Total)?)null;
+        var numbers = meter is { } mm ? $" {Tokens(mm.Used)} of {Tokens(mm.Total)}" : "";
+        var meterWidth = meter is null ? 0 : 2 + 10 + numbers.Length;
 
-    /// <summary>Ten cells and "4.1k of 16k".</summary>
-    static (string Text, int Length) Meter(Theme theme, int used, int total)
-    {
-        var filled = Math.Clamp(used * 10 / total, used > 0 ? 1 : 0, 10);
-        var numbers = $"  {Tokens(used)} of {Tokens(total)}";
-        var cell = theme.Glyph('■');
-        return (theme.Paint(new string(cell, filled), Tone.Secondary) + theme.Paint(new string(cell, 10 - filled), Tone.Line) + theme.Paint(numbers, Tone.Muted), 10 + numbers.Length);
+        if (chipWidth + TextWidth.Of(hint) + statusWidth + meterWidth + 2 > width) (meter, meterWidth) = (null, 0);
+        if (chipWidth + TextWidth.Of(hint) + statusWidth + 2 > width) hint = "";
+        if (chipWidth + statusWidth + 2 > width) (chip, chipWidth) = (null, 0);
+        if (statusWidth > width) (status, statusWidth) = (TextWidth.Fit(status, width - (info.Offline ? 2 : 0)), width);
+
+        var row = Grid.Row();
+        if (chip is not null)
+        {
+            if (theme.Edges) row.Add("▕", Tone.ChipBorder).Add($" {chip} ", Tone.Secondary).Add("▏", Tone.ChipBorder);
+            else row.Add($" {chip} ", new Style(Tone.Secondary, Surface.Selected));
+            row.Add(" ");
+        }
+        row.Add(hint, Tone.Muted).PadTo(Grid.Gutter + width - statusWidth - meterWidth);
+        if (info.Offline) row.Add(theme.Glyph('●').ToString(), Tone.Danger).Add(" ");
+        row.Add(status, Tone.Muted);
+        if (meter is { } used)
+        {
+            var filled = Math.Clamp(used.Used * 10 / used.Total, used.Used > 0 ? 1 : 0, 10);
+            var cell = theme.Glyph('■');
+            row.Add("  ").Add(new string(cell, filled), Tone.Secondary).Add(new string(cell, 10 - filled), Tone.MeterEmpty).Add(numbers, Tone.Muted);
+        }
+        return OnPanel(row);
     }
 
     /// <summary>"950", "4.1k", "16k".</summary>
@@ -390,53 +404,27 @@ public static class PromptPanel
 }
 
 /// <summary>
-/// What the conversation writes to. Everything goes through one place, because the panel stays on screen while an
-/// answer streams and the two can't be drawn over each other.
-/// </summary>
-public sealed class ConversationWriter(TextWriter inner) : TextWriter
-{
-    public TextWriter Inner => inner;
-    /// <summary>Set while the panel is up: it draws the text above the panel. Otherwise text goes straight through.</summary>
-    public Action<string>? Sink { get; set; }
-    public override Encoding Encoding => inner.Encoding;
-    public override void Write(char value) => Write(value.ToString());
-    public override void Write(char[] buffer, int index, int count) => Write(new string(buffer, index, count));
-    public override void Write(string? value)
-    {
-        if (string.IsNullOrEmpty(value)) return;
-        if (Sink is { } sink) sink(value);
-        else inner.Write(value);
-    }
-    public override void WriteLine() => Write(NewLine);
-    public override void WriteLine(string? value) => Write(value + NewLine);
-}
-
-/// <summary>
 /// The prompt on a real console. The panel stays at the bottom of the window from start to exit: keys are read the whole
-/// time, so the user can type while an answer streams, and whatever they send meanwhile waits in a visible queue.
-/// Only rows that changed are redrawn, inside a synchronized update, so typing doesn't flicker.
+/// time, so the user can type while an answer streams, and whatever they send meanwhile waits in a visible queue. The
+/// <see cref="Screen"/> draws it; this class reads keys, keeps the text and the queue, and asks yes/no questions.
 /// </summary>
-public sealed class PromptEditor : ILineReader
+public sealed class PromptEditor : ILineReader, IPanel
 {
     readonly Ui _ui;
-    readonly ConversationWriter _conversation;
-    readonly TextWriter _out;
+    readonly Screen _screen;
+    readonly ITerminal _terminal;
     readonly PromptBuffer _buffer;
     readonly string _historyFile;
-    readonly object _gate = new();
     readonly List<(bool Ok, string? Text)> _queue = [];
     readonly SemaphoreSlim _ready = new(0);
     Task? _pump;
     bool _running;
     bool _treatedControlC;
     Exception? _failure;
-    int _conversationRow, _conversationColumn; // where the conversation carries on, in window rows
-    List<string>? _drawn;
-    int _drawnTop, _drawnHeight, _drawnWidth;
-    PanelInfo? _drawnWith;
     string? _question; // the panel is asking yes or no
     bool _answer;
     ManualResetEventSlim? _answered;
+    PanelInfo? _drawnWith;
 
     /// <summary>What the panel shows; read again while waiting for keys, so a server coming up shows without a key press.</summary>
     public Func<PanelInfo> Panel { get; set; } = () => new(null, "", "");
@@ -445,20 +433,16 @@ public sealed class PromptEditor : ILineReader
     /// <summary>An answer or command is running, so Enter queues.</summary>
     public bool Busy { get; set; }
 
-    /// <summary>How many rows the conversation has on screen: the window less the panel's rows below it.</summary>
-    public int ConversationRows
-    {
-        get { lock (_gate) return Math.Max(Console.WindowHeight - (_drawn?.Count ?? 0), 1); }
-    }
-
-    public PromptEditor(Ui ui, ConversationWriter conversation, Func<string> directory, string? historyFile = null)
+    public PromptEditor(Ui ui, Screen screen, ITerminal terminal, Func<string> directory, string? historyFile = null)
     {
         _ui = ui;
-        _conversation = conversation;
-        _out = conversation.Inner;
+        _screen = screen;
+        _terminal = terminal;
         _historyFile = historyFile ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "history");
         _buffer = new PromptBuffer(directory, LoadHistory(_historyFile));
     }
+
+    object Gate => _screen.Gate;
 
     /// <summary>Base64, one entry a line: a typed line break can't split an entry.</summary>
     static IEnumerable<string> LoadHistory(string path)
@@ -485,56 +469,53 @@ public sealed class PromptEditor : ILineReader
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // history is a convenience
     }
 
-    /// <summary>Puts the panel on screen and starts reading keys. From here on, the conversation draws above the panel.</summary>
+    /// <summary>Puts the panel on screen and starts reading keys. From here on the screen draws the conversation above it.</summary>
     public void Start()
     {
-        lock (_gate)
+        lock (Gate)
         {
             if (_running) return;
             _running = true;
-            _treatedControlC = Console.TreatControlCAsInput;
-            Console.TreatControlCAsInput = true;
-            ReadCursor();
-            _conversation.Sink = WriteAbove;
-            Render();
+            _treatedControlC = _terminal.TreatControlCAsInput;
+            _terminal.TreatControlCAsInput = true;
+            _screen.Panel = this;
         }
+        _screen.Start();
         _pump = Task.Run(PumpAsync);
     }
 
     /// <summary>Takes the panel away and leaves the cursor under the conversation.</summary>
     public async Task StopAsync()
     {
-        lock (_gate) _running = false;
+        lock (Gate) _running = false;
         if (_pump is { } pump) await pump;
-        lock (_gate)
-        {
-            _conversation.Sink = null;
-            _out.Write(Sync(Go(BelowConversation()) + "\e[J" + Go(_conversationRow, _conversationColumn) + "\e[?25h"));
-            _drawn = null;
-            Console.TreatControlCAsInput = _treatedControlC;
-        }
+        await _screen.StopAsync();
+        try { _terminal.TreatControlCAsInput = _treatedControlC; }
+        catch (Exception e) when (e is IOException or InvalidOperationException) { }
     }
 
-    /// <summary>
-    /// For an exit that skips <see cref="StopAsync"/> (Ctrl+Break while idle, the process ending): closes any half-sent
-    /// synchronized block, clears the panel and shows the cursor again, so the shell isn't left with a hidden cursor and a
-    /// dead panel. Runs on the signal's thread, so it waits only briefly for a draw in progress.
-    /// </summary>
+    /// <summary>For an exit that skips <see cref="StopAsync"/> (Ctrl+Break while idle, the process ending): see <see cref="Screen.Restore"/>.</summary>
     public void Restore()
     {
-        var locked = Monitor.TryEnter(_gate, TimeSpan.FromMilliseconds(200));
-        try
-        {
-            if (!locked) { _out.Write("\e[?2026l\e[?25h"); return; }
-            if (!_running && _drawn is null) return; // stopped properly already
-            _running = false;
-            _conversation.Sink = null;
-            _out.Write("\e[?2026l" + Go(BelowConversation()) + "\e[J" + Go(_conversationRow, _conversationColumn) + "\e[?25h");
-            _out.Flush();
-            _drawn = null;
-        }
-        catch (Exception e) when (e is IOException or ObjectDisposedException) { } // the console is already gone
-        finally { if (locked) Monitor.Exit(_gate); }
+        _screen.Restore();
+        try { _terminal.TreatControlCAsInput = _treatedControlC; }
+        catch (Exception e) when (e is IOException or InvalidOperationException) { }
+    }
+
+    public PanelFrame Render(int columns, int height)
+    {
+        var info = CurrentInfo();
+        _drawnWith = info;
+        return PromptPanel.Draw(_ui.Theme, _buffer, info, columns, height, _question);
+    }
+
+    PanelInfo CurrentInfo()
+    {
+        var info = Panel();
+        var dot = _ui.Theme.Glyph('·');
+        var queued = _queue.Where(q => q.Ok).Select(q => q.Text ?? "").ToList();
+        // The record's equality would see a new list as a change, so an empty queue stays null.
+        return info with { Queued = queued.Count > 0 ? new QueueRows(queued) : null, Hint = Busy ? $"Enter queues {dot} Ctrl+C stops" : info.Hint };
     }
 
     /// <summary>The next thing the user sent: in the order sent, and right away if they sent it during an answer.</summary>
@@ -545,18 +526,19 @@ public sealed class PromptEditor : ILineReader
         {
             await _ready.WaitAsync();
             (bool Ok, string? Text) next;
-            lock (_gate)
+            lock (Gate)
             {
                 if (_failure is { } failure) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
                 if (_queue.Count == 0) continue; // Ctrl+C cleared it
                 next = _queue[0];
                 _queue.RemoveAt(0);
-                Render();
             }
+            _screen.Changed();
             if (next is (true, { Length: > 0 } text))
             {
                 _ui.Blank();
                 _ui.UserMessage(text);
+                _ui.Blank();
             }
             return next;
         }
@@ -566,30 +548,81 @@ public sealed class PromptEditor : ILineReader
     {
         try
         {
+            var sinceKey = Stopwatch.StartNew();
+            var sinceInfo = Stopwatch.StartNew();
             while (true)
             {
-                lock (_gate) { if (!_running) return; }
-                if (!Console.KeyAvailable)
+                lock (Gate) { if (!_running) return; }
+                if (!_terminal.KeyAvailable)
                 {
-                    lock (_gate) { if (Changed()) Render(); }
-                    await Task.Delay(25);
+                    // The panel's own text (status, meter, the server coming up) can change without a key: look a few times a second.
+                    if (sinceInfo.ElapsedMilliseconds >= 250)
+                    {
+                        sinceInfo.Restart();
+                        bool changed;
+                        lock (Gate) changed = CurrentInfo() != _drawnWith;
+                        if (changed) _screen.Changed();
+                    }
+                    await Task.Delay(sinceKey.ElapsedMilliseconds < 300 ? 8 : 33);
                     continue;
                 }
-                var key = Console.ReadKey(intercept: true);
-                var more = Console.KeyAvailable; // a paste draws once, at its end
-                lock (_gate)
+                var keys = Drain();
+                // A paste can arrive in pieces; one that ends on a line break waits a moment for the rest, so the break
+                // stays a new line instead of sending half the paste.
+                if (keys.Count > 0 && keys[^1].Key == ConsoleKey.Enter)
                 {
-                    if (_question is not null) AnswerQuestion(key);
-                    else Apply(key, more);
-                    if (!more) Render();
+                    await Task.Delay(15);
+                    keys.AddRange(Drain());
                 }
+                sinceKey.Restart();
+                lock (Gate) Handle(keys);
+                _screen.Changed();
             }
         }
         catch (Exception e)
         {
-            lock (_gate) _failure = e;
+            lock (Gate) _failure = e;
             _ready.Release();
         }
+    }
+
+    List<ConsoleKeyInfo> Drain()
+    {
+        var keys = new List<ConsoleKeyInfo>();
+        while (keys.Count < 100_000 && _terminal.KeyAvailable) keys.Add(_terminal.ReadKey());
+        return keys;
+    }
+
+    /// <summary>Keys in one batch: runs of plain characters go in as one piece; a line break followed by more keys is part of a paste.</summary>
+    void Handle(List<ConsoleKeyInfo> keys)
+    {
+        var run = new StringBuilder();
+        void Flush()
+        {
+            if (run.Length == 0) return;
+            _buffer.Type(run.ToString());
+            run.Clear();
+        }
+        for (var i = 0; i < keys.Count; i++)
+        {
+            var key = keys[i];
+            if (_question is not null) { Flush(); AnswerQuestion(key); continue; }
+            var control = key.Modifiers.HasFlag(ConsoleModifiers.Control);
+            if (control && key.Key == ConsoleKey.L) { Flush(); _screen.Redraw(); continue; }
+            if (IsPlain(key)) { run.Append(key.KeyChar); continue; }
+            Flush();
+            Apply(key, more: i < keys.Count - 1);
+        }
+        Flush();
+    }
+
+    static bool IsPlain(ConsoleKeyInfo key)
+    {
+        var control = key.Modifiers.HasFlag(ConsoleModifiers.Control);
+        var altGr = control && key.Modifiers.HasFlag(ConsoleModifiers.Alt);
+        return !char.IsControl(key.KeyChar) && (!control || altGr) && key.Key is not (ConsoleKey.Enter or ConsoleKey.Tab or ConsoleKey.Escape
+            or ConsoleKey.UpArrow or ConsoleKey.DownArrow or ConsoleKey.LeftArrow or ConsoleKey.RightArrow or ConsoleKey.Home or ConsoleKey.End
+            or ConsoleKey.Backspace or ConsoleKey.Delete);
     }
 
     void Apply(ConsoleKeyInfo key, bool more)
@@ -617,113 +650,6 @@ public sealed class PromptEditor : ILineReader
         _ready.Release();
     }
 
-    bool Changed() => CurrentInfo() != _drawnWith || _ui.Width != _drawnWidth || Console.WindowHeight != _drawnHeight;
-
-    PanelInfo CurrentInfo()
-    {
-        var info = Panel();
-        var dot = _ui.Theme.Glyph('·');
-        var queued = _queue.Where(q => q.Ok).Select(q => q.Text ?? "").ToList();
-        // The record's equality would see a new list as a change, so an empty queue stays null.
-        return info with { Queued = queued.Count > 0 ? new QueueRows(queued) : null, Hint = Busy ? $"Enter queues {dot} Ctrl+C stops" : info.Hint };
-    }
-
-    /// <param name="into">Inside a write that's already under way (<see cref="WriteAbove"/>): add the drawing to it instead of writing.</param>
-    void Render(StringBuilder? into = null)
-    {
-        var info = CurrentInfo();
-        var height = Console.WindowHeight;
-        if (_question is { } question)
-        {
-            var footer = PromptPanel.Draw(_ui, new PromptBuffer(() => ""), info with { Hint = "/undo puts it back" }, height).Rows[^1];
-            Show([_ui.Rule(), QuestionRow(question), footer], 1, 0, into);
-        }
-        else
-        {
-            var drawn = PromptPanel.Draw(_ui, _buffer, info, height);
-            Show(drawn.Rows, drawn.CaretRow, drawn.CaretColumn, into);
-        }
-        (_drawnWith, _drawnWidth, _drawnHeight) = (info, _ui.Width, height);
-    }
-
-    static string Go(int row, int column = 0) => PromptPanel.Go(row, column);
-    /// <summary>All of it reaches the screen at once, where the terminal supports that, so a redraw never shows half done.</summary>
-    static string Sync(string text) => "\e[?2026h" + text + "\e[?2026l";
-    /// <summary>The first free row: a half-written row still belongs to the conversation.</summary>
-    int BelowConversation() => _conversationColumn > 0 ? _conversationRow + 1 : _conversationRow;
-
-    void ReadCursor()
-    {
-        var (column, top) = Console.GetCursorPosition();
-        (_conversationRow, _conversationColumn) = (Math.Max(top - Console.WindowTop, 0), column);
-    }
-
-    /// <summary>Draws the panel at the bottom of the window, writing only the rows that changed.</summary>
-    void Show(List<string> rows, int caretRow, int caretColumn, StringBuilder? into = null)
-    {
-        var height = Console.WindowHeight;
-        _conversationRow = Math.Min(_conversationRow, height - 1); // the window may have shrunk
-        var (scroll, top) = PromptPanel.Place(BelowConversation(), rows.Count, height);
-        var screen = new StringBuilder("\e[?25l");
-        if (_drawn is not null && (scroll > 0 || top != _drawnTop || rows.Count != _drawn.Count))
-        {
-            screen.Append(Go(BelowConversation())).Append("\e[J");
-            _drawn = null;
-        }
-        if (scroll > 0)
-        {
-            // Real scrolling, so what leaves the window lands in the terminal's scrollback.
-            screen.Append(Go(height - 1)).Append('\n', scroll);
-            _conversationRow -= scroll;
-        }
-        screen.Append(PromptPanel.Frame(_drawn, _drawnTop, rows, top));
-        screen.Append(Go(top + caretRow, caretColumn)).Append("\e[?25h");
-        if (into is not null) into.Append(screen); // the caller's synchronized block is still open
-        else _out.Write(Sync(screen.ToString()));
-        (_drawn, _drawnTop) = (rows, top);
-    }
-
-    /// <summary>
-    /// Conversation text. It goes where the conversation left off, and the panel is only taken down when a new line would
-    /// reach it; then the conversation scrolls up and the panel comes back below it.
-    /// </summary>
-    void WriteAbove(string text)
-    {
-        lock (_gate)
-        {
-            var reaches = _drawn is not null && _conversationRow + text.Count(c => c == '\n') + 1 >= _drawnTop;
-            var screen = new StringBuilder("\e[?25l");
-            if (reaches)
-            {
-                screen.Append(Go(BelowConversation())).Append("\e[J");
-                _drawn = null;
-            }
-            screen.Append(Go(_conversationRow, _conversationColumn)).Append(text);
-            // Two writes inside one synchronized block: the text has to reach the screen before the cursor can be read
-            // back, and the panel and caret then follow in a single write that also closes the block. A nested block
-            // used to close it early, halfway through.
-            _out.Write("\e[?2026h" + screen);
-            ReadCursor();
-            var rest = new StringBuilder();
-            if (_drawn is null) Render(rest);
-            else if (_question is null)
-            {
-                var drawn = PromptPanel.Draw(_ui, _buffer, CurrentInfo(), Console.WindowHeight);
-                rest.Append(Go(_drawnTop + drawn.CaretRow, drawn.CaretColumn)).Append("\e[?25h");
-            }
-            else rest.Append(Go(_drawnTop + 1)).Append("\e[?25h");
-            _out.Write(rest.Append("\e[?2026l").ToString());
-        }
-    }
-
-    string QuestionRow(string question)
-    {
-        var theme = _ui.Theme;
-        var row = _ui.Cell("?", Tone.Accent) + theme.Paint(ConsoleText.Sanitize(question) + "   ", Tone.Primary)
-            + theme.On(Surface.Accent, theme.Paint(" y  apply ", Tone.Ink)) + "  " + theme.On(Surface.Selected, theme.Paint(" n  skip ", Tone.Secondary));
-        return theme.Band(Surface.Panel, row);
-    }
-
     void AnswerQuestion(ConsoleKeyInfo key)
     {
         if (key.Key is not (ConsoleKey.Y or ConsoleKey.N or ConsoleKey.Escape) && !(key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))) return;
@@ -737,13 +663,10 @@ public sealed class PromptEditor : ILineReader
     {
         Start();
         using var answered = new ManualResetEventSlim();
-        lock (_gate)
-        {
-            (_question, _answered) = (question, answered);
-            Render();
-        }
+        lock (Gate) (_question, _answered) = (question, answered);
+        _screen.Changed();
         answered.Wait();
-        lock (_gate)
+        lock (Gate)
         {
             _answered = null;
             return _answer;

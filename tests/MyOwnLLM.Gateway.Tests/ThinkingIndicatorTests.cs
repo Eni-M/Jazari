@@ -1,60 +1,84 @@
+using MyOwnLLM.Cli;
 using MyOwnLLM.Cli.Terminal;
 
 namespace MyOwnLLM.Gateway.Tests;
 
+/// <summary>A clock tests move by hand.</summary>
+public sealed class TestClock : TimeProvider
+{
+    long _ticks;
+    public void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, by.Ticks);
+    public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+}
+
 public class ThinkingIndicatorTests
 {
-    [Fact]
-    public async Task Shows_thinking_with_elapsed_seconds_then_clears()
+    static readonly Theme Color = new(ColorMode.TrueColor, unicode: true);
+
+    static (Screen Screen, FakeTerminal Terminal) NewScreen()
     {
-        var output = new StringWriter();
-        var ticks = 0;
-        var indicator = ThinkingIndicator.Start(output, new Theme(ColorMode.TrueColor, unicode: true),
-            async (_, ct) => { if (++ticks > 2) await Task.Delay(Timeout.Infinite, ct); });
-
-        for (var i = 0; i < 50 && ticks <= 2; i++) await Task.Delay(10);
-        await indicator.StopAsync();
-
-        var text = output.ToString();
-        Assert.Contains("Thinking", text);
-        Assert.Contains("1s", text);
-        Assert.Contains("2s", text);
-        Assert.EndsWith("\r\e[2K", text, StringComparison.Ordinal);
+        var terminal = new FakeTerminal(100, 20);
+        var screen = new Screen(terminal, Color, bottom: true, paced: false);
+        screen.Start();
+        return (screen, terminal);
     }
 
     [Fact]
-    public async Task Reading_progress_replaces_thinking_and_the_taskbar_is_cleared_after()
+    public async Task Counts_the_seconds_in_the_gutter_row()
     {
-        var output = new StringWriter();
-        var indicator = ThinkingIndicator.Start(output, new Theme(ColorMode.TrueColor, unicode: true), (_, ct) => Task.Delay(Timeout.Infinite, ct));
+        var (screen, terminal) = NewScreen();
+        var clock = new TestClock();
+        var thinking = ThinkingIndicator.Start(screen, Color, clock);
 
-        indicator.Report(new MyOwnLLM.Cli.ReadProgress(5000, 1000, 2500));
-        await indicator.StopAsync();
+        Assert.Equal("    live  Thinking", terminal.Vt.Text(0));
+        clock.Advance(TimeSpan.FromSeconds(12));
+        screen.RenderNow();
+        Assert.Equal("    live  Thinking · 12s", terminal.Vt.Text(0));
 
-        var text = output.ToString();
-        Assert.Contains("Reading 2,500 of 5,000 tokens · 50%", text);
-        Assert.Contains("\e]9;4;1;50\a", text);
-        Assert.EndsWith("\e]9;4;0;0\a", text, StringComparison.Ordinal);
+        await thinking.StopAsync();
+        Assert.Equal("", terminal.Vt.Text(0));
     }
 
     [Fact]
-    public async Task Plain_mode_writes_nothing()
+    public async Task Reading_progress_replaces_the_seconds_and_shows_on_the_tab()
+    {
+        var (screen, terminal) = NewScreen();
+        var clock = new TestClock();
+        var thinking = ThinkingIndicator.Start(screen, Color, clock);
+
+        thinking.Report(new ReadProgress(5000, 0, 1000));
+        clock.Advance(TimeSpan.FromSeconds(4));
+        thinking.Report(new ReadProgress(5000, 0, 3000));
+
+        Assert.Equal("    live  Reading 3,000 of 5,000 tokens · 60% · under a minute left", terminal.Vt.Text(0));
+        Assert.Contains("9;4;1;60", terminal.Vt.Signals);
+        await thinking.StopAsync();
+        Assert.Contains("9;4;0;0", terminal.Vt.Signals);
+    }
+
+    [Fact]
+    public async Task Stopping_twice_is_harmless()
+    {
+        var (screen, _) = NewScreen();
+        var thinking = ThinkingIndicator.Start(screen, Color, new TestClock());
+
+        await thinking.StopAsync();
+        await thinking.StopAsync();
+
+        Assert.Empty(screen.Blocks);
+    }
+
+    [Fact]
+    public async Task Plain_output_shows_nothing()
     {
         var output = new StringWriter();
+        var ui = new Ui(output, new Theme(ColorMode.None, unicode: true), 80);
 
-        var indicator = ThinkingIndicator.Start(output, new Theme(ColorMode.None, unicode: true), (_, ct) => Task.Delay(1, ct));
-        await Task.Delay(50);
-        await indicator.StopAsync();
+        var thinking = ui.Thinking();
+        thinking.Report(new ReadProgress(100, 0, 50));
+        await thinking.StopAsync();
 
         Assert.Equal("", output.ToString());
-    }
-
-    [Fact]
-    public async Task Stop_is_safe_to_call_twice()
-    {
-        var indicator = ThinkingIndicator.Start(new StringWriter(), new Theme(ColorMode.TrueColor, true), (_, ct) => Task.Delay(Timeout.Infinite, ct));
-
-        await indicator.StopAsync();
-        await indicator.StopAsync();
     }
 }

@@ -100,14 +100,17 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     {
         var dot = ui.Theme.Glyph('·');
         if (StartingModel is { } starting)
-            return new(_chip, "Type now: it sends as soon as the model is ready", $"starting {starting}", Live: "Starting the model");
+            return new(_chip, "Type now: it sends as soon as the model is ready", $"starting {starting}");
 
         var speed = _timings is { AnswerPerSecond: > 0 } t ? t.AnswerPerSecond : Tuning?.AnswerPerSecond ?? 0;
         string?[] parts = [ModelVersion().Replace(ModelName, "").ToLowerInvariant(), Tuning?.ShortName(), speed > 0 ? $"{speed:0} tok/s" : null];
         var used = _timings is { } last ? last.PromptTokens + last.AnswerTokens : (_history.Sum(h => h.Content.Length) + (_context?.Length ?? 0)) / 4;
         var total = Tuning?.ContextTokens ?? 16384;
-        return new(_chip, _hint ?? $"Enter sends {dot} / commands", string.Join($" {dot} ", parts.OfType<string>().Where(p => p.Length > 0)),
-            used > 0 ? (used, total) : null, Offline: !_reachable);
+        var status = string.Join($" {dot} ", parts.OfType<string>().Where(p => p.Length > 0));
+        // Under a question the footer is narrower: model and speed, then the context in words.
+        string?[] compact = [parts[0], parts[2], used > 0 ? $"{PromptPanel.Tokens(used)} of {PromptPanel.Tokens(total)}" : null];
+        return new(_chip, _hint ?? $"Enter sends {dot} / commands", status, used > 0 ? (used, total) : null, Offline: !_reachable,
+            Compact: string.Join($" {dot} ", compact.OfType<string>().Where(p => p.Length > 0)));
     }
 
     public Task HandleAsync(string input, CancellationToken ct)
@@ -145,7 +148,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (EchoQuestions) ui.UserMessage(question);
         ui.Blank();
 
-        var thinking = ThinkingIndicator.Start(ui.Output, ui.Theme);
+        var thinking = ui.Thinking();
         void StopThinking() => thinking.StopAsync().GetAwaiter().GetResult();
 
         var renderer = newRenderer();
@@ -265,7 +268,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     /// </summary>
     async Task<(bool Ok, T Value)> WithThinking<T>(Func<Task<T>> call, CancellationToken ct)
     {
-        var thinking = ThinkingIndicator.Start(ui.Output, ui.Theme);
+        var thinking = ui.Thinking();
         Exception? error = null;
         T value = default!;
         try { value = await call(); }

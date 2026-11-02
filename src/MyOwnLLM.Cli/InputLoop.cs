@@ -34,18 +34,18 @@ public static class InputLoop
     /// <param name="start">Starts the servers; whatever it reported is printed once it's done. Returns whether there's a key.</param>
     /// <param name="measured">Whether this PC's best settings were measured.</param>
     public static async Task RunInteractiveAsync(Session session, Ui ui, string version, string directory, PromptEditor editor,
-        Func<Task<(bool HasKey, string Report)>> start, Task<bool>? updateAvailable, bool measured)
+        Func<Task<(bool HasKey, BlockBuffer Report)>> start, Task<bool>? updateAvailable, bool measured)
     {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         editor.Panel = session.Panel;
         Welcome.Opening(ui, version, directory);
-        var wordmarkRow = Console.CursorTop - Console.WindowTop - 1;
+        var starting = ui.Thinking("Starting the model");
         editor.Start();
 
         async Task OpenAsync()
         {
             ConnectionState state;
-            var report = "";
+            var report = new BlockBuffer();
             try
             {
                 (var hasKey, report) = await start();
@@ -57,8 +57,9 @@ public static class InputLoop
                 state = ConnectionState.GatewayNotRunning;
             }
             session.StartingModel = null;
-            ui.Output.Write(report);
-            Welcome.Opened(ui, state, clock.Elapsed, wordmarkRow, measured);
+            await starting.StopAsync();
+            ui.Replay(report);
+            Welcome.Opened(ui, state, clock.Elapsed, measured);
         }
 
         // Ctrl+Break while idle, or anything else that ends the process, skips StopAsync: put the cursor back anyway.

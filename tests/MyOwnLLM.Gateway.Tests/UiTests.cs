@@ -104,13 +104,16 @@ public class UiTests
     }
 
     [Fact]
-    public void TakeOverScreen_sets_title_and_clears_in_a_real_terminal()
+    public void The_session_screen_sets_the_title_and_clears_the_window_but_keeps_the_scrollback()
     {
-        var output = new StringWriter();
+        var terminal = new FakeTerminal(80, 10);
+        terminal.Vt.Write("earlier shell output\r\n");
 
-        new Ui(output, new Theme(ColorMode.TrueColor, true), 80).TakeOverScreen();
+        new Screen(terminal, new Theme(ColorMode.TrueColor, true), bottom: true, paced: false).Start();
 
-        Assert.Equal("\e]0;Jazari\a\e[H\e[2J\e[3J", output.ToString());
+        Assert.Contains("0;Jazari", terminal.Vt.Signals);
+        Assert.DoesNotContain("\e[3J", string.Concat(terminal.Frames));
+        Assert.Contains("earlier shell output", terminal.Vt.Scrollback);
     }
 
     [Fact]
@@ -155,7 +158,16 @@ public class UiTests
         var output = new StringWriter();
         new Ui(output, new Theme(ColorMode.TrueColor, unicode: true), 40).UserMessage("hi\nthere");
 
-        Assert.Equal(["     ›  hi", "        there"], Clean(output));
+        Assert.Equal(["       ›  hi", "          there"], Shown(output, 40));
+    }
+
+    /// <summary>What a terminal one column wider than <paramref name="width"/> shows after the output.</summary>
+    static string[] Shown(StringWriter output, int width)
+    {
+        var vt = new VtScreen(width + 1, 60);
+        vt.Write(output.ToString());
+        Assert.Equal(0, vt.SoftWraps);
+        return vt.Everything.Reverse().SkipWhile(l => l.Length == 0).Reverse().ToArray();
     }
 
     static string[] Clean(StringWriter output) =>
@@ -174,7 +186,7 @@ public class UiTests
 
         ui.Row("read", "two files and some tokens", Tone.Muted);
 
-        Assert.Equal(["  read  two files and some", "        tokens"], Clean(output));
+        Assert.Equal(["    read  two files and", "          some tokens"], Shown(output, 28));
     }
 
     [Fact]
@@ -184,7 +196,7 @@ public class UiTests
 
         ui.Error("Can't reach the gateway.", "Nothing answered.", "jazari update");
 
-        Assert.Equal(["     ✕  Can't reach the gateway.", "   why  Nothing answered.", "   fix  jazari update"], Clean(output));
+        Assert.Equal(["       ✕  Can't reach the gateway.", "     why  Nothing answered.", "     fix  jazari update"], Shown(output, 80));
     }
 
     [Fact]
@@ -194,9 +206,9 @@ public class UiTests
 
         ui.Header("~/MyOwnLLM", "main");
 
-        var rows = Clean(output);
-        Assert.Equal("jazari — ~/MyOwnLLM                 main", rows[0]);
-        Assert.Equal(new string('─', 41), rows[1]); // edge to edge: the width is one short of the terminal's
+        var rows = Shown(output, 40);
+        Assert.Equal("  jazari — ~/MyOwnLLM             main", rows[0]);
+        Assert.Equal(new string('▔', 40), rows[1]); // a thin line under it, never in the terminal's last column
     }
 
     [Fact]

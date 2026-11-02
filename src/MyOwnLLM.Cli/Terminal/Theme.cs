@@ -1,12 +1,14 @@
 namespace MyOwnLLM.Cli.Terminal;
 
-public enum Tone { Primary, Secondary, Muted, Inactive, Line, Accent, Danger, Added, Removed, Ink }
+public enum Tone { Primary, Secondary, Muted, Inactive, Line, Accent, Danger, Added, Removed, Ink, Border, CodeBorder, ChipBorder, MeterEmpty }
 
 /// <summary>The backgrounds the interface draws text on.</summary>
 public enum Surface { Panel, Code, Inline, Selected, Added, Removed, Accent }
 
 /// <summary>The palette of the Jazari CLI Interface design, rendered for whatever the terminal supports.</summary>
-public sealed class Theme(ColorMode mode, bool unicode)
+/// <param name="edges">Thin box edges drawn with one-eighth blocks (▁▔▕▏). Windows Terminal and VS Code draw these
+/// glyphs themselves; classic console fonts may not have them, so there boxes are drawn with backgrounds only.</param>
+public sealed class Theme(ColorMode mode, bool unicode, bool? edges = null)
 {
     public const string Reset = "\e[0m";
 
@@ -23,6 +25,10 @@ public sealed class Theme(ColorMode mode, bool unicode)
         [Tone.Added] = (0xA6D9AE, 151, 92),
         [Tone.Removed] = (0xEBA596, 217, 91),
         [Tone.Ink] = (0x0E0F11, 233, 30),
+        [Tone.Border] = (0x1E2024, 234, 90),
+        [Tone.CodeBorder] = (0x222428, 235, 90),
+        [Tone.ChipBorder] = (0x2C2E33, 236, 90),
+        [Tone.MeterEmpty] = (0x33353A, 237, 90),
     };
 
     // surface → (24-bit color, 256-color index); below 256 colors there are no backgrounds
@@ -44,6 +50,74 @@ public sealed class Theme(ColorMode mode, bool unicode)
     };
 
     public ColorMode Mode => mode;
+
+    /// <summary>Whether thin box edges are drawn (see the constructor).</summary>
+    public bool Edges { get; } = (edges ?? true) && unicode;
+
+    /// <summary>
+    /// One row as escape codes, cut to <paramref name="columns"/> so the terminal never wraps it. Every row ends by
+    /// clearing the rest of the line (on the fill color, if any), so a shorter row leaves nothing of the longer one behind.
+    /// </summary>
+    public string Encode(Line line, int columns)
+    {
+        var text = new System.Text.StringBuilder();
+        Style? current = null;
+        var used = 0;
+        foreach (var span in line.Spans)
+        {
+            if (span.Text.Length == 0) continue;
+            var room = columns - used;
+            if (room <= 0) break;
+            var piece = span.Text;
+            if (TextWidth.Of(piece) > room)
+            {
+                piece = TextWidth.Take(piece, room).Head;
+                if (TextWidth.Of(piece) > room) break;
+            }
+            if (current != span.Style)
+            {
+                text.Append(Sgr(span.Style));
+                current = span.Style;
+            }
+            text.Append(piece);
+            used += TextWidth.Of(piece);
+        }
+        if (line.Fill is { } fill && Sgr(new Style(Bg: fill)) is var background && background != "\e[0m")
+            text.Append(background).Append("\e[K").Append(Reset);
+        else text.Append(Reset).Append("\e[K");
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// The escape code for a style, starting from a reset. Below 256 colors there are no backgrounds, so a selected row
+    /// and the accent button are drawn in reverse video instead; with no color at all, reverse video and bold remain.
+    /// </summary>
+    public string Sgr(Style style)
+    {
+        var codes = new List<string> { "0" };
+        if (style.Bold) codes.Add("1");
+        var reverse = style.Bg is Surface.Selected or Surface.Accent;
+        switch (mode)
+        {
+            case ColorMode.TrueColor:
+                if (style.Fg is { } fg) codes.Add("38;2;" + Rgb(Palette[fg].Rgb));
+                if (style.Bg is { } bg) codes.Add("48;2;" + Rgb(Surfaces[bg].Rgb));
+                break;
+            case ColorMode.Ansi256:
+                if (style.Fg is { } fg256) codes.Add("38;5;" + Palette[fg256].Index);
+                if (style.Bg is { } bg256) codes.Add("48;5;" + Surfaces[bg256].Index);
+                break;
+            case ColorMode.Ansi16:
+                var tone = style.Bg is Surface.Accent ? Tone.Accent : style.Fg;
+                if (tone is { } fg16) codes.Add(Palette[fg16].Basic.ToString());
+                if (reverse) codes.Add("7");
+                break;
+            default:
+                if (reverse) codes.Add("7");
+                break;
+        }
+        return "\e[" + string.Join(';', codes) + "m";
+    }
 
     static string Rgb(int color) => $"{color >> 16 & 0xFF};{color >> 8 & 0xFF};{color & 0xFF}";
 

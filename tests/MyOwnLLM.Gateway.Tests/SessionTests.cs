@@ -288,7 +288,10 @@ public class SessionTests
 
         var text = output.ToString();
         Assert.Contains("Thinking", text);
-        Assert.True(text.IndexOf("Thinking", StringComparison.Ordinal) < text.LastIndexOf("\r\e[2K", StringComparison.Ordinal), "indicator must be cleared after it shows");
+        var vt = new VtScreen(81, 100);
+        vt.Write(text);
+        Assert.DoesNotContain(vt.Everything, row => row.Contains("Thinking")); // shown while waiting, gone once the answer is in
+        Assert.Equal(0, vt.SoftWraps);
     }
 
     [Fact]

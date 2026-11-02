@@ -210,26 +210,41 @@ public class PromptEditorTests
     [InlineData(16384, "16k")]
     public void Tokens_are_short(int tokens, string expected) => Assert.Equal(expected, PromptPanel.Tokens(tokens));
 
-    static PromptPanel.Drawn Draw(PromptBuffer buffer, PanelInfo info, int width = 120)
+    static readonly Theme Color = new(ColorMode.TrueColor, unicode: true);
+
+    static PanelFrame Draw(PromptBuffer buffer, PanelInfo info, int columns = 120, int height = 40, string? question = null) =>
+        PromptPanel.Draw(Color, buffer, info, columns, height, question);
+
+    static List<string> Texts(PanelFrame frame) => frame.Rows.Select(r => r.Text.TrimEnd()).ToList();
+
+    [Fact]
+    public void Panel_has_an_edge_the_prompt_the_footer_and_padding()
     {
-        var ui = new Ui(new StringWriter(), new Theme(ColorMode.TrueColor, unicode: true), width);
-        return PromptPanel.Draw(ui, buffer, info, 40);
+        var drawn = Draw(Typed("hi"), new("Program.cs", "Enter sends", "granite 3b · iris xe · 14 tok/s", (4100, 16384)));
+        var rows = Texts(drawn);
+
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(PromptPanel.BaseRows, drawn.Base);
+        Assert.StartsWith("▔", rows[0]);
+        Assert.Equal("       ›  hi", rows[1]);
+        Assert.Contains("▕ Program.cs ▏", rows[2]);
+        Assert.Contains("Enter sends", rows[2]);
+        Assert.Contains("granite 3b · iris xe · 14 tok/s", rows[2]);
+        Assert.EndsWith("■■■■■■■■■■ 4.1k of 16k", rows[2]);
+        Assert.Equal("", rows[3]);
+        Assert.Equal((1, Ui.Gutter + 2), drawn.Caret);
+        Assert.All(drawn.Rows, r => Assert.Equal(Surface.Panel, r.Fill));
+        Assert.All(drawn.Rows.SelectMany(r => r.Spans), s => Assert.NotNull(s.Style.Bg)); // nothing shows the terminal's background through
     }
 
     [Fact]
-    public void Panel_has_a_rule_the_prompt_and_the_line_under_it()
+    public void The_prompt_marker_is_bold_accent_and_muted_when_offline()
     {
-        var drawn = Draw(Typed("hi"), new("Program.cs", "Enter sends", "granite 3b · iris xe · 14 tok/s", (4100, 16384)));
-        var rows = drawn.Rows.Select(Plain).ToList();
+        var marker = Draw(Typed(""), new(null, "", "")).Rows[1].Spans[0].Style;
+        var offline = Draw(Typed(""), new(null, "", "", Offline: true)).Rows[1].Spans[0].Style;
 
-        Assert.Equal(3, rows.Count);
-        Assert.StartsWith("─", rows[0]);
-        Assert.Equal("     ›  hi", rows[1]);
-        Assert.Contains(" Program.cs ", rows[2]);
-        Assert.Contains("Enter sends", rows[2]);
-        Assert.Contains("granite 3b · iris xe · 14 tok/s", rows[2]);
-        Assert.EndsWith("■■■■■■■■■■  4.1k of 16k", rows[2]);
-        Assert.Equal((1, Ui.Gutter + 2), (drawn.CaretRow, drawn.CaretColumn));
+        Assert.Equal((Tone.Accent, true), (marker.Fg!.Value, marker.Bold));
+        Assert.Equal(Tone.Muted, offline.Fg);
     }
 
     [Fact]
@@ -239,101 +254,100 @@ public class PromptEditorTests
         var info = new PanelInfo("a-rather-long-file-name-for-a-chip.cs", "Enter sends · / commands", "granite 3b · iris xe · 14 tok/s", (4100, 16384));
 
         foreach (var width in new[] { 120, 60, 40, 20 })
-            Assert.All(Draw(buffer, info, width).Rows.Skip(1).Select(Plain), r => Assert.True(r.Length <= width, $"{r.Length} > {width}: '{r}'"));
+            Assert.All(Draw(buffer, info, width).Rows.Skip(1), r => Assert.True(r.Width <= width, $"{r.Width} > {width}: '{r.Text}'"));
     }
-
-    [Theory]
-    [InlineData(5, 3, 40, 0, 37)] // a short conversation: the panel still sits at the bottom
-    [InlineData(37, 3, 40, 0, 37)] // the conversation just reaches it
-    [InlineData(39, 3, 40, 2, 37)] // past it: the conversation scrolls up
-    [InlineData(39, 8, 40, 7, 32)] // a menu makes the panel taller
-    [InlineData(0, 50, 40, 0, 0)] // a panel taller than the window starts at the top
-    public void The_panel_is_placed_at_the_bottom_of_the_window(int conversationRow, int rows, int height, int scroll, int top) =>
-        Assert.Equal((scroll, top), PromptPanel.Place(conversationRow, rows, height));
 
     [Fact]
     public void Menu_sits_above_the_prompt_and_describes_each_command()
     {
-        var drawn = Draw(Typed("/re"), new(null, "hint", "status"));
-        var rows = drawn.Rows.Select(Plain).ToList();
+        var drawn = Draw(Typed("/re"), new("Program.cs", "hint", "status", (10, 100)));
+        var rows = Texts(drawn);
 
         Assert.Contains("/read <path>", rows[1]);
         Assert.Contains("Read a file or folder", rows[1]);
         Assert.Contains("/review [path]", rows[2]);
         Assert.Contains("/retry", rows[3]);
-        Assert.Contains($"all {Session.Commands.Length} commands: /", rows[4]);
-        Assert.Equal("     ›  /re", rows[5]);
-        Assert.DoesNotContain("hint", rows[6]); // the menu's own hint is enough
-        Assert.Equal(5, drawn.CaretRow);
+        Assert.StartsWith("▔", rows[4].Trim()); // the divider
+        Assert.Contains($"all {Session.Commands.Length} commands: /", rows[5]);
+        Assert.Equal("       ›  /re", rows[6]);
+        Assert.Equal("status", rows[7].Trim()); // only the status while the menu is open
+        Assert.Equal(6, drawn.Caret!.Value.Row);
+        Assert.Equal(PromptPanel.BaseRows, drawn.Base); // the menu grows over the conversation, it doesn't push it
     }
 
     [Fact]
-    public void A_frame_writes_only_the_rows_that_changed()
+    public void The_chosen_command_is_highlighted_across_the_menu()
     {
-        var frame = PromptPanel.Frame(["rule", "› he", "footer"], 10, ["rule", "› hello", "footer"], 10);
+        var row = Draw(Typed("/re"), new(null, "", "")).Rows[1];
 
-        Assert.Equal("\e[12;1H› hello", frame);
+        Assert.All(row.Spans.Skip(1), s => Assert.Equal(Surface.Selected, s.Style.Bg));
+        Assert.Equal(Ui.Gutter + Layout.Body(120), row.Width);
     }
 
     [Fact]
-    public void A_frame_with_nothing_changed_writes_nothing() =>
-        Assert.Equal("", PromptPanel.Frame(["a", "b"], 10, ["a", "b"], 10));
+    public void A_question_takes_the_prompt_with_two_buttons_and_a_compact_footer()
+    {
+        var drawn = Draw(Typed("typed"), new("Queue/ · 2 files", "hint", "granite 3b · iris xe · 14 tok/s", (6300, 16384), Compact: "granite 3b · 14 tok/s · 6.3k of 16k"),
+            question: "Apply this change to RequestQueue.cs?");
+        var rows = Texts(drawn);
 
-    [Fact]
-    public void A_first_frame_writes_every_row() =>
-        Assert.Equal("\e[11;1Ha\e[12;1Hb", PromptPanel.Frame(null, 0, ["a", "b"], 10));
-
-    [Fact]
-    public void A_frame_that_moved_writes_every_row_from_where_it_starts() =>
-        Assert.Equal("\e[10;1Ha\e[11;1Hb\e[12;1Hc", PromptPanel.Frame(["a", "b"], 10, ["a", "b", "c"], 9));
+        Assert.Equal(4, rows.Count);
+        Assert.StartsWith("       ?  Apply this change to RequestQueue.cs?", rows[1]);
+        Assert.Contains(" y  apply ", rows[1]);
+        Assert.Contains("▕ n  skip ▏", rows[1]);
+        Assert.Contains("/undo puts it back", rows[2]);
+        Assert.EndsWith("granite 3b · 14 tok/s · 6.3k of 16k", rows[2]);
+        Assert.DoesNotContain("■", rows[2]);
+        Assert.Null(drawn.Caret);
+        Assert.Contains(drawn.Rows[1].Spans, s => s.Text == " y  apply " && s.Style.Bg == Surface.Accent);
+    }
 
     [Fact]
     public void Queued_questions_show_above_the_prompt()
     {
-        var rows = Draw(Typed(""), new(null, "hint", "status", Queued: ["first question", "second question"])).Rows.Select(Plain).ToList();
+        var rows = Texts(Draw(Typed(""), new(null, "hint", "status", Queued: ["first question", "second question"])));
 
-        Assert.Equal(" queue  first question", rows[1]);
-        Assert.Equal(" queue  second question", rows[2]);
-        Assert.StartsWith("     ›", rows[3]);
+        Assert.Equal("   queue  first question", rows[1]);
+        Assert.Equal("   queue  second question", rows[2]);
+        Assert.StartsWith("       ›", rows[3]);
     }
 
     [Fact]
     public void A_long_queue_is_summed_up()
     {
-        var rows = Draw(Typed(""), new(null, "", "", Queued: ["a", "b", "c", "d", "e"])).Rows.Select(Plain).ToList();
+        var rows = Texts(Draw(Typed(""), new(null, "", "", Queued: ["a", "b", "c", "d", "e"])));
 
-        Assert.Equal(" queue  a", rows[1]);
-        Assert.Equal(" queue  c", rows[3]);
-        Assert.Equal("        and 2 more", rows[4]);
+        Assert.Equal("   queue  a", rows[1]);
+        Assert.Equal("   queue  c", rows[3]);
+        Assert.Equal("          and 2 more", rows[4]);
     }
 
     [Fact]
     public void A_queued_multi_line_question_stays_on_one_row()
     {
-        var rows = Draw(Typed(""), new(null, "", "", Queued: ["line one\nline two"])).Rows.Select(Plain).ToList();
+        var rows = Texts(Draw(Typed(""), new(null, "", "", Queued: ["line one\nline two"])));
 
-        Assert.Equal(" queue  line one line two", rows[1]);
+        Assert.Equal("   queue  line one line two", rows[1]);
     }
 
     [Fact]
     public void A_paste_taller_than_the_window_shows_the_part_being_typed()
     {
         var buffer = Typed(string.Join('\n', Enumerable.Range(1, 40).Select(i => $"line {i}")));
-        var ui = new Ui(new StringWriter(), new Theme(ColorMode.TrueColor, unicode: true), 100);
 
-        var drawn = PromptPanel.Draw(ui, buffer, new(null, "", ""), screenRows: 20);
-        var rows = drawn.Rows.Select(Plain).ToList();
+        var drawn = Draw(buffer, new(null, "", ""), columns: 100, height: 20);
+        var rows = Texts(drawn);
 
         Assert.True(rows.Count <= 20, $"{rows.Count} rows");
         Assert.Contains(rows, r => r.Contains("line 40"));
         Assert.DoesNotContain(rows, r => r.EndsWith("line 1"));
-        Assert.Contains("line 40", rows[drawn.CaretRow]);
+        Assert.Contains("line 40", rows[drawn.Caret!.Value.Row]);
     }
 
     [Fact]
     public void A_menu_of_one_draws()
     {
-        var rows = Draw(Typed("/mo"), new(null, "", "")).Rows.Select(Plain).ToList();
+        var rows = Texts(Draw(Typed("/mo"), new(null, "", "")));
 
         Assert.Contains("/model", rows[1]);
     }
@@ -343,31 +357,22 @@ public class PromptEditorTests
     {
         var buffer = Typed("/");
         for (var i = 0; i < 10; i++) buffer.Apply(Key(ConsoleKey.DownArrow));
-        var ui = new Ui(new StringWriter(), new Theme(ColorMode.TrueColor, unicode: true), 100);
 
-        var rows = PromptPanel.Draw(ui, buffer, new(null, "", ""), screenRows: 8).Rows.Select(Plain).ToList();
+        var rows = Texts(Draw(buffer, new(null, "", ""), columns: 100, height: 11));
 
         Assert.Contains(rows, r => r.Contains(buffer.Menu.Items[10]));
-        Assert.Equal(1 + 3 + 1 + 1 + 1, rows.Count); // rule, three commands, the menu's hint, prompt, footer
+        Assert.Equal(1 + 3 + 1 + 1 + 1 + 1 + 1, rows.Count); // edge, three commands, divider, hint, prompt, footer, padding
     }
 
     [Fact]
     public void Offline_shows_a_red_dot_instead_of_the_model()
     {
-        var row = Draw(Typed(""), new(null, "", "granite 3b", (10, 100), Offline: true)).Rows[^1];
+        var footer = Draw(Typed(""), new(null, "", "granite 3b", (10, 100), Offline: true)).Rows[2];
 
-        Assert.Contains("\e[38;2;240;144;123m●", row, StringComparison.Ordinal);
-        Assert.Contains("not connected", row);
-        Assert.DoesNotContain("granite", row);
-    }
-
-    [Fact]
-    public void The_live_row_goes_above_the_prompt()
-    {
-        var rows = Draw(Typed(""), new(null, "Type now", "starting granite 3b", Live: "Starting the model")).Rows.Select(Plain).ToList();
-
-        Assert.Equal("  live  Starting the model", rows[1]);
-        Assert.Contains("Type now", rows[^1]);
+        Assert.Contains(footer.Spans, s => s.Text == "●" && s.Style.Fg == Tone.Danger);
+        Assert.Contains("not connected", footer.Text);
+        Assert.DoesNotContain("granite", footer.Text);
+        Assert.DoesNotContain("■", footer.Text);
     }
 
     [Fact]

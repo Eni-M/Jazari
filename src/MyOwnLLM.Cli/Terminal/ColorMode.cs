@@ -12,4 +12,11 @@ public static class ColorModeDetector
         if (getEnv("TERM")?.Contains("256") == true) return ColorMode.Ansi256;
         return ColorMode.Ansi16;
     }
+
+    /// <summary>
+    /// Whether the terminal draws the one-eighth blocks used for thin box edges itself (Windows Terminal and VS Code do);
+    /// a classic console font may not have them.
+    /// </summary>
+    public static bool DrawsEdges(Func<string, string?> getEnv) =>
+        !string.IsNullOrEmpty(getEnv("WT_SESSION")) || getEnv("TERM_PROGRAM") == "vscode";
 }

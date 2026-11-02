@@ -39,18 +39,19 @@ public static class Welcome
     }
 
     /// <summary>The servers have answered or given up. One row says so: "ready in 4 s" replaces the version, even with a question typed meanwhile below it.</summary>
-    public static void Opened(Ui ui, ConnectionState state, TimeSpan took, int wordmarkRow, bool measured)
+    public static void Opened(Ui ui, ConnectionState state, TimeSpan took, bool measured)
     {
         if (state == ConnectionState.Available)
         {
-            ui.ReplaceWordmark(wordmarkRow, $"ready in {Math.Max(took.TotalSeconds, 1):0} s");
+            ui.ReplaceWordmark($"ready in {Math.Max(took.TotalSeconds, 1):0} s");
             if (measured) return;
             ui.Metadata("On safe CPU settings. jazari tune measures this PC for the fastest ones.");
             ui.Blank();
             return;
         }
         var (message, cause, fix, then) = Problem(state);
-        ui.Error(message, cause, fix);
+        // The fix is a command to type, shown in a box like code.
+        ui.Error(message, cause, fix, nextIsCommand: true);
         ui.Metadata(then);
         ui.Blank();
     }

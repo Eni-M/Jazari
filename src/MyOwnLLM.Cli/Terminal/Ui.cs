@@ -1,52 +1,84 @@
 namespace MyOwnLLM.Cli.Terminal;
 
-/// <summary>The Jazari terminal components. Every screen is built from these, never styled ad hoc.
-/// All text passed in is treated as untrusted and sanitized here, so no caller can forget.
-/// In a real terminal everything hangs off a gutter of short labels (the time, "copy 1", "why"); piped output stays plain.</summary>
-public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
+/// <summary>
+/// The Jazari terminal components. Every screen is built from these, never styled ad hoc. All text passed in is treated
+/// as untrusted and sanitized here, so no caller can forget. In a real terminal each component becomes a block on the
+/// <see cref="Screen"/>, laid out in the canvas's geometry (a gutter of short labels: the time, "copy 1", "why"); piped
+/// output stays plain text, written as it always was.
+/// </summary>
+public sealed class Ui
 {
-    public Ui(TextWriter output, Theme theme, int width) : this(output, theme, () => width) { }
+    readonly TextWriter _output;
+    readonly IBlockSink? _sink;
+    readonly Theme _theme;
+    readonly Func<int> _width;
+    LiveBlock? _wordmark, _tune;
+    string _wordmarkText = "";
+    (IReadOnlyList<string> Steps, int Done, string Left) _tuneState;
 
-    public const string Name = "J A Z A R I";
-    public const int Gutter = 8;
-    const int KeyColumn = 12;
-    const int Measure = 86; // the design's 720 px text column, in characters
-
-    public Theme Theme => theme;
-    public TextWriter Output => output;
-    public int Width => Math.Max(width(), 20);
-    public bool Live => theme.Mode != ColorMode.None;
-    /// <summary>The columns text gets beside the gutter.</summary>
-    public int Body => Math.Max(Math.Min(Width - Gutter, Measure), 12);
-    int Room => Live ? Body : Width;
-
-    public void Blank() => output.WriteLine();
-
-    /// <summary>
-    /// Several rows as one write. Above the panel each write is a full cursor, draw and panel cycle, and a terminal without
-    /// synchronized output can paint each one separately, so a 30-row block written row by row could flicker.
-    /// </summary>
-    void WriteLines(IEnumerable<string> lines) => output.Write(string.Concat(lines.Select(l => l + output.NewLine)));
-
-    /// <summary>
-    /// Opening the interactive session: name the tab "Jazari" and start on a clean screen (no shell banner or prompt
-    /// above). Only in a real terminal; piped output is left alone.
-    /// </summary>
-    public void TakeOverScreen()
+    /// <summary>Text to a writer: plain when there's no color, otherwise drawn by the writer's shared flow-mode screen.</summary>
+    public Ui(TextWriter output, Theme theme, Func<int> width)
     {
-        if (Live) output.Write("\e]0;Jazari\a\e[H\e[2J\e[3J");
+        _output = output;
+        _theme = theme;
+        _width = width;
+        if (theme.Mode != ColorMode.None) _sink = Screen.For(output, theme, width);
     }
 
-    /// <summary>The right-aligned label beside a row, and the space between it and the text; nothing in plain output.</summary>
-    public string Cell(string? label = null, Tone tone = Tone.Muted) =>
-        Live ? theme.Paint(ConsoleText.Sanitize(label ?? "").PadLeft(Gutter - 2), tone) + "  " : "";
+    public Ui(TextWriter output, Theme theme, int width) : this(output, theme, () => width) { }
+
+    /// <summary>Blocks to a screen (the interactive session) or a buffer.</summary>
+    public Ui(IBlockSink sink, Theme theme, Func<int> width)
+    {
+        _output = TextWriter.Null;
+        _sink = sink;
+        _theme = theme;
+        _width = width;
+    }
+
+    public const string Name = "J A Z A R I";
+    public const int Gutter = Layout.Gutter;
+    const int KeyColumn = 12;
+
+    public Theme Theme => _theme;
+    public TextWriter Output => _output;
+    public IBlockSink? Sink => _sink;
+    public int Width => Math.Max(_width(), 20);
+    /// <summary>Drawn on a real terminal (a screen), not written as plain text.</summary>
+    public bool Live => _sink is not null;
+
+    void Add(Block block) => _sink!.Append(block);
+    void Add(Func<int, IReadOnlyList<Line>> rows) => Add(new LinesBlock(rows));
+
+    public void Blank()
+    {
+        if (Live) Add(new BlankBlock());
+        else _output.WriteLine();
+    }
+
+    /// <summary>Kept for callers that cleared the screen themselves; the session's screen now does it when it starts.</summary>
+    public void TakeOverScreen() { }
+
+    /// <summary>Adds blocks collected elsewhere (what starting the servers had to say).</summary>
+    public void Replay(BlockBuffer buffer)
+    {
+        if (!Live) return;
+        foreach (var block in buffer.Blocks) Add(block);
+    }
+
+    /// <summary>"live  Thinking · 12s" until <see cref="ThinkingIndicator.StopAsync"/>; nothing in plain output.</summary>
+    public ThinkingIndicator Thinking(string label = "Thinking") => Live ? ThinkingIndicator.Start(_sink!, _theme, label: label) : ThinkingIndicator.None;
 
     /// <summary>One row of the conversation: a label in the gutter, text beside it, wrapped lines under the text.</summary>
     public void Row(string? label, string text, Tone tone = Tone.Primary, Tone labelTone = Tone.Muted)
     {
-        var lines = Wrap(ConsoleText.Sanitize(text), Room);
-        WriteLines(lines.Select((line, i) => Cell(i == 0 ? label : null, labelTone) + theme.Paint(line, tone)));
+        var clean = ConsoleText.Sanitize(text);
+        if (!Live) { WriteLines(Wrap(clean, Width).Select(line => _theme.Paint(line, tone))); return; }
+        Add(columns => RowLines(label, labelTone, clean, tone, columns));
     }
+
+    static List<Line> RowLines(string? label, Tone labelTone, string text, Style style, int columns, bool boldLabel = false) =>
+        Wrap(text, Layout.Body(columns)).Select((line, i) => Layout.Row(i == 0 ? label : null, labelTone, boldLabel).Add(line, style).Build()).ToList();
 
     public void Line(string text, Tone tone = Tone.Primary) => Row(null, text, tone);
 
@@ -55,114 +87,208 @@ public sealed class Ui(TextWriter output, Theme theme, Func<int> width)
     {
         if (!Live) return;
         var right = ConsoleText.Sanitize(branch ?? "");
-        var left = $"jazari {theme.Glyph('—')} {ConsoleText.Sanitize(place)}";
-        var room = Width - right.Length - 1;
-        if (left.Length > room) left = left[..Math.Max(room, 0)];
-        WriteLines([theme.Paint(left.PadRight(room + 1) + right, Tone.Muted), Rule(), ""]);
+        var path = ConsoleText.Sanitize(place);
+        var dash = _theme.Glyph('—').ToString();
+        Add(columns =>
+        {
+            var room = columns - 4 - TextWidth.Of(right) - 2;
+            var left = new LineBuilder().Add("  jazari ", Tone.Muted).Add(dash, Tone.Inactive).Add(" " + TextWidth.Fit(path, Math.Max(room - 9, 4)), Tone.Muted);
+            var row = left.PadTo(columns - 2 - TextWidth.Of(right)).Add(right, Tone.Muted).Build();
+            var rule = new string(_theme.Edges ? '▔' : _theme.Glyph('─'), columns);
+            return [row, new Line([new(rule, Tone.Border)])];
+        });
     }
 
-    /// <summary>A thin line edge to edge, like the panel's background. Filling the last column doesn't wrap until the next character, and a line break comes first.</summary>
-    public string Rule() => theme.Paint(new string(theme.Glyph('─'), Width + 1), Tone.Line);
-
+    /// <summary>"jazari  0.3.0" under the header; <see cref="ReplaceWordmark"/> later makes it "jazari  ready in 4 s".</summary>
     public void Wordmark(string version)
     {
-        if (Live) output.WriteLine(LiveWordmark(version));
-        else output.WriteLine($"{theme.Paint(Name, Tone.Primary)}  {theme.Paint(ConsoleText.Sanitize(version), Tone.Muted)}");
+        if (!Live)
+        {
+            _output.WriteLine($"{_theme.Paint(Name, Tone.Primary)}  {_theme.Paint(ConsoleText.Sanitize(version), Tone.Muted)}");
+            return;
+        }
+        _wordmarkText = ConsoleText.Sanitize(version);
+        _wordmark = new LiveBlock(_ => [Layout.Row().Add("jazari", new Style(Tone.Primary, Bold: true)).Add("  " + _wordmarkText, Tone.Muted).Build()]);
+        Add(_wordmark);
     }
 
-    string LiveWordmark(string text) => Cell() + theme.Bold("jazari") + theme.Paint("  " + ConsoleText.Sanitize(text), Tone.Muted);
-
-    /// <summary>Rewrites the wordmark's row wherever the cursor is, and leaves the cursor there: "0.3.0" becomes "ready in 4 s".</summary>
-    public void ReplaceWordmark(int windowRow, string text) => output.Write($"\e7\e[{windowRow + 1};1H\e[2K{LiveWordmark(text)}\e8");
+    /// <summary>"0.3.0" becomes "ready in 4 s", wherever the wordmark is now.</summary>
+    public void ReplaceWordmark(string text)
+    {
+        if (_wordmark is not { } wordmark) return;
+        lock (_sink!.Gate)
+        {
+            _wordmarkText = ConsoleText.Sanitize(text);
+            wordmark.Done();
+        }
+        _sink.Changed();
+    }
 
     public void Label(string text)
     {
         var clean = ConsoleText.Sanitize(text);
-        output.WriteLine(Cell() + theme.Paint(Live ? clean : clean.ToUpperInvariant(), Tone.Muted));
+        if (Live) Add(_ => [Layout.Row().Add(clean, Tone.Muted).Build()]);
+        else _output.WriteLine(_theme.Paint(clean.ToUpperInvariant(), Tone.Muted));
     }
 
     /// <summary>Key/value rows; the key column fits the longest key (at least 12), so values never run into keys.</summary>
     public void Rows(IEnumerable<(string Key, string Value)> rows, int? keyWidth = null)
     {
         var list = rows.Select(r => (Key: ConsoleText.Sanitize(r.Key), Value: ConsoleText.Sanitize(r.Value))).ToList();
-        var column = keyWidth ?? Math.Max(KeyColumn, list.Select(r => r.Key.Length + 2).DefaultIfEmpty(0).Max());
-        WriteLines(list.SelectMany(r => Wrap(r.Value, Room - column).Select((line, i) =>
-            Cell() + theme.Paint(i == 0 ? r.Key.PadRight(column) : new string(' ', column), Tone.Muted) + theme.Paint(line, Tone.Secondary))));
+        var column = keyWidth ?? Math.Max(KeyColumn, list.Select(r => TextWidth.Of(r.Key) + 2).DefaultIfEmpty(0).Max());
+        if (!Live)
+        {
+            WriteLines(list.SelectMany(r => Wrap(r.Value, Width - column).Select((line, i) =>
+                _theme.Paint(i == 0 ? r.Key.PadRight(column) : new string(' ', column), Tone.Muted) + _theme.Paint(line, Tone.Secondary))));
+            return;
+        }
+        Add(columns => list.SelectMany(r => Wrap(r.Value, Layout.Body(columns) - column).Select((line, i) =>
+            Layout.Row().Add(TextWidth.PadRight(i == 0 ? r.Key : "", column), Tone.Muted).Add(line, Tone.Secondary).Build())).ToList());
     }
 
     /// <summary>The key column that fits every key in all of <paramref name="groups"/>, so grouped rows line up.</summary>
     public static int KeyWidth(IEnumerable<IEnumerable<(string Key, string Value)>> groups) =>
-        Math.Max(KeyColumn, groups.SelectMany(g => g).Select(r => r.Key.Length + 2).DefaultIfEmpty(0).Max());
+        Math.Max(KeyColumn, groups.SelectMany(g => g).Select(r => TextWidth.Of(r.Key) + 2).DefaultIfEmpty(0).Max());
 
     public void ToolLines(string label, IEnumerable<string> doneSteps)
     {
-        WriteLines([theme.Paint("  " + ConsoleText.Sanitize(label).ToUpperInvariant(), Tone.Muted),
-            .. doneSteps.Select(step => theme.Paint($"  {theme.Glyph('✓')} {ConsoleText.Sanitize(step)}", Tone.Muted))]);
+        var steps = doneSteps.Select(ConsoleText.Sanitize).ToList();
+        var title = ConsoleText.Sanitize(label).ToUpperInvariant();
+        if (!Live)
+        {
+            WriteLines([_theme.Paint("  " + title, Tone.Muted), .. steps.Select(step => _theme.Paint($"  {_theme.Glyph('✓')} {step}", Tone.Muted))]);
+            return;
+        }
+        Add(_ => [Layout.Row().Add(title, Tone.Muted).Build(), .. steps.Select(step => Layout.Row().Add($"{_theme.Glyph('✓')} {step}", Tone.Muted).Build())]);
     }
 
     public void ActionRequired(string what, string command)
     {
-        var rule = theme.Paint(theme.Glyph('│').ToString(), Tone.Secondary) + " ";
-        WriteLines([rule + "ACTION REQUIRED", rule + theme.Paint(ConsoleText.Sanitize(what) + ":", Tone.Secondary),
-            rule + ConsoleText.Sanitize(command), rule + theme.Paint("[y] Allow once  [n] Deny  [a] Always allow", Tone.Secondary)]);
-    }
-
-    public void Error(string message, string? cause, string? next)
-    {
-        if (Live)
+        var bar = _theme.Glyph('│') + " ";
+        var (cleanWhat, cleanCommand) = (ConsoleText.Sanitize(what), ConsoleText.Sanitize(command));
+        if (!Live)
         {
-            Row(theme.Glyph('✕').ToString(), message, Tone.Primary, Tone.Danger);
-            if (cause is not null) Row("why", cause, Tone.Secondary);
-            if (next is not null) Row("fix", next, Tone.Secondary);
+            var rule = _theme.Paint(_theme.Glyph('│').ToString(), Tone.Secondary) + " ";
+            WriteLines([rule + "ACTION REQUIRED", rule + _theme.Paint(cleanWhat + ":", Tone.Secondary),
+                rule + cleanCommand, rule + _theme.Paint("[y] Allow once  [n] Deny  [a] Always allow", Tone.Secondary)]);
             return;
         }
-        output.WriteLine("ERROR");
-        Line(message);
-        if (cause is not null) Line("Cause: " + cause, Tone.Muted);
-        if (next is not null) Line(next, Tone.Muted);
+        Add(_ =>
+        [
+            Layout.Row().Add(bar, Tone.Secondary).Add("ACTION REQUIRED").Build(),
+            Layout.Row().Add(bar, Tone.Secondary).Add(cleanWhat + ":", Tone.Secondary).Build(),
+            Layout.Row().Add(bar, Tone.Secondary).Add(cleanCommand).Build(),
+            Layout.Row().Add(bar, Tone.Secondary).Add("[y] Allow once  [n] Deny  [a] Always allow", Tone.Secondary).Build(),
+        ]);
+    }
+
+    /// <summary>
+    /// "✕ message", "why cause", "fix next". When <paramref name="nextIsCommand"/>, the fix is a command to type and is
+    /// shown in a box, like code.
+    /// </summary>
+    public void Error(string message, string? cause, string? next, bool nextIsCommand = false)
+    {
+        if (!Live)
+        {
+            _output.WriteLine("ERROR");
+            Line(message);
+            if (cause is not null) Line("Cause: " + cause, Tone.Muted);
+            if (next is not null) Line(next, Tone.Muted);
+            return;
+        }
+        var (cleanMessage, cleanCause, cleanNext) = (ConsoleText.Sanitize(message), cause is null ? null : ConsoleText.Sanitize(cause), next is null ? null : ConsoleText.Sanitize(next));
+        var cross = _theme.Glyph('✕').ToString();
+        Add(columns =>
+        {
+            var lines = RowLines(cross, Tone.Danger, cleanMessage, Tone.Primary, columns, boldLabel: true);
+            if (cleanCause is not null) lines.AddRange(RowLines("why", Tone.Muted, cleanCause, Tone.Secondary, columns));
+            if (cleanNext is null) return lines;
+            if (!nextIsCommand) { lines.AddRange(RowLines("fix", Tone.Muted, cleanNext, Tone.Secondary, columns)); return lines; }
+            var box = Math.Min(TextWidth.Of(cleanNext) + 4, Layout.Body(columns));
+            if (_theme.Edges) lines.Add(Layout.Row().Add(new string('▁', box), Tone.CodeBorder).Build());
+            lines.Add(Layout.Row("fix").Add(TextWidth.PadRight("  " + TextWidth.Fit(cleanNext, box - 4), box), new Style(Tone.Primary, Surface.Code)).Build());
+            if (_theme.Edges) lines.Add(Layout.Row().Add(new string('▔', box), Tone.CodeBorder).Build());
+            return lines;
+        });
     }
 
     /// <summary>The user's turn: "› question", continuation lines indented under it.</summary>
     public void UserMessage(string text)
     {
-        var lines = ConsoleText.Sanitize(text).Split('\n').SelectMany(paragraph => Wrap(paragraph, Live ? Body : Width - 2));
-        WriteLines(lines.Select((line, i) =>
+        var paragraphs = ConsoleText.Sanitize(text).Split('\n');
+        if (!Live)
         {
-            var marker = i == 0 ? theme.Glyph('›').ToString() : null;
-            return Live ? Cell(marker, Tone.Accent) + theme.Paint(line, Tone.Secondary) : $"{marker ?? " "} {line}";
-        }));
+            WriteLines(paragraphs.SelectMany(p => Wrap(p, Width - 2)).Select((line, i) => $"{(i == 0 ? _theme.Glyph('›').ToString() : " ")} {line}"));
+            return;
+        }
+        var marker = _theme.Glyph('›').ToString();
+        Add(columns => paragraphs.SelectMany(p => Wrap(p, Layout.Body(columns)))
+            .Select((line, i) => Layout.Row(i == 0 ? marker : null, Tone.Accent, bold: true).Add(line, Tone.Secondary).Build()).ToList());
     }
 
     public void Metadata(string text, string? label = null)
     {
         if (Live) Row(label, text, Tone.Muted);
-        else output.WriteLine(theme.Paint(ConsoleText.Sanitize(text), Tone.Muted));
+        else _output.WriteLine(_theme.Paint(ConsoleText.Sanitize(text), Tone.Muted));
     }
 
-    /// <summary>One line of a proposed change: a line number or +/− in its own column, on the change's background.</summary>
+    /// <summary>
+    /// One line of a proposed change: a line number or −/+ in its own column, on the change's background. Lines in a row
+    /// share one box.
+    /// </summary>
     public void DiffLine(string marker, string text, Tone tone, Surface? surface = null)
     {
-        var clean = ConsoleText.Sanitize(text);
-        if (!Live) { output.WriteLine($"{marker} {clean}"); return; }
-        var row = theme.Paint($" {marker,3}  {clean}", tone);
-        output.WriteLine(Cell() + theme.Band(surface ?? Surface.Code, row));
+        if (!Live) { _output.WriteLine($"{marker} {ConsoleText.Sanitize(text)}"); return; }
+        lock (_sink!.Gate)
+        {
+            var open = _sink is Screen screen && screen.Blocks.Count > 0 && screen.Blocks[^1] is DiffBlock last ? last
+                : _sink is BlockBuffer buffer && buffer.Blocks.Count > 0 && buffer.Blocks[^1] is DiffBlock buffered ? buffered : null;
+            if (open is null)
+            {
+                open = new DiffBlock(_theme);
+                open.Add(marker, text, tone, surface ?? Surface.Code);
+                Add(open);
+                return;
+            }
+            open.Add(marker, text, tone, surface ?? Surface.Code);
+        }
+        _sink.Changed();
     }
 
     /// <summary>The live "Tuning for this PC" block: what's left, a bar, and each step done, running or waiting. Redraws in place.</summary>
     public void TuneProgress(IReadOnlyList<string> steps, int done, string left, bool redraw)
     {
         if (!Live) return;
-        var dot = theme.Glyph('·');
-        const int bar = 44;
-        var filled = steps.Count == 0 ? bar : bar * done / steps.Count;
-        var title = "\e[2K" + Cell("live", Tone.Accent) + theme.Paint("Tuning for this PC ", Tone.Primary) + theme.Paint($"{dot} {left}", Tone.Muted);
-        var progress = "\e[2K" + Cell() + theme.Paint(new string(theme.Glyph('━'), filled), Tone.Accent) + theme.Paint(new string(theme.Glyph('━'), bar - filled), Tone.Line);
-        var row = steps.Select((step, i) =>
-            i < done ? theme.Paint(theme.Glyph('✓').ToString(), Tone.Secondary) + theme.Paint(" " + ConsoleText.Sanitize(step), Tone.Muted)
-            : i == done ? theme.Paint($"{theme.Glyph('●')} {ConsoleText.Sanitize(step)}", Tone.Primary)
-            : theme.Paint($"{theme.Glyph('○')} {ConsoleText.Sanitize(step)}", Tone.Muted));
-        WriteLines([(redraw ? "\e[3A\r" : "") + title, progress, "\e[2K" + Cell() + string.Join("   ", row)]);
+        lock (_sink!.Gate) _tuneState = (steps.Select(ConsoleText.Sanitize).ToList(), done, ConsoleText.Sanitize(left));
+        if (redraw && _tune is not null) { _sink.Changed(); return; }
+        _tune = new LiveBlock(TuneRows);
+        Add(_tune);
     }
+
+    IReadOnlyList<Line> TuneRows(int columns)
+    {
+        var (steps, done, left) = _tuneState;
+        var dot = _theme.Glyph('·');
+        var bar = Math.Min(Layout.Body(columns), 66);
+        var filled = steps.Count == 0 ? bar : bar * Math.Min(done, steps.Count) / steps.Count;
+        var row = Layout.Row();
+        foreach (var (step, i) in steps.Select((s, i) => (s, i)))
+        {
+            if (i > 0) row.Add("   ");
+            if (i < done) row.Add(_theme.Glyph('✓').ToString(), Tone.Secondary).Add(" " + step, Tone.Muted);
+            else if (i == done) row.Add($"{_theme.Glyph('●')} {step}", Tone.Primary);
+            else row.Add($"{_theme.Glyph('○')} {step}", Tone.Muted);
+        }
+        return
+        [
+            Layout.Row("live", Tone.Accent).Add("Tuning for this PC ", Tone.Primary).Add($"{dot} {left}", Tone.Muted).Build(),
+            Layout.Row().Add(new string(_theme.Glyph('━'), filled), Tone.Accent).Add(new string(_theme.Glyph('━'), bar - filled), Tone.Line).Build(),
+            row.Build(),
+        ];
+    }
+
+    /// <summary>Several rows as one write.</summary>
+    void WriteLines(IEnumerable<string> lines) => _output.Write(string.Concat(lines.Select(l => l + _output.NewLine)));
 
     /// <summary>Word-wraps to <paramref name="max"/> columns (at least 8); words longer than a line are split between characters.</summary>
     public static IReadOnlyList<string> Wrap(string text, int max) => TextWidth.Wrap(text, Math.Max(max, 8));
