@@ -2,7 +2,7 @@
 
 *jah-ZAH-ree* — a lightweight, local coding assistant for ASP.NET Core, C#, .NET, networking, system design and security.
 
-Jazari runs entirely on your own machine: IBM Granite 4.1 3B on llama.cpp, behind a small ASP.NET Core gateway, with a monochrome terminal client. It's named after Ismail al-Jazari, the 12th-century engineer often called the father of robotics.
+Jazari runs entirely on your own machine: IBM Granite 4.0-H Tiny on llama.cpp, behind a small ASP.NET Core gateway, with a monochrome terminal client. It's named after Ismail al-Jazari, the 12th-century engineer often called the father of robotics.
 
 ## Quick start
 

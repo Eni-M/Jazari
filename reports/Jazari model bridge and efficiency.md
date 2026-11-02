@@ -8,7 +8,7 @@
 
 - **`--cache-reuse` is not a no-op.** The launcher's existing `--cache-reuse 256` is valid, and KV shifting works on this model.
 - **Normal prefix reuse applies.** The server keeps the longest common token prefix, as on any dense model. Reuse is not limited to resuming from saved checkpoints.
-- **The checkpoint flags don't matter here.** Tuning `--checkpoint-min-step` and `--ctx-checkpoints` matters only for SWA or recurrent state, so on this model they should sit idle.
+- **The checkpoint flags don't matter here.** Tuning `--checkpoint-min-step` and `--ctx-checkpoints` matters only for SWA or recurrent state, so on this model they should sit idle. **Correction, 2026-11-02:** true for the dense 3B only. Jazari now runs Granite 4.0-H Tiny, a hybrid, where checkpoints are active and large: 55 MiB of Mamba state each, up to 32 per slot. See `reports/Local inference sources for Jazari.md`.
 
 The file's process advice still stands, because prefix stability matters on any model. That covers keeping the prefix byte-stable, putting per-question context after the history, storing assistant replies exactly as streamed, compacting rarely, and showing progress and cache hits. One more consequence of a dense model: the KV cache grows linearly. At f16 it is **80 KiB per token, so 1.25 GiB at the current `-c 16384`** (arithmetic from the config). That matches the design doc's measured working sets of 3.8 GB at 4k context, 4.1 GB at 8k and 4.7 GB at 16k ([design doc](C:/MyOwnLLM/docs/superpowers/specs/2026-10-30-myownllm-design.md)).
 

@@ -109,7 +109,7 @@ RAM isn't the limit; speed is. Writing speed follows memory bandwidth, and one s
 
 - Both got the same three wrong: EF Core raw SQL parameters, a 404 from a minimal API, and whether a record is a value type. Those are facts a law book can supply; style training can't.
 - H-Tiny matches Eni-M's picture of using fewer links per step: a mixture-of-experts model uses a small part of its weights each token.
-- H-Tiny's risks: about twice the RAM (3.94 GiB file). It may not reuse the prompt cache in long conversations the way the 3B does, which could make later turns slow. It failed the earlier fill-in-the-middle test, which matters only for autocomplete.
+- H-Tiny's risks: about twice the RAM (3.94 GiB file). It may not reuse the prompt cache in long conversations the way the 3B does, which could make later turns slow. (Correction, 2026-11-02: it does on llama.cpp build 11982, which shifts the cache on a history cut, 11 s instead of 228 s. See `reports/Local inference sources for Jazari.md`.) It failed the earlier fill-in-the-middle test, which matters only for autocomplete.
 
 ### Asking the model to offer next steps backfired
 
