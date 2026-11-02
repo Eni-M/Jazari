@@ -99,14 +99,17 @@ var startupUi = new Ui(Console.Out, theme, Columns);
 if (cli.Command == "session")
 {
     startupUi.TakeOverScreen();
-    var ui = startupUi;
     var tuning = DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), config?.Model);
     var measured = DeviceTuner.IsMeasured(Tuning.DefaultPath, config?.Model);
     // The panel prompt needs a real console; pipes and some IDE terminals get plain line input instead.
     var piped = Console.IsInputRedirected || Console.IsOutputRedirected;
-    var editor = piped ? null : new PromptEditor(ui, Directory.GetCurrentDirectory);
+    // The panel stays up during answers, so a real console's conversation is drawn through it.
+    var conversation = piped ? null : new ConversationWriter(Console.Out);
+    TextWriter sessionOutput = (TextWriter?)conversation ?? Console.Out;
+    var ui = new Ui(sessionOutput, theme, Columns);
+    var editor = conversation is null ? null : new PromptEditor(ui, conversation, Directory.GetCurrentDirectory);
     // In a real terminal the prompt puts the "› question" row on screen; piped input isn't echoed, so Jazari prints it.
-    var interactive = new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, Columns(), ScreenRows()), directory)
+    var interactive = new Session(gateway, ui, () => new MarkdownStream(sessionOutput, theme, Columns(), ScreenRows()), directory)
     {
         EchoQuestions = piped,
         Tuning = tuning,

@@ -148,6 +148,14 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         void StopThinking() => thinking.StopAsync().GetAwaiter().GetResult();
 
         var renderer = newRenderer();
+        // In a real terminal the text flows at a steady pace instead of in the model's bursts; "Thinking" stays up until it starts.
+        var pacer = ui.Live ? new TextPacer(t => { StopThinking(); renderer.Write(t); }) : null;
+        async Task FinishAsync()
+        {
+            if (pacer is not null) await pacer.DrainAsync();
+            StopThinking();
+            renderer.Complete();
+        }
         var answer = new StringBuilder();
         string? id = null;
         AnswerTimings? timings = null;
@@ -162,22 +170,20 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
                 cutOff |= chunk.CutOff;
                 if (chunk.Error is not null)
                 {
-                    StopThinking();
-                    renderer.Complete();
+                    await FinishAsync();
                     Stamp(renderer, watch);
                     FailOrCut(new GatewayException(chunk.Error, null, null), answer.Length > 0);
                     return;
                 }
                 if (chunk.Content is { } text)
                 {
-                    StopThinking();
                     answer.Append(text);
-                    renderer.Write(text);
+                    if (pacer is null) { StopThinking(); renderer.Write(text); }
+                    else pacer.Add(text);
                 }
                 id = chunk.Id ?? id;
             }
-            StopThinking();
-            renderer.Complete();
+            await FinishAsync();
             Remember(question, answer.ToString());
             _timings = timings ?? _timings;
             _reachable = true;
@@ -194,23 +200,20 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            StopThinking();
-            renderer.Complete();
+            await FinishAsync();
             Stamp(renderer, watch);
             if (answer.Length > 0) Remember(question, answer.ToString());
             ui.Metadata("stopped");
         }
         catch (GatewayException e)
         {
-            StopThinking();
-            renderer.Complete();
+            await FinishAsync();
             Stamp(renderer, watch);
             FailOrCut(e, answer.Length > 0);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            StopThinking();
-            renderer.Complete();
+            await FinishAsync();
             Unexpected(e);
         }
         finally { if (!ui.Live) ui.Blank(); }

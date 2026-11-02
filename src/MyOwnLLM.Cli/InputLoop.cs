@@ -40,6 +40,7 @@ public static class InputLoop
         editor.Panel = session.Panel;
         Welcome.Opening(ui, version, directory);
         var wordmarkRow = Console.CursorTop - Console.WindowTop - 1;
+        editor.Start();
 
         async Task OpenAsync()
         {
@@ -56,29 +57,29 @@ public static class InputLoop
                 state = ConnectionState.GatewayNotRunning;
             }
             session.StartingModel = null;
-            editor.Post(() =>
-            {
-                ui.Output.Write(report);
-                Welcome.Opened(ui, state, clock.Elapsed, wordmarkRow, measured);
-            });
+            ui.Output.Write(report);
+            Welcome.Opened(ui, state, clock.Elapsed, wordmarkRow, measured);
         }
 
-        await LoopAsync(session, ui, editor, updateAvailable, OpenAsync());
+        try { await LoopAsync(session, ui, editor, updateAvailable, OpenAsync()); }
+        finally { await editor.StopAsync(); }
     }
 
     /// <param name="opening">Finishes when the servers are up; a question typed sooner waits for it.</param>
     static async Task LoopAsync(Session session, Ui ui, ILineReader reader, Task<bool>? updateAvailable, Task opening)
     {
-
-        // While an answer streams nobody is reading keys, so Ctrl+C arrives as a console signal: stop the answer.
+        // With the panel prompt, Ctrl+C arrives as a key at any time. Plain input gets it as a console signal.
         CancellationTokenSource? generating = null;
-        ConsoleCancelEventHandler onCancel = (_, e) =>
+        bool StopAnswer()
         {
-            if (generating is not { } current) return;
-            e.Cancel = true;
+            if (generating is not { } current) return false;
             try { current.Cancel(); }
             catch (ObjectDisposedException) { } // the answer finished at that very moment
-        };
+            return true;
+        }
+        var editor = reader as PromptEditor;
+        if (editor is not null) editor.Interrupt = StopAnswer;
+        ConsoleCancelEventHandler onCancel = (_, e) => e.Cancel = StopAnswer();
         Console.CancelKeyPress += onCancel;
         try
         {
@@ -107,12 +108,14 @@ public static class InputLoop
                 await opening;
 
                 generating = new CancellationTokenSource();
+                if (editor is not null) editor.Busy = true;
                 try { await session.HandleAsync(text, generating.Token); }
                 catch (Exception e) when (e is not OperationCanceledException) { session.Unexpected(e); }
                 finally
                 {
                     var finished = generating;
                     generating = null; // first, so a Ctrl+C from now on finds nothing to cancel
+                    if (editor is not null) editor.Busy = false;
                     finished.Dispose();
                 }
             }

@@ -10,7 +10,17 @@ namespace MyOwnLLM.Cli.Terminal;
 /// <param name="Meter">Context used of the total, in tokens.</param>
 /// <param name="Offline">The gateway didn't answer: a red dot instead of the status.</param>
 /// <param name="Live">A row that replaces itself above the prompt until it's gone.</param>
-public sealed record PanelInfo(string? Chip, string Hint, string Status, (int Used, int Total)? Meter = null, bool Offline = false, string? Live = null);
+/// <param name="Queued">Questions sent during an answer, waiting their turn.</param>
+public sealed record PanelInfo(string? Chip, string Hint, string Status, (int Used, int Total)? Meter = null, bool Offline = false, string? Live = null, QueueRows? Queued = null);
+
+/// <summary>The waiting questions, compared by what they say, so the panel only redraws when they change.</summary>
+public sealed class QueueRows : List<string>
+{
+    public QueueRows() { }
+    public QueueRows(IEnumerable<string> rows) : base(rows) { }
+    public override bool Equals(object? other) => other is QueueRows rows && this.SequenceEqual(rows);
+    public override int GetHashCode() => Count;
+}
 
 public enum KeyResult { Editing, Submit, Cancel }
 
@@ -217,14 +227,45 @@ public static class PromptPanel
         if (info.Live is { } live) rows.Add(Band(theme, ui.Cell("live", Tone.Accent) + theme.Paint(ConsoleText.Sanitize(live), Tone.Secondary)));
         var open = buffer.Menu.Items.Count > 0;
         if (open) rows.AddRange(MenuRows(ui, buffer, screenRows));
+        if (info.Queued is { Count: > 0 } queued) rows.AddRange(QueueRowsFor(ui, queued));
 
         var room = Math.Max(ui.Width - Ui.Gutter, 8);
         var (lines, caretRow, caretColumn) = Layout(buffer.Text, buffer.Caret, room);
+        // A paste taller than the window: show the part around the caret, and keep the rest of the panel on screen.
+        var fit = Math.Max(screenRows - rows.Count - 1, 1);
+        var start = Math.Clamp(caretRow - fit + 1, 0, Math.Max(lines.Count - fit, 0));
         var first = rows.Count;
         var marker = ui.Cell(theme.Glyph('›').ToString(), info.Offline ? Tone.Muted : Tone.Accent);
-        for (var i = 0; i < lines.Count; i++) rows.Add(Band(theme, (i == 0 ? marker : ui.Cell()) + theme.Paint(lines[i], info.Offline ? Tone.Muted : Tone.Primary)));
+        foreach (var (line, i) in lines.Select((line, i) => (line, i)).Skip(start).Take(fit))
+            rows.Add(Band(theme, (i == start ? marker : ui.Cell()) + theme.Paint(line, info.Offline ? Tone.Muted : Tone.Primary)));
         rows.Add(Footer(ui, info, open));
-        return new(rows, first + caretRow, Ui.Gutter + caretColumn);
+        return new(rows, first + caretRow - start, Ui.Gutter + caretColumn);
+    }
+
+    /// <summary>The rows of a frame that aren't already on screen: all of them when it's new or has moved, otherwise only those that changed.</summary>
+    public static string Frame(IReadOnlyList<string>? shown, int shownTop, IReadOnlyList<string> rows, int top)
+    {
+        var whole = shown is null || shownTop != top || shown.Count != rows.Count;
+        var frame = new StringBuilder();
+        for (var i = 0; i < rows.Count; i++)
+            if (whole || shown![i] != rows[i]) frame.Append(Go(top + i)).Append(rows[i]);
+        return frame.ToString();
+    }
+
+    public static string Go(int row, int column = 0) => $"\e[{row + 1};{column + 1}H";
+
+    const int QueueShown = 3;
+
+    static IEnumerable<string> QueueRowsFor(Ui ui, QueueRows queued)
+    {
+        var theme = ui.Theme;
+        var room = Math.Max(ui.Width - Ui.Gutter, 8);
+        foreach (var question in queued.Take(QueueShown))
+        {
+            var text = ConsoleText.Sanitize(question).Replace('\n', ' ');
+            yield return Band(theme, ui.Cell("queue") + theme.Paint(text.Length > room ? text[..(room - 3)] + "..." : text, Tone.Secondary));
+        }
+        if (queued.Count > QueueShown) yield return Band(theme, ui.Cell() + theme.Paint($"and {queued.Count - QueueShown} more", Tone.Muted));
     }
 
     static string Band(Theme theme, string row) => theme.Band(Surface.Panel, row);
@@ -345,31 +386,70 @@ public static class PromptPanel
         : (n / 1000).ToString(CultureInfo.InvariantCulture) + "k";
 }
 
-/// <summary>The prompt on a real console: reads keys, redraws the panel in place, and keeps history between sessions.</summary>
+/// <summary>
+/// What the conversation writes to. Everything goes through one place, because the panel stays on screen while an
+/// answer streams and the two can't be drawn over each other.
+/// </summary>
+public sealed class ConversationWriter(TextWriter inner) : TextWriter
+{
+    public TextWriter Inner => inner;
+    /// <summary>Set while the panel is up: it draws the text above the panel. Otherwise text goes straight through.</summary>
+    public Action<string>? Sink { get; set; }
+    public override Encoding Encoding => inner.Encoding;
+    public override void Write(char value) => Write(value.ToString());
+    public override void Write(char[] buffer, int index, int count) => Write(new string(buffer, index, count));
+    public override void Write(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        if (Sink is { } sink) sink(value);
+        else inner.Write(value);
+    }
+    public override void WriteLine() => Write(NewLine);
+    public override void WriteLine(string? value) => Write(value + NewLine);
+}
+
+/// <summary>
+/// The prompt on a real console. The panel stays at the bottom of the window from start to exit: keys are read the whole
+/// time, so the user can type while an answer streams, and whatever they send meanwhile waits in a visible queue.
+/// Only rows that changed are redrawn, inside a synchronized update, so typing doesn't flicker.
+/// </summary>
 public sealed class PromptEditor : ILineReader
 {
     readonly Ui _ui;
+    readonly ConversationWriter _conversation;
+    readonly TextWriter _out;
     readonly PromptBuffer _buffer;
     readonly string _historyFile;
-    readonly Lock _gate = new();
-    readonly Queue<Action> _above = new();
-    bool _reading;
-    bool _nothingPrinted; // the last prompt left nothing behind, so the next needs no blank row above it
-    int _conversationRow; // the window row the conversation carries on from, once the panel is gone
+    readonly object _gate = new();
+    readonly List<(bool Ok, string? Text)> _queue = [];
+    readonly SemaphoreSlim _ready = new(0);
+    Task? _pump;
+    bool _running;
+    bool _treatedControlC;
+    Exception? _failure;
+    int _conversationRow, _conversationColumn; // where the conversation carries on, in window rows
+    List<string>? _drawn;
+    int _drawnTop, _drawnHeight, _drawnWidth;
     PanelInfo? _drawnWith;
-    int _drawnWidth, _drawnHeight;
+    string? _question; // the panel is asking yes or no
+    bool _answer;
+    ManualResetEventSlim? _answered;
 
     /// <summary>What the panel shows; read again while waiting for keys, so a server coming up shows without a key press.</summary>
     public Func<PanelInfo> Panel { get; set; } = () => new(null, "", "");
+    /// <summary>Ctrl+C: stops what's running, returning true. False means nothing was, and it counts toward quitting.</summary>
+    public Func<bool>? Interrupt { get; set; }
+    /// <summary>An answer or command is running, so Enter queues.</summary>
+    public bool Busy { get; set; }
 
-    public PromptEditor(Ui ui, Func<string> directory, string? historyFile = null)
+    public PromptEditor(Ui ui, ConversationWriter conversation, Func<string> directory, string? historyFile = null)
     {
         _ui = ui;
+        _conversation = conversation;
+        _out = conversation.Inner;
         _historyFile = historyFile ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "history");
         _buffer = new PromptBuffer(directory, LoadHistory(_historyFile));
     }
-
-    static int WindowRow => Console.CursorTop - Console.WindowTop;
 
     /// <summary>Base64, one entry a line: a typed line break can't split an entry.</summary>
     static IEnumerable<string> LoadHistory(string path)
@@ -396,141 +476,240 @@ public sealed class PromptEditor : ILineReader
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // history is a convenience
     }
 
-    /// <summary>Writes above the panel, whether or not a prompt is open: from a background task while the user types, say.</summary>
-    public void Post(Action write)
+    /// <summary>Puts the panel on screen and starts reading keys. From here on, the conversation draws above the panel.</summary>
+    public void Start()
     {
         lock (_gate)
         {
-            if (_reading) { _above.Enqueue(write); return; }
+            if (_running) return;
+            _running = true;
+            _treatedControlC = Console.TreatControlCAsInput;
+            Console.TreatControlCAsInput = true;
+            ReadCursor();
+            _conversation.Sink = WriteAbove;
+            Render();
         }
-        write();
+        _pump = Task.Run(PumpAsync);
     }
 
+    /// <summary>Takes the panel away and leaves the cursor under the conversation.</summary>
+    public async Task StopAsync()
+    {
+        lock (_gate) _running = false;
+        if (_pump is { } pump) await pump;
+        lock (_gate)
+        {
+            _conversation.Sink = null;
+            _out.Write(Sync(Go(BelowConversation()) + "\e[J" + Go(_conversationRow, _conversationColumn) + "\e[?25h"));
+            _drawn = null;
+            Console.TreatControlCAsInput = _treatedControlC;
+        }
+    }
+
+    /// <summary>The next thing the user sent: in the order sent, and right away if they sent it during an answer.</summary>
     public async Task<(bool Ok, string? Text)> ReadAsync()
     {
-        if (!_nothingPrinted) _ui.Blank();
-        _nothingPrinted = false;
-        _conversationRow = WindowRow;
-        var treated = Console.TreatControlCAsInput;
-        Console.TreatControlCAsInput = true;
-        lock (_gate) _reading = true;
+        Start();
+        while (true)
+        {
+            await _ready.WaitAsync();
+            (bool Ok, string? Text) next;
+            lock (_gate)
+            {
+                if (_failure is { } failure) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
+                if (_queue.Count == 0) continue; // Ctrl+C cleared it
+                next = _queue[0];
+                _queue.RemoveAt(0);
+                Render();
+            }
+            if (next is (true, { Length: > 0 } text))
+            {
+                _ui.Blank();
+                _ui.UserMessage(text);
+            }
+            return next;
+        }
+    }
+
+    async Task PumpAsync()
+    {
         try
         {
-            Render();
             while (true)
             {
-                DrainAbove();
+                lock (_gate) { if (!_running) return; }
                 if (!Console.KeyAvailable)
                 {
-                    if (Panel() != _drawnWith || _ui.Width != _drawnWidth || Console.WindowHeight != _drawnHeight) Render();
+                    lock (_gate) { if (Changed()) Render(); }
                     await Task.Delay(25);
                     continue;
                 }
-
                 var key = Console.ReadKey(intercept: true);
-                var before = _buffer.Text;
-                var result = _buffer.Apply(key, key.Key == ConsoleKey.Enter && Console.KeyAvailable);
-                if (result == KeyResult.Editing)
+                var more = Console.KeyAvailable; // a paste draws once, at its end
+                lock (_gate)
                 {
-                    if (!Console.KeyAvailable) Render(); // a paste draws once, at its end
-                    continue;
+                    if (_question is not null) AnswerQuestion(key);
+                    else Apply(key, more);
+                    if (!more) Render();
                 }
-
-                Erase();
-                if (result == KeyResult.Cancel)
-                {
-                    _buffer.Reset();
-                    _nothingPrinted = before.Length > 0;
-                    return (false, before);
-                }
-                var text = _buffer.Take();
-                if (text.Trim().Length > 0)
-                {
-                    Remember(text);
-                    _ui.UserMessage(text);
-                }
-                else _nothingPrinted = true;
-                return (true, text);
             }
         }
-        finally
+        catch (Exception e)
         {
-            lock (_gate) _reading = false;
-            Console.TreatControlCAsInput = treated;
-            DrainAbove(draw: false);
+            lock (_gate) _failure = e;
+            _ready.Release();
         }
     }
 
-    void DrainAbove(bool draw = true)
+    void Apply(ConsoleKeyInfo key, bool more)
     {
-        while (true)
+        var typed = _buffer.Text;
+        switch (_buffer.Apply(key, key.Key == ConsoleKey.Enter && more))
         {
-            Action? write;
-            lock (_gate)
-            {
-                if (!_above.TryDequeue(out write)) return;
-            }
-            Erase();
-            write();
-            _conversationRow = WindowRow;
-            if (draw) Render();
+            case KeyResult.Cancel:
+                if (Interrupt?.Invoke() == true) { _queue.Clear(); break; } // stopping includes what was lined up behind it
+                _buffer.Reset();
+                Send(false, typed);
+                break;
+            case KeyResult.Submit:
+                var text = _buffer.Take();
+                if (text.Trim().Length == 0) break;
+                Remember(text);
+                Send(true, text);
+                break;
         }
+    }
+
+    void Send(bool ok, string text)
+    {
+        _queue.Add((ok, text));
+        _ready.Release();
+    }
+
+    bool Changed() => CurrentInfo() != _drawnWith || _ui.Width != _drawnWidth || Console.WindowHeight != _drawnHeight;
+
+    PanelInfo CurrentInfo()
+    {
+        var info = Panel();
+        var dot = _ui.Theme.Glyph('·');
+        var queued = _queue.Where(q => q.Ok).Select(q => q.Text ?? "").ToList();
+        // The record's equality would see a new list as a change, so an empty queue stays null.
+        return info with { Queued = queued.Count > 0 ? new QueueRows(queued) : null, Hint = Busy ? $"Enter queues {dot} Ctrl+C stops" : info.Hint };
     }
 
     void Render()
     {
-        var info = Panel();
-        var drawn = PromptPanel.Draw(_ui, _buffer, info, Console.WindowHeight);
-        Show(drawn.Rows, drawn.CaretRow, drawn.CaretColumn);
-        (_drawnWith, _drawnWidth, _drawnHeight) = (info, _ui.Width, Console.WindowHeight);
+        var info = CurrentInfo();
+        var height = Console.WindowHeight;
+        if (_question is { } question)
+        {
+            var footer = PromptPanel.Draw(_ui, new PromptBuffer(() => ""), info with { Hint = "/undo puts it back" }, height).Rows[^1];
+            Show([_ui.Rule(), QuestionRow(question), footer], 1, 0);
+        }
+        else
+        {
+            var drawn = PromptPanel.Draw(_ui, _buffer, info, height);
+            Show(drawn.Rows, drawn.CaretRow, drawn.CaretColumn);
+        }
+        (_drawnWith, _drawnWidth, _drawnHeight) = (info, _ui.Width, height);
     }
 
-    static string Go(int row, int column = 0) => $"\e[{row + 1};{column + 1}H";
+    static string Go(int row, int column = 0) => PromptPanel.Go(row, column);
+    /// <summary>All of it reaches the screen at once, where the terminal supports that, so a redraw never shows half done.</summary>
+    static string Sync(string text) => "\e[?2026h" + text + "\e[?2026l";
+    /// <summary>The first free row: a half-written row still belongs to the conversation.</summary>
+    int BelowConversation() => _conversationColumn > 0 ? _conversationRow + 1 : _conversationRow;
 
-    /// <summary>Draws the panel at the bottom of the window, whatever was drawn before.</summary>
+    void ReadCursor()
+    {
+        var (column, top) = Console.GetCursorPosition();
+        (_conversationRow, _conversationColumn) = (Math.Max(top - Console.WindowTop, 0), column);
+    }
+
+    /// <summary>Draws the panel at the bottom of the window, writing only the rows that changed.</summary>
     void Show(List<string> rows, int caretRow, int caretColumn)
     {
         var height = Console.WindowHeight;
         _conversationRow = Math.Min(_conversationRow, height - 1); // the window may have shrunk
-        var (scroll, top) = PromptPanel.Place(_conversationRow, rows.Count, height);
+        var (scroll, top) = PromptPanel.Place(BelowConversation(), rows.Count, height);
         var screen = new StringBuilder("\e[?25l");
-        screen.Append(Go(_conversationRow)).Append("\e[J");
+        if (_drawn is not null && (scroll > 0 || top != _drawnTop || rows.Count != _drawn.Count))
+        {
+            screen.Append(Go(BelowConversation())).Append("\e[J");
+            _drawn = null;
+        }
         if (scroll > 0)
         {
+            // Real scrolling, so what leaves the window lands in the terminal's scrollback.
             screen.Append(Go(height - 1)).Append('\n', scroll);
             _conversationRow -= scroll;
         }
-        screen.Append(Go(top)).AppendJoin("\r\n", rows);
+        screen.Append(PromptPanel.Frame(_drawn, _drawnTop, rows, top));
         screen.Append(Go(top + caretRow, caretColumn)).Append("\e[?25h");
-        _ui.Output.Write(screen);
+        _out.Write(Sync(screen.ToString()));
+        (_drawn, _drawnTop) = (rows, top);
     }
 
-    /// <summary>Takes the panel off the screen, leaving the cursor where the conversation carries on.</summary>
-    void Erase() => _ui.Output.Write(Go(_conversationRow) + "\e[J");
+    /// <summary>
+    /// Conversation text. It goes where the conversation left off, and the panel is only taken down when a new line would
+    /// reach it; then the conversation scrolls up and the panel comes back below it.
+    /// </summary>
+    void WriteAbove(string text)
+    {
+        lock (_gate)
+        {
+            var reaches = _drawn is not null && _conversationRow + text.Count(c => c == '\n') + 1 >= _drawnTop;
+            var screen = new StringBuilder("\e[?25l");
+            if (reaches)
+            {
+                screen.Append(Go(BelowConversation())).Append("\e[J");
+                _drawn = null;
+            }
+            screen.Append(Go(_conversationRow, _conversationColumn)).Append(text);
+            _out.Write("\e[?2026h" + screen);
+            ReadCursor();
+            if (_drawn is null) Render();
+            else if (_question is null)
+            {
+                var drawn = PromptPanel.Draw(_ui, _buffer, CurrentInfo(), Console.WindowHeight);
+                _out.Write(Go(_drawnTop + drawn.CaretRow, drawn.CaretColumn) + "\e[?25h");
+            }
+            else _out.Write(Go(_drawnTop + 1) + "\e[?25h");
+            _out.Write("\e[?2026l");
+        }
+    }
+
+    string QuestionRow(string question)
+    {
+        var theme = _ui.Theme;
+        var row = _ui.Cell("?", Tone.Accent) + theme.Paint(ConsoleText.Sanitize(question) + "   ", Tone.Primary)
+            + theme.On(Surface.Accent, theme.Paint(" y  apply ", Tone.Ink)) + "  " + theme.On(Surface.Selected, theme.Paint(" n  skip ", Tone.Secondary));
+        return theme.Band(Surface.Panel, row);
+    }
+
+    void AnswerQuestion(ConsoleKeyInfo key)
+    {
+        if (key.Key is not (ConsoleKey.Y or ConsoleKey.N or ConsoleKey.Escape) && !(key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))) return;
+        _answer = key.Key == ConsoleKey.Y;
+        _question = null;
+        _answered?.Set();
+    }
 
     /// <summary>The panel asking a yes/no question ("? Apply this change?  y apply  n skip"). Anything but y is no.</summary>
     public bool Ask(string question)
     {
-        var theme = _ui.Theme;
-        var info = Panel() with { Hint = "/undo puts it back" };
-        var row = _ui.Cell("?", Tone.Accent) + theme.Paint(ConsoleText.Sanitize(question) + "   ", Tone.Primary)
-            + theme.On(Surface.Accent, theme.Paint(" y  apply ", Tone.Ink)) + "  " + theme.On(Surface.Selected, theme.Paint(" n  skip ", Tone.Secondary));
-        var drawn = PromptPanel.Draw(_ui, new PromptBuffer(() => ""), info, Console.WindowHeight);
-        _conversationRow = WindowRow;
-        Show([_ui.Rule(), theme.Band(Surface.Panel, row), drawn.Rows[^1]], 1, 0);
-
-        var treated = Console.TreatControlCAsInput;
-        Console.TreatControlCAsInput = true;
-        try
+        Start();
+        using var answered = new ManualResetEventSlim();
+        lock (_gate)
         {
-            while (true)
-            {
-                var key = Console.ReadKey(intercept: true);
-                if (key.Key is not (ConsoleKey.Y or ConsoleKey.N or ConsoleKey.Escape) && !(key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))) continue;
-                Erase();
-                return key.Key == ConsoleKey.Y;
-            }
+            (_question, _answered) = (question, answered);
+            Render();
         }
-        finally { Console.TreatControlCAsInput = treated; }
+        answered.Wait();
+        lock (_gate)
+        {
+            _answered = null;
+            return _answer;
+        }
     }
 }

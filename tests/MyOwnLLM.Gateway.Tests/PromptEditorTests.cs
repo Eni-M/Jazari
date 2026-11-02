@@ -268,6 +268,69 @@ public class PromptEditorTests
     }
 
     [Fact]
+    public void A_frame_writes_only_the_rows_that_changed()
+    {
+        var frame = PromptPanel.Frame(["rule", "› he", "footer"], 10, ["rule", "› hello", "footer"], 10);
+
+        Assert.Equal("\e[12;1H› hello", frame);
+    }
+
+    [Fact]
+    public void A_frame_with_nothing_changed_writes_nothing() =>
+        Assert.Equal("", PromptPanel.Frame(["a", "b"], 10, ["a", "b"], 10));
+
+    [Fact]
+    public void A_first_frame_writes_every_row() =>
+        Assert.Equal("\e[11;1Ha\e[12;1Hb", PromptPanel.Frame(null, 0, ["a", "b"], 10));
+
+    [Fact]
+    public void A_frame_that_moved_writes_every_row_from_where_it_starts() =>
+        Assert.Equal("\e[10;1Ha\e[11;1Hb\e[12;1Hc", PromptPanel.Frame(["a", "b"], 10, ["a", "b", "c"], 9));
+
+    [Fact]
+    public void Queued_questions_show_above_the_prompt()
+    {
+        var rows = Draw(Typed(""), new(null, "hint", "status", Queued: ["first question", "second question"])).Rows.Select(Plain).ToList();
+
+        Assert.Equal(" queue  first question", rows[1]);
+        Assert.Equal(" queue  second question", rows[2]);
+        Assert.StartsWith("     ›", rows[3]);
+    }
+
+    [Fact]
+    public void A_long_queue_is_summed_up()
+    {
+        var rows = Draw(Typed(""), new(null, "", "", Queued: ["a", "b", "c", "d", "e"])).Rows.Select(Plain).ToList();
+
+        Assert.Equal(" queue  a", rows[1]);
+        Assert.Equal(" queue  c", rows[3]);
+        Assert.Equal("        and 2 more", rows[4]);
+    }
+
+    [Fact]
+    public void A_queued_multi_line_question_stays_on_one_row()
+    {
+        var rows = Draw(Typed(""), new(null, "", "", Queued: ["line one\nline two"])).Rows.Select(Plain).ToList();
+
+        Assert.Equal(" queue  line one line two", rows[1]);
+    }
+
+    [Fact]
+    public void A_paste_taller_than_the_window_shows_the_part_being_typed()
+    {
+        var buffer = Typed(string.Join('\n', Enumerable.Range(1, 40).Select(i => $"line {i}")));
+        var ui = new Ui(new StringWriter(), new Theme(ColorMode.TrueColor, unicode: true), 100);
+
+        var drawn = PromptPanel.Draw(ui, buffer, new(null, "", ""), screenRows: 20);
+        var rows = drawn.Rows.Select(Plain).ToList();
+
+        Assert.True(rows.Count <= 20, $"{rows.Count} rows");
+        Assert.Contains(rows, r => r.Contains("line 40"));
+        Assert.DoesNotContain(rows, r => r.EndsWith("line 1"));
+        Assert.Contains("line 40", rows[drawn.CaretRow]);
+    }
+
+    [Fact]
     public void A_menu_of_one_draws()
     {
         var rows = Draw(Typed("/mo"), new(null, "", "")).Rows.Select(Plain).ToList();

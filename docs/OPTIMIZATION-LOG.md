@@ -244,3 +244,7 @@ The panel now sits at the bottom of the window. It's drawn at a fixed position w
 ## Model chosen by the test set (2026-11-02)
 
 `eval/` runs 45 C#/.NET questions plus `/read`, `/edit`, `/review` and a conversation against any model. Granite 4.0-H Tiny on the CPU won under the agreed limits: 37/45, typically 8 s an answer, 47 s for the first answer after `/read`, 12 s for a follow-up. Qwen3 4B scored higher, 41/45, but missed the limits, at 23 s typically and 153 s after `/read`. Compare them again once the law book exists. CPU threads are now capped at half: on the T480 that wrote faster than all 8. Full results: `docs/superpowers/specs/2026-11-02-model-choice-results.md`.
+
+## Interface: a panel that stays (2026-11-02)
+
+The panel stays at the bottom from start to exit. Keys are read the whole time, conversation text is drawn above the panel, and only rows that changed are redrawn, so typing doesn't flicker. Questions sent during an answer wait in a visible queue. Answers flow at a steady pace through `TextPacer`, after holding the first words for up to 1.5 s. Ctrl+C stops the answer and drops the queue.
