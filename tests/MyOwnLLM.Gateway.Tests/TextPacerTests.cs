@@ -61,6 +61,43 @@ public class TextPacerTests
     }
 
     [Fact]
+    public async Task Pieces_end_at_a_space_when_one_is_near()
+    {
+        var pieces = new List<string>();
+        var pacer = new TextPacer(pieces.Add, tick: Tick, holdChars: 1, hold: Tick);
+
+        pacer.Add(string.Concat(Enumerable.Repeat("word ", 60)));
+        await pacer.DrainAsync();
+
+        Assert.All(pieces, p => Assert.EndsWith(" ", p));
+    }
+
+    [Fact]
+    public async Task The_first_words_wait_only_a_moment_by_default()
+    {
+        var shown = new StringBuilder();
+        var pacer = new TextPacer(t => { lock (shown) shown.Append(t); }, tick: Tick);
+
+        pacer.Add("Hi");
+        await Task.Delay(1000);
+
+        lock (shown) Assert.Equal("Hi", shown.ToString());
+        await pacer.DrainAsync();
+    }
+
+    [Fact]
+    public async Task Discarding_drops_what_wasnt_shown_and_says_how_much()
+    {
+        var shown = new StringBuilder();
+        var pacer = new TextPacer(t => { lock (shown) shown.Append(t); }, tick: Tick, holdChars: 100, hold: TimeSpan.FromMinutes(1));
+
+        pacer.Add("not shown yet");
+
+        Assert.Equal(13, await pacer.DiscardAsync());
+        Assert.Equal("", shown.ToString());
+    }
+
+    [Fact]
     public async Task Draining_with_nothing_added_finishes()
     {
         var pacer = new TextPacer(_ => throw new InvalidOperationException("nothing to show"), tick: Tick);
