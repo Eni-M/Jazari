@@ -1,6 +1,6 @@
 # Starts llama-server with the settings measured for this laptop (see docs/superpowers/specs/2026-10-30-myownllm-design.md).
 param(
-    [string]$ModelPath = "$PSScriptRoot\..\spike\models\granite-4.1-3b-Q4_K_M.gguf",
+    [string]$ModelPath = "$PSScriptRoot\..\spike\models\granite-4.0-h-tiny-Q4_K_M.gguf",
     [int]$Port = 8080
 )
 

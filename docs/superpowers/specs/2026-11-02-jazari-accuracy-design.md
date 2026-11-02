@@ -169,6 +169,18 @@ Each phase ends with a score or a working feature, and can stop there.
 - **Pasted errors:** a pasted stack trace is offered as `/fix`.
 - Parsing and reading in code is deliberate: it's exact, costs no tokens to decide, and works on a weak model.
 
+### 3b. Interface fixes (Eni-M, 2026-11-02, next up)
+
+Eni-M: the interface is "meh"; "everytime I type, the thing glitches/refreshes"; "when I give it a question, the typing bar disappears"; "there is no queue message"; and it'd be "cool to wait longer (meanwhile the output is being made) then shown typing fast and smooth". Canvas check first, with Eni-M looking at real screens.
+
+- No flicker: redraw only what changed, inside a synchronized update, never erase and rewrite the panel per key.
+- The panel stays visible while an answer is written, and the user can keep typing. Questions typed meanwhile queue, with a visible queue message, and are sent in order.
+- Smooth text: tokens are held briefly, then shown at a fast steady pace. The hold has to stay short at 5-10 tok/s, or it adds to the wait.
+
+### 3c. Freeing GPU memory at tune (Eni-M, 2026-11-02)
+
+Eni-M asked for tune to close background GPU hogs. Claude's call: tune shows what's using GPU memory and how much would be freed, and asks. It never closes anything itself, because a browser or video editor may hold unsaved work. This only matters on setups that use a GPU; today's winner runs on the CPU.
+
 ### 4. Law book
 
 - Source: Microsoft's public `dotnet/docs`, `dotnet/AspNetCore.Docs` and `dotnet/EntityFramework.Docs` repos, pinned to a commit. Confirm the repo names and licences before shipping.
@@ -176,6 +188,18 @@ Each phase ends with a score or a working feature, and can stop there.
 - For each question, search; if a passage matches well enough, send at most about 300 tokens of the best passages inside the question. About 8 s of reading on CPU, less with the MX150.
 - Show a `source` row in the gutter naming the doc, so answers can be checked. If nothing matches, send nothing.
 - Installed by the updater; keep the download small. Keep it only if the score rises.
+
+### 4b. Looking things up on the web (Eni-M, 2026-11-02)
+
+Eni-M: "if I'm asking something the book doesn't have, the model searches for it, answers me, and adds that information on the book."
+
+Claude's design:
+- It uses only the search text and trusted documentation sites to start: Microsoft Learn and the official .NET docs. Jazari's code does the fetching, not the model.
+- The law book stores the page's own text with its address and date, never the model's summary, so a wrong answer can't poison the book.
+- Web text is data, never instructions, so a page can't tell Jazari to do anything.
+- Private code stays private. Only a short question goes out, and never text from `/read`, `/fix` or the user's files; the user sees what's sent.
+- It's opt-in, and offline stays the default promise. The system prompt's "you can't reach the internet" changes with it.
+- It runs up front or between answers, as fetching and re-reading add time.
 
 ### 5. Read-only project tools (gated)
 

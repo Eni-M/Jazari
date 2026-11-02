@@ -87,12 +87,12 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
     public string ModelName => _info?.Model ?? "unknown";
 
-    /// <summary>"granite 3b" from "granite-4.1-3b-Q4_K_M.gguf"; "the model" when the name doesn't look like that.</summary>
+    /// <summary>"granite tiny" from "granite-4.0-h-tiny-Q4_K_M.gguf"; "the model" when the name doesn't look like that.</summary>
     public static string ModelFromFile(string? file) =>
         ModelFile().Match(Path.GetFileName(file ?? "")) is { Success: true } m ? $"{m.Groups[1].Value} {m.Groups[2].Value}".ToLowerInvariant() : "the model";
 
     [System.Text.RegularExpressions.GeneratedRegex(@"^([A-Za-z]+)-[\d.]+-(?:h-)?([^-]+)-")] private static partial System.Text.RegularExpressions.Regex ModelFile();
-    [System.Text.RegularExpressions.GeneratedRegex(@"\s*\b\d+\.\d+\b")] private static partial System.Text.RegularExpressions.Regex ModelVersion();
+    [System.Text.RegularExpressions.GeneratedRegex(@"\s*\b\d+\.\d+(-H)?\b")] private static partial System.Text.RegularExpressions.Regex ModelVersion();
 
     /// <summary>What the panel around the prompt shows right now.</summary>
     public PanelInfo Panel()
