@@ -39,8 +39,26 @@ public sealed partial record Tuning(
     [
         "-m", model, "-dev", Device, "-ngl", GpuLayers.ToString(), "-t", Threads.ToString(), "--poll", "0",
         "-fa", FlashAttention ? "on" : "off", "-c", ContextTokens.ToString(), "--cache-ram", CacheRamMiB.ToString(),
-        "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", "8080",
+        "-np", "1", .. CacheArgs(model), "--no-webui", "--host", "127.0.0.1", "--port", "8080",
     ];
+
+    /// <summary>
+    /// Granite's hybrid Mamba/attention models (4.x "-h-": H-Tiny, H-Small, H-Micro). Their recurrent state can't be cut
+    /// back to any token, only to a saved checkpoint.
+    /// </summary>
+    public static bool IsHybrid(string model) => HybridName().IsMatch(Path.GetFileName(model));
+
+    [GeneratedRegex(@"granite-4\.\d+-h-", RegexOptions.IgnoreCase)]
+    private static partial Regex HybridName();
+
+    /// <summary>
+    /// Prompt cache settings. Dense models reuse shifted chunks of an earlier prompt (<c>--cache-reuse 256</c>). On a hybrid
+    /// that can't help and could pair a stale Mamba state with shifted attention cache, so it's off; 8 checkpoints of about
+    /// 54 MiB each instead of the default 32 keep them inside <c>--cache-ram</c>
+    /// (see reports/Jazari CLI and model enhancements.md, section 1).
+    /// </summary>
+    public static string[] CacheArgs(string model) =>
+        IsHybrid(model) ? ["--cache-reuse", "0", "--ctx-checkpoints", "8"] : ["--cache-reuse", "256"];
 
     public static Tuning? Load(string path)
     {
