@@ -512,6 +512,28 @@ public sealed class PromptEditor : ILineReader
         }
     }
 
+    /// <summary>
+    /// For an exit that skips <see cref="StopAsync"/> (Ctrl+Break while idle, the process ending): closes any half-sent
+    /// synchronized block, clears the panel and shows the cursor again, so the shell isn't left with a hidden cursor and a
+    /// dead panel. Runs on the signal's thread, so it waits only briefly for a draw in progress.
+    /// </summary>
+    public void Restore()
+    {
+        var locked = Monitor.TryEnter(_gate, TimeSpan.FromMilliseconds(200));
+        try
+        {
+            if (!locked) { _out.Write("\e[?2026l\e[?25h"); return; }
+            if (!_running && _drawn is null) return; // stopped properly already
+            _running = false;
+            _conversation.Sink = null;
+            _out.Write("\e[?2026l" + Go(BelowConversation()) + "\e[J" + Go(_conversationRow, _conversationColumn) + "\e[?25h");
+            _out.Flush();
+            _drawn = null;
+        }
+        catch (Exception e) when (e is IOException or ObjectDisposedException) { } // the console is already gone
+        finally { if (locked) Monitor.Exit(_gate); }
+    }
+
     /// <summary>The next thing the user sent: in the order sent, and right away if they sent it during an answer.</summary>
     public async Task<(bool Ok, string? Text)> ReadAsync()
     {
