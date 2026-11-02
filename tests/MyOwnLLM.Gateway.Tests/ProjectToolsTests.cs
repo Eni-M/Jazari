@@ -49,6 +49,33 @@ public class ProjectToolsTests : IDisposable
         Assert.Equal(5, skipped); // only what was walked; skipped folders aren't entered
     }
 
+    [Theory]
+    [InlineData(@"C:\Users\me\.ssh\config", true)]
+    [InlineData("a/.aws/credentials", true)]
+    [InlineData("repo/.git/config", true)]
+    [InlineData("src/.github/workflows/ci.yml", false)]
+    [InlineData("src/ssh/Client.cs", false)]
+    [InlineData(".ssh", false)] // a file of that name, not the folder
+    public void Files_in_credential_folders_are_secret(string path, bool secret) => Assert.Equal(secret, ProjectFiles.IsSecret(path));
+
+    [Fact]
+    public void A_linked_file_is_not_followed()
+    {
+        var outside = Directory.CreateTempSubdirectory("jazari outside").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(outside, "id_rsa"), "PRIVATE KEY");
+            Add("src/Home.cs", "class Home;");
+            try { File.CreateSymbolicLink(Path.Combine(_dir, "notes.txt"), Path.Combine(outside, "id_rsa")); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; } // Windows without the right to make links
+
+            var (files, _) = ProjectFiles.Load(_dir);
+
+            Assert.Equal(["src/Home.cs"], files.Select(f => f.Path));
+        }
+        finally { Directory.Delete(outside, recursive: true); }
+    }
+
     [Fact]
     public void Files_are_grouped_and_big_ones_cut_at_line_ends()
     {

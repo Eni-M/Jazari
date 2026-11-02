@@ -43,7 +43,9 @@ public static partial class ProjectFiles
     static IEnumerable<string> Walk(string folder)
     {
         var options = new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 }; // a folder we can't open is no reason to stop
-        foreach (var file in Directory.EnumerateFiles(folder, "*", options)) yield return file;
+        // A link can point anywhere: notes.txt linked to ~/.ssh/id_rsa passes every name rule. Only links are skipped, not
+        // every reparse point, since OneDrive marks its ordinary files as reparse points too.
+        foreach (var file in Directory.EnumerateFiles(folder, "*", options).Where(f => !IsLink(new FileInfo(f)))) yield return file;
         foreach (var sub in Directory.EnumerateDirectories(folder, "*", options))
         {
             if (SkippedFolders.Contains(Path.GetFileName(sub)) || new DirectoryInfo(sub).Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
@@ -57,8 +59,20 @@ public static partial class ProjectFiles
         return CodeExtensions.Contains(Path.GetExtension(path)) && !Noise().IsMatch(name) && !IsSecret(path);
     }
 
-    /// <summary>Files that hold keys and passwords (.env, *.pem, appsettings.Production.json): never sent to the model.</summary>
-    public static bool IsSecret(string path) => Secret().IsMatch(Path.GetFileName(path));
+    static bool IsLink(FileInfo file)
+    {
+        try { return file.LinkTarget is not null; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; } // can't tell: don't follow it
+    }
+
+    static readonly HashSet<string> SecretFolders = new(StringComparer.OrdinalIgnoreCase) { ".ssh", ".aws", ".azure", ".gnupg", ".kube", ".git" };
+
+    /// <summary>
+    /// Files that hold keys and passwords (.env, *.pem, appsettings.Production.json) or sit in a folder of them (.ssh, .aws,
+    /// .git and the like): never sent to the model.
+    /// </summary>
+    public static bool IsSecret(string path) =>
+        Secret().IsMatch(Path.GetFileName(path)) || path.Split('/', '\\').SkipLast(1).Any(SecretFolders.Contains);
 
     static string? TryRead(string path)
     {
