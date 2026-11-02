@@ -1,0 +1,20 @@
+A heading
+Some text with bold, inline code and a link
+(https://learn.microsoft.com/dotnet).
+  - first bullet that is long enough to wrap around onto a second row when the
+    width is small
+  - second
+  1. numbered
+  12. another numbered item
+
+[1] csharp
+builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+    indented();
+[2]
+no info string
+Lifetime   Instances
+Transient  every time
+Scoped     per request
+after the table
+averyveryveryverylongwordwithoutanyspacesthatmustbesplitbecauseitislongerthanthe
+rowitself

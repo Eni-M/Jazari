@@ -1,0 +1,26 @@
+J A Z A R I  0.3.0
+
+A long explanation that has to wrap because it is wider than the eighty columns
+this test gives it to use.
+a line
+MODELS
+Model                 Granite 4.1 3B · local
+Directory             ~/EduCore
+A very long key name  value
+  READING
+  ✓ a.cs
+  ✓ b.cs
+│ ACTION REQUIRED
+│ Run this:
+│ dotnet build
+│ [y] Allow once  [n] Deny  [a] Always allow
+ERROR
+Can't reach the gateway.
+Cause: Nothing answered.
+jazari update
+› what is dependency injection?
+  and a second line
+2 files, 2.1k tokens.
+18 readonly Channel<Work> _work =
+-     Channel.CreateUnbounded<Work>();
++     Channel.CreateBounded<Work>(32);

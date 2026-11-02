@@ -1,0 +1,46 @@
+› what is dependency injection?
+
+A class gets the things it needs handed to it.
+ix-3 · N s
+
+› show code
+
+Use this:
+[1] csharp
+var x = 1;
+and then:
+[2]
+y();
+ix-3 · N s · 2 code blocks, /copy 1
+
+ASK
+(just type)          Ask a question; answers keep the conversation
+/retry               Ask the last question again
+/status              Where are we left at?
+
+FILES AND CODE
+/read <path>         Read a file or folder for the next questions
+/diff [ref]          Read your uncommitted changes (or the changes since ref)
+/context             What the next question will send
+/edit <file> <what>  Change a file, after showing you the change
+/undo                Undo the last /edit
+/copy [n]            Copy code block n of the last answer (no number: the last
+                     block)
+/review [path]       Review a whole project and write a report
+/commit              Write a commit message for the staged changes
+
+SESSION
+/model               Show the model
+/clear               Clear conversation and files read
+/details             Details of the last error
+/help                Available commands
+/exit                Quit
+
+KEYS
+Enter                Send
+Alt+Enter            New line (also Shift+Enter, Ctrl+J)
+Tab                  Complete commands and paths
+Up / Down            History; in a menu, choose
+Esc                  Close the menu
+Ctrl+C               Stop the answer; twice on an empty line quits
+There is no code block 9. The last answer has 2.
