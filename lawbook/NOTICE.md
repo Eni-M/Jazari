@@ -20,4 +20,4 @@ The text was changed, not only copied. Pages were cut into pieces of at most 1,0
 version's text was kept where a page covers several versions. Included files, images, comments and links were
 removed, keeping the link text. Code the pages reference from sample files was copied in, and Visual Basic, F#
 and C++ samples were left out. `whats-new`, `what-is-new`, `breaking-changes` and `release-notes` pages were
-left out. This is not an official Microsoft product, and Microsoft does not endorse it.
+left out. Text repeated on several pages is kept once. This is not an official Microsoft product, and Microsoft does not endorse it.

@@ -1,7 +1,7 @@
 import os, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from build import chunks, clean, inline_snippets, keep_latest_version, learn_url, strip_front_matter
+from build import chunks, clean, first_of_each, inline_snippets, keep_latest_version, learn_url, strip_front_matter
 
 
 class FrontMatterTests(unittest.TestCase):
@@ -150,6 +150,15 @@ class ChunkTests(unittest.TestCase):
 
     def test_a_heading_with_nothing_under_it_makes_no_chunk(self):
         self.assertEqual(chunks("T", "# T\n## Empty\n## Full\ntext"), [("T: Full", "text")])
+
+
+class RepeatTests(unittest.TestCase):
+    def test_a_passage_repeated_on_other_pages_is_kept_once(self):
+        seen = set()
+        first = list(first_of_each([("A", "This change is a behavioral change.", "u1"), ("A", "Own text.", "u1")], seen))
+        later = list(first_of_each([("B", "This change is a behavioral change.", "u2"), ("B", "Other text.", "u2")], seen))
+        self.assertEqual(first, [("A", "This change is a behavioral change.", "u1"), ("A", "Own text.", "u1")])
+        self.assertEqual(later, [("B", "Other text.", "u2")])
 
 
 class UrlTests(unittest.TestCase):
