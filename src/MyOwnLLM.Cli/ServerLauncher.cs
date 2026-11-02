@@ -38,7 +38,7 @@ public sealed class ServerLauncher(
                 ?
                 [
                     "-m", config.Model, "-dev", "none", "-t", "6", "--poll", "0", "-c", "16384", "--cache-ram", "2048",
-                    "-np", "1", .. Tuning.CacheArgs(config.Model), "--no-webui", "--host", "127.0.0.1", "--port", "8080",
+                    "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", "8080",
                 ]
                 : await llamaArgs(config, ct), Path.Combine(logDir, "llama-server.log"));
         if (gatewayState is ConnectionState.GatewayNotRunning)

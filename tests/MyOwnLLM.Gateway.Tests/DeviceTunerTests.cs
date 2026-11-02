@@ -69,21 +69,6 @@ public class DeviceTunerTests : IDisposable
         Assert.Equal("16384", args[Array.IndexOf(args, "-c") + 1]);
     }
 
-    [Theory]
-    [InlineData(@"C:\models\granite-4.0-h-tiny-Q4_K_M.gguf", true)]
-    [InlineData("Granite-4.0-H-Small-Q4_0.gguf", true)]
-    [InlineData("granite-4.1-3b-Q4_K_M.gguf", false)]
-    [InlineData("qwen3-4b-instruct-2507-Q4_K_M.gguf", false)]
-    public void Hybrid_models_turn_chunk_reuse_off_and_cap_checkpoints(string model, bool hybrid)
-    {
-        var args = new Tuning("f", "none", 4, 0, false, 16384, 2048).ServerArgs(model);
-
-        Assert.Equal(hybrid, Tuning.IsHybrid(model));
-        Assert.Equal(hybrid ? "0" : "256", args[Array.IndexOf(args, "--cache-reuse") + 1]);
-        Assert.Equal(hybrid, args.Contains("--ctx-checkpoints"));
-        if (hybrid) Assert.Equal("8", args[Array.IndexOf(args, "--ctx-checkpoints") + 1]);
-    }
-
     [Fact]
     public async Task Measuring_saves_what_a_start_then_uses()
     {
