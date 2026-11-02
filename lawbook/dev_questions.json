@@ -1,0 +1,42 @@
+{
+  "note": "Tuning set for the law book. Written without opening eval/questions.json; try_dev.py --check-overlap confirms no question shares more than half its words with a test question. Answerable: the right passage holds must_contain. Traps: nothing should come back.",
+  "answerable": [
+    {"question": "How do I accept an uploaded file with IFormFile?", "must_contain": "IFormFile"},
+    {"question": "What is the difference between the scoped and singleton service lifetimes?", "must_contain": "AddScoped"},
+    {"question": "How do I declare a record type with positional properties in C#?", "must_contain": "record"},
+    {"question": "How do I seed initial data with HasData when the model is created?", "must_contain": "HasData"},
+    {"question": "How do I enable CORS for a web API so a browser app on another origin can call it?", "must_contain": "AddCors"},
+    {"question": "How do I read a value from appsettings.json with IConfiguration?", "must_contain": "IConfiguration"},
+    {"question": "How do I cancel a long running async operation with a CancellationToken?", "must_contain": "CancellationToken"},
+    {"question": "How do I serialize an object to a JSON string with System.Text.Json?", "must_contain": "JsonSerializer.Serialize"},
+    {"question": "How do I create and apply a migration in Entity Framework Core?", "must_contain": "migrations add"},
+    {"question": "What does the required modifier do on a property?", "must_contain": "required"},
+    {"question": "How do I use a switch expression with property patterns?", "must_contain": "switch"},
+    {"question": "How do I consume an async stream with await foreach?", "must_contain": "await foreach"},
+    {"question": "How do I bind settings to a class with the options pattern and IOptions?", "must_contain": "IOptions"},
+    {"question": "Why should I use IHttpClientFactory instead of creating HttpClient instances?", "must_contain": "IHttpClientFactory"},
+    {"question": "How do I add rate limiting middleware to an ASP.NET Core app?", "must_contain": "AddRateLimiter"},
+    {"question": "What is Span<T> and when should I use it?", "must_contain": "Span"},
+    {"question": "How do I write log messages with ILogger in a service?", "must_contain": "ILogger"},
+    {"question": "How do I configure a one-to-many relationship in EF Core?", "must_contain": "HasMany"},
+    {"question": "How do I add health checks to an ASP.NET Core app?", "must_contain": "AddHealthChecks"},
+    {"question": "How does a using declaration dispose an object?", "must_contain": "Dispose"}
+  ],
+  "traps": [
+    {"question": "How do I configure Kafka consumers in Spring Boot?", "kind": "other stack"},
+    {"question": "How do I create a React component that keeps state with the useState hook?", "kind": "other stack"},
+    {"question": "How do I define a Django model with a foreign key to another model?", "kind": "other stack"},
+    {"question": "How do I write a goroutine that reads from a channel?", "kind": "other stack"},
+    {"question": "How do I write a Rails migration that adds a column to a table?", "kind": "other stack"},
+    {"question": "How do I borrow a mutable reference twice in Rust?", "kind": "other stack"},
+    {"question": "How do I configure webpack loaders for SCSS files?", "kind": "other stack"},
+    {"question": "How do I write a Laravel Eloquent query with eager loading?", "kind": "other stack"},
+    {"question": "How do I turn on the QuantumTls option in Kestrel?", "kind": "not in .NET"},
+    {"question": "How do I call DbContext.SaveEverythingAsync in EF Core?", "kind": "not in .NET"},
+    {"question": "Which services does IServiceCollection.AddTelepathy register?", "kind": "not in .NET"},
+    {"question": "How do I use JsonSerializer.DeserializeFast for large files?", "kind": "not in .NET"},
+    {"question": "What does the AutoDispose attribute do in C#?", "kind": "not in .NET"},
+    {"question": "How do I write an unless statement in C#?", "kind": "not in .NET"},
+    {"question": "How do I sort a list randomly with the LINQ OrderByRandom operator?", "kind": "not in .NET"}
+  ]
+}

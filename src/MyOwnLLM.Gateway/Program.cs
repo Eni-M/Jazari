@@ -18,6 +18,12 @@ if (args is ["add-key", ..])
     return;
 }
 
+if (args is ["search-law", var lawQuestion, ..]) // for lawbook/try_dev.py: what the law book sends for a question, as JSON
+{
+    Console.WriteLine(JsonSerializer.Serialize(new LawBook(options).Search(lawQuestion), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }));
+    return;
+}
+
 builder.WebHost.UseUrls($"http://127.0.0.1:{options.Port}");
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
 builder.Services.AddSingleton(options);
@@ -29,6 +35,7 @@ builder.Services.AddSingleton<InteractionLog>();
 builder.Services.AddSingleton<StateNoteUpdater>();
 builder.Services.AddSingleton<RequestQueue>();
 builder.Services.AddSingleton<ModelLimits>();
+builder.Services.AddSingleton<LawBook>();
 builder.Services.AddHostedService<QueueWorker>();
 builder.Services.AddHybridCache();
 builder.Services.AddHttpClient<ILlamaClient, LlamaClient>(http =>
