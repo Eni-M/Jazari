@@ -61,8 +61,15 @@ public static class InputLoop
             Welcome.Opened(ui, state, clock.Elapsed, wordmarkRow, measured);
         }
 
+        // Ctrl+Break while idle, or anything else that ends the process, skips StopAsync: put the cursor back anyway.
+        EventHandler onExit = (_, _) => editor.Restore();
+        AppDomain.CurrentDomain.ProcessExit += onExit;
         try { await LoopAsync(session, ui, editor, updateAvailable, OpenAsync()); }
-        finally { await editor.StopAsync(); }
+        finally
+        {
+            await editor.StopAsync();
+            AppDomain.CurrentDomain.ProcessExit -= onExit;
+        }
     }
 
     /// <param name="opening">Finishes when the servers are up; a question typed sooner waits for it.</param>
@@ -79,7 +86,12 @@ public static class InputLoop
         }
         var editor = reader as PromptEditor;
         if (editor is not null) editor.Interrupt = StopAnswer;
-        ConsoleCancelEventHandler onCancel = (_, e) => e.Cancel = StopAnswer();
+        // With the panel up only Ctrl+Break gets here. Nothing to stop means the process ends now, so clean the screen first.
+        ConsoleCancelEventHandler onCancel = (_, e) =>
+        {
+            e.Cancel = StopAnswer();
+            if (!e.Cancel) editor?.Restore();
+        };
         Console.CancelKeyPress += onCancel;
         try
         {
