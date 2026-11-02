@@ -48,7 +48,7 @@ public class DeviceTunerTests : IDisposable
         await Tuner(runner).MeasureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
 
         var gpuRun = Assert.Single(runner.Runs, r => r.Contains("Vulkan0"));
-        Assert.Equal("18", gpuRun[Array.IndexOf(gpuRun, "-ngl") + 1]);
+        Assert.Equal("27", gpuRun[Array.IndexOf(gpuRun, "-ngl") + 1]);
     }
 
     [Fact]
