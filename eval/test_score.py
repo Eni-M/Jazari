@@ -1,6 +1,6 @@
 import os, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from score import score, pick
+from score import rescore, score, pick
 
 QUESTION = {"must_have": [["AddScoped", "Scoped"]], "must_not": ["AddSingleton"]}
 GOOD = {"label": "a", "score": 30, "plain_p50_s": 20, "read_first_s": 100, "followup_s": 25, "edit_ok": True, "review_ok": True}
@@ -22,6 +22,16 @@ class ScoreTests(unittest.TestCase):
 
     def test_empty_answer_fails(self):
         self.assertFalse(score("", QUESTION)["passed"])
+
+
+class RescoreTests(unittest.TestCase):
+    def test_a_saved_answer_is_scored_against_the_current_checks(self):
+        result = {"score": 0, "answers": [{"id": "q", "answer": "use scoped", "passed": False, "missing": ["x"], "forbidden": []},
+                                          {"id": "gone", "answer": "kept", "passed": True, "missing": [], "forbidden": []}]}
+        rescored = rescore(result, [{"id": "q", **QUESTION}])
+        self.assertEqual(rescored["answers"][0]["passed"], True)
+        self.assertEqual(rescored["answers"][0]["missing"], [])
+        self.assertEqual(rescored["score"], 2)  # a question no longer in the set keeps its result
 
 
 class PickTests(unittest.TestCase):

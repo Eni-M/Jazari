@@ -22,3 +22,13 @@ def pick(results):
     """The highest score that meets every limit; the faster one wins a tie. None when nothing qualifies."""
     fit = [r for r in results if _within_limits(r)]
     return min(fit, key=lambda r: (-r["score"], r["plain_p50_s"])) if fit else None
+
+
+def rescore(result, questions):
+    """Scores saved answers again after a check was corrected, without running the model."""
+    by_id = {q["id"]: q for q in questions}
+    for answer in result["answers"]:
+        if answer["id"] in by_id:
+            answer.update(score(answer["answer"], by_id[answer["id"]]))
+    result["score"] = sum(a["passed"] for a in result["answers"])
+    return result

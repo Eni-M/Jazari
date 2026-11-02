@@ -177,7 +177,7 @@ def chat(messages, max_tokens=MAX_TOKENS, json_schema=None, port=PORT):
 def server_args(a):
     # The same settings as Tuning.ServerArgs.
     return [a.llama, "-m", a.model, "-dev", a.device, "-ngl", str(a.gpu_layers), "-t", str(a.threads), "--poll", "0", "-fa", "on",
-            "-c", "16384", "--cache-ram", "2048", "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(PORT)]
+            "-c", "16384", "--cache-ram", "2048", "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(PORT)] + ([] if a.reasoning == "auto" else ["--reasoning", a.reasoning])
 
 
 def main():
@@ -187,6 +187,7 @@ def main():
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--device", default="none")
     parser.add_argument("--gpu-layers", type=int, default=0)
+    parser.add_argument("--reasoning", default="auto", choices=["auto", "on", "off"], help="a model's own thinking; off leaves its answer alone within the token cap")
     parser.add_argument("--scenarios", action="store_true", help="also time /read, /edit, /review and a conversation")
     parser.add_argument("--limit", type=int, help="only the first N questions, for a quick check")
     parser.add_argument("--llama", default=os.path.join(os.environ.get("LOCALAPPDATA", ""), "Jazari", "llama", "llama-server.exe"))

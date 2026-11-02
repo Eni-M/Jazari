@@ -1,8 +1,8 @@
 import os, socket, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import json
-from run_eval import PortInUse, conversation, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, start_server, system_prompt
+import argparse, json
+from run_eval import PortInUse, conversation, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, server_args, start_server, system_prompt
 
 PROMPT_BUILDER = os.path.join(HERE, "..", "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
 Q1 = {"id": "a", "category": "api", "question": "boom", "must_have": [["x"]], "must_not": []}
@@ -47,6 +47,19 @@ def replying(*replies):
         calls.append({"messages": list(messages), "max_tokens": max_tokens, "json_schema": json_schema})
         return replies[min(len(calls) - 1, len(replies) - 1)]
     return ask, calls
+
+
+class ServerArgsTests(unittest.TestCase):
+    def args(self, **changes):
+        settings = {"llama": "l.exe", "model": "m.gguf", "device": "none", "gpu_layers": 0, "threads": 4, "reasoning": "auto", **changes}
+        return server_args(argparse.Namespace(**settings))
+
+    def test_thinking_can_be_turned_off(self):
+        args = self.args(reasoning="off")
+        self.assertEqual(args[args.index("--reasoning") + 1], "off")
+
+    def test_thinking_is_left_to_the_model_by_default(self):
+        self.assertNotIn("--reasoning", self.args())
 
 
 class ScenarioTests(unittest.TestCase):

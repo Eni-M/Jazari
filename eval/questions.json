@@ -24,7 +24,7 @@
   {"id": "logger", "category": "api", "question": "How do I write logs from a class in ASP.NET Core?", "must_have": [["ILogger<"]], "must_not": [], "note": "Inject ILogger<T>"},
   {"id": "concurrent-dictionary", "category": "api", "question": "Which dictionary type in .NET is safe to use from many threads at once?", "must_have": [["ConcurrentDictionary"]], "must_not": [], "note": ""},
 
-  {"id": "linq-filter", "category": "code", "question": "Write a LINQ query that gets the names of active users from a List<User> in C#.", "must_have": [["Where("], ["Select("]], "must_not": [], "note": ""},
+  {"id": "linq-filter", "category": "code", "question": "Write a LINQ query that gets the names of active users from a List<User> in C#.", "must_have": [["Where(", "where "], ["Select(", "select "]], "must_not": [], "note": ""},
   {"id": "read-file-async", "category": "code", "question": "Write one line of C# that reads a whole text file asynchronously.", "must_have": [["File.ReadAllTextAsync"]], "must_not": [], "note": ""},
   {"id": "minimal-endpoint", "category": "code", "question": "Write an ASP.NET Core minimal API endpoint that returns \"hello\" at /hello.", "must_have": [["MapGet"], ["/hello"]], "must_not": ["[HttpGet"], "note": ""},
   {"id": "constructor-injection", "category": "code", "question": "Show a C# class OrderService that gets an IOrderRepository through constructor injection.", "must_have": [["class OrderService"], ["IOrderRepository "]], "must_not": ["new OrderRepository"], "note": ""},
@@ -37,10 +37,10 @@
 
   {"id": "efcore-raw-sql", "category": "security", "question": "How do I stop SQL injection when using EF Core raw SQL?", "must_have": [["FromSqlInterpolated", "FromSql(", "SqlParameter", "ExecuteSqlInterpolated"]], "must_not": [], "note": "Both early models got this wrong"},
   {"id": "ado-parameters", "category": "security", "question": "How do I prevent SQL injection with ADO.NET SqlCommand?", "must_have": [["parameter"]], "must_not": [], "note": "Parameters.Add or AddWithValue"},
-  {"id": "password-storage", "category": "security", "question": "How should I store user passwords in ASP.NET Core?", "must_have": [["hash"], ["PasswordHasher", "bcrypt", "argon2", "PBKDF2", "salt"]], "must_not": [], "note": "Salted slow hash, never plain text or encryption"},
+  {"id": "password-storage", "category": "security", "question": "How should I store user passwords in ASP.NET Core?", "must_have": [["hash"], ["PasswordHasher", "bcrypt", "argon2", "PBKDF2", "salt", "Identity"]], "must_not": [], "note": "Salted slow hash, never plain text or encryption"},
   {"id": "jwt-validation", "category": "security", "question": "Which things should an ASP.NET Core API validate on a JWT?", "must_have": [["issuer"], ["audience"], ["lifetime", "expir"], ["signing", "signature"]], "must_not": [], "note": "TokenValidationParameters"},
   {"id": "csrf", "category": "security", "question": "How does ASP.NET Core protect MVC and Razor forms against CSRF?", "must_have": [["antiforgery", "anti-forgery"]], "must_not": [], "note": ""},
-  {"id": "xss-razor", "category": "security", "question": "How does Razor help prevent XSS, and what should I be careful with?", "must_have": [["encod"], ["Html.Raw", "raw"]], "must_not": [], "note": "Encodes by default; Html.Raw bypasses it"},
+  {"id": "xss-razor", "category": "security", "question": "How does Razor help prevent XSS, and what should I be careful with?", "must_have": [["encod", "escap"], ["Html.Raw", "raw"]], "must_not": [], "note": "Encodes by default; Html.Raw bypasses it"},
   {"id": "dev-secrets", "category": "security", "question": "Where should I keep API keys during local development of a .NET app?", "must_have": [["user secrets", "user-secrets", "Secret Manager"]], "must_not": [], "note": ""},
   {"id": "hsts", "category": "security", "question": "What does HSTS do?", "must_have": [["HTTPS"]], "must_not": [], "note": "Tells browsers to use only HTTPS"},
   {"id": "authorize", "category": "security", "question": "How do I require a logged-in user on an ASP.NET Core controller?", "must_have": [["[Authorize]"]], "must_not": [], "note": ""},

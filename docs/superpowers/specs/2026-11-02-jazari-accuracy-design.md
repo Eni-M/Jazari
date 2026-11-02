@@ -14,6 +14,17 @@ Eni-M, what a good session looks like:
 - Up to about 30 seconds for a question, more for a hard one. Find "a sweet spot of speed and accuracy, but biasing towards accuracy".
 - Fine-tune on our data and compress without losing too much accuracy.
 
+## Who it's for
+
+Eni-M, 2026-11-02: the idea is one model optimized to work well on any PC, delivering satisfactory results, free and open source, so others use it and keep working on it. The first users are working .NET developers.
+
+What that means for choices below (Claude's reading):
+- They know what DI is. They value a fix for a real bug, answers about their own code, and modern .NET facts with a source they can check.
+- One wrong confident answer loses them, so "say you don't know" and the published score matter.
+- A free, private, offline tool that's good at everyday C#/.NET is the promise, not cloud quality.
+- `/fix` and project search come before the law book.
+- A later step, not in this plan: reaching them where they work, in Visual Studio, Rider or VS Code.
+
 ## Goals
 
 1. Measure accuracy with a test set, so every later change is judged by a score.
@@ -140,7 +151,7 @@ Each phase ends with a score or a working feature, and can stop there.
 - Run: 4.1 3B on CPU + MX150, H-Tiny on CPU, H-Tiny with MX150 layers, 4.2 3B and Qwen3 4B. All are already in `spike/models`.
 - Also run a 6-turn conversation to see whether later turns slow down.
 - Pick the highest score that meets the limits above. A model that re-reads everything on each follow-up after `/read` fails, because it makes the main project workflow slow; `/edit` and `/review` must also still work on it. Then ship it through `scripts/jazari-manifest.json`, and make tuning cover it. Tuning never splits layers across two GPUs; the UHD 620 finding stays specific to that chip, so a stronger integrated GPU can still win alone.
-- The T480 decides: it's the main device (Eni-M, 2026-10-31). One model for every PC. Other PCs get it and tune for themselves; PCs under about 12 GB of RAM aren't a target for this work.
+- The T480 is the test machine (Eni-M, 2026-10-31): if it runs well here, it should run acceptably on a developer's laptop. Other PCs tune for themselves. A second, smaller model for PCs under about 12 GB of RAM, chosen at install, comes after the first release, since working developers mostly have 16 GB or more (Claude's guess, to check against feedback).
 - Default prediction: H-Tiny if the `/read` follow-up test passes, otherwise the 3B on CPU + MX150.
 
 ### 3. Conversation behaviours
@@ -176,7 +187,8 @@ Each phase ends with a score or a working feature, and can stop there.
 
 - Eni-M, 2026-11-02: private repo code may go to Colab, and only Colab, for training. Never Kaggle or any other service. This is the one exception to "nothing private leaves the laptop". The private C# repos in scope are EduCore, WareFlow and LearningRoadmap (the 2026-10-30 design's list).
 - Data: Qwen2.5-Coder-14B on Colab writes questions and answers seeded from the allowed sources; only code that compiles is kept. Corrected wrong answers are added: those from the test set, and those Eni-M reports. Eni-M reviews any corrections from real conversations before use, and nothing is collected automatically, because logged prompts can hold employer code. About 5% general data, to limit forgetting.
-- A model trained on private code is never published. It's built on the T480 and installed from a local file there, so the updater needs a local-file path alongside `modelUrl`.
+- **The public model trains on public data only:** Microsoft's docs and open-source C# projects whose licences allow it, because a model can memorise its training data. Private repos only go into an optional private version for Eni-M's own laptop, built and installed from a local file, never published. The updater needs a local-file path alongside `modelUrl` for that.
+- The public model is published on Hugging Face under the base model's licence terms.
 - QLoRA with Unsloth, fp16, GGUF export. Granite 4.0-H has an Unsloth notebook; Granite 4.1 isn't confirmed. Test this first.
 - Expect style and conventions rather than new facts, per `reports/Advanced training methods feasibility.md`.
 - Ship only if the test set score rises and nothing general gets noticeably worse.
@@ -196,10 +208,20 @@ Each phase ends with a score or a working feature, and can stop there.
 - Tools come after the law book and only if tested.
 - `/fix` is single-file at first, with one undo covering it and its retries. A failed build keeps the changes and says so.
 - Project work counts in choosing the model, with the limits in phase 1.
-- The T480 decides the model, and there's one model for every PC.
+- The T480 is the test machine for choosing the model. One model for now, with a smaller one for low-RAM PCs after the first release.
 - The CPU is capped at half its threads on every PC, even where more threads would be slightly faster, because Eni-M wants to keep working.
 - Wrong answers for training are never collected automatically.
-- Custom models are installed from a local file and never published.
+- Public model: public data only. Private version: Eni-M's laptop only.
+
+## Before an open-source release (a later plan)
+
+- Scan the repo and its history for secrets, then make it public with a licence. Check that the licences of Granite, the teacher model, the training data and the law book allow redistribution.
+- **Automatic model choice (Eni-M, 2026-11-02):** `jazari tune` picks the most suitable model for the PC, then tunes it (threads, GPU layers, context, priority). Claude's design: a catalog of models and quality levels, each already optimized and scored by us. Tune rules out what doesn't fit the RAM, measures speed on the PC, and applies the same rule as `pick`: the best published score that meets the time limits. Each model is at most one download, and it asks before downloading. This replaces the separate low-RAM model.
+- **The choice at tune (Eni-M, 2026-11-02):** tune asks which the user wants: Jazari's own model, fine-tuned on .NET data, or an open-source general model suited to their PC, possibly bigger. Both get the same add-ons: law book, commands and PC tuning. Claude's design: each option shows its test score, expected time per answer and download size for that PC, and the recommended one is the default. `jazari model` changes it later. Only models we've scored and whose licences allow it are offered; `/edit`, `/review` and `/fix` must work on each.
+- Fine-tuning and quantization aren't done on the user's PC: they need a GPU, hours and training data, and they'd give every user the same result. We do them once per catalog entry and publish the result.
+- Install from a public source, with no sign-in. Windows first; Linux and Mac after.
+- Publish the test set and its score, so people can see how good it is.
+- Harder test questions a working developer would ask, added before the release score is published.
 
 ## Needed from Eni-M
 
