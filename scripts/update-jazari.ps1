@@ -166,7 +166,11 @@ if (-not $Reexec) {
     }
 
     try {
-        Invoke-Git reset --hard origin/main | Out-Null
+        # Windows sometimes refuses to recreate a file just deleted ("unable to create file: File exists"); a second try works.
+        foreach ($try in 1..3) {
+            try { Invoke-Git reset --hard origin/main | Out-Null; break }
+            catch { if ($try -eq 3) { throw }; Start-Sleep -Seconds 3 }
+        }
         Invoke-Git clean -fd | Out-Null
     }
     catch {
@@ -230,4 +234,12 @@ catch { Say-Error "config" $_ }
 # 8.
 if ($script:failed) { exit 1 }
 Write-Host "Jazari is up to date ($($commit.Substring(0, 7)))"
+
+# 9. measuring takes the whole PC for minutes, so it's the user's call, and only once the new files are in place
+if (-not [Console]::IsInputRedirected) {
+    if ((Read-Host "Tune Jazari for this PC now? It measures for a few minutes. [y/n]") -eq "y") {
+        & (Join-Path $installDir "app\jazari.exe") tune
+    }
+    else { Write-Host "Skipped. Run jazari tune whenever you like." }
+}
 exit 0

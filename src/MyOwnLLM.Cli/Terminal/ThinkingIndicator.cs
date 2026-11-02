@@ -3,8 +3,8 @@ using System.Diagnostics;
 namespace MyOwnLLM.Cli.Terminal;
 
 /// <summary>
-/// "THINKING · 12s" on one line, updated every second until the answer starts, so a long wait never looks frozen.
-/// Once the model reports how far it has read the prompt, it becomes "READING 2,400 of 5,000 tokens · 48% · about 1 min left",
+/// "live  Thinking · 12s" on one line, updated every second until the answer starts, so a long wait never looks frozen.
+/// Once the model reports how far it has read the prompt, it becomes "live  Reading 2,400 of 5,000 tokens · 48% · about 1 min left",
 /// and the percentage also shows on the Windows Terminal tab and taskbar button.
 /// The only animation in Jazari, and it has a job: showing it's still working. Plain/piped output shows nothing.
 /// </summary>
@@ -68,11 +68,11 @@ public sealed class ThinkingIndicator
         {
             var percent = Math.Clamp(p.Processed * 100 / p.Total, 0, 100);
             var left = Remaining(p);
-            text = $"READING {p.Processed:N0} of {p.Total:N0} tokens {dot} {percent}%{(left is null ? "" : $" {dot} {left}")}";
+            text = $"Reading {p.Processed:N0} of {p.Total:N0} tokens {dot} {percent}%{(left is null ? "" : $" {dot} {left}")}";
             _output.Write($"\e]9;4;1;{percent}\a"); // Windows Terminal: progress on the tab and taskbar
         }
-        else text = seconds == 0 ? "THINKING" : $"THINKING {dot} {seconds}s";
-        _output.Write("\r\e[2K" + _theme.Paint(text, Tone.Muted));
+        else text = seconds == 0 ? "Thinking" : $"Thinking {dot} {seconds}s";
+        _output.Write("\r\e[2K" + _theme.Paint("live".PadLeft(Ui.Gutter - 2) + "  ", Tone.Accent) + _theme.Paint(text, Tone.Muted));
     }
 
     /// <summary>Time left at the reading speed seen so far, once there's enough to judge it.</summary>

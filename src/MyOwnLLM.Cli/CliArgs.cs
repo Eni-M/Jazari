@@ -12,7 +12,7 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
           jazari review [path]            review a whole project and write a report
           jazari status                   where we left off
           jazari feedback <ix-id> up|down rate an answer
-          jazari tune                     measure the fastest settings for this PC again
+          jazari tune                     measure the fastest settings for this PC (a few minutes)
           jazari stop                     stop the background servers to free memory
           jazari update                   update Jazari
           jazari --version

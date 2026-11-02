@@ -44,7 +44,7 @@ public class DeviceTunerTests : IDisposable
     {
         var runner = new FakeRunner { Devices = "Available devices:\n  Vulkan0: NVIDIA GeForce MX150 (2048 MiB, 1900 MiB free)\n" };
 
-        await Tuner(runner).EnsureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
+        await Tuner(runner).MeasureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
 
         var gpuRun = Assert.Single(runner.Runs, r => r.Contains("Vulkan0"));
         Assert.Equal("18", gpuRun[Array.IndexOf(gpuRun, "-ngl") + 1]);
@@ -69,24 +69,55 @@ public class DeviceTunerTests : IDisposable
     }
 
     [Fact]
-    public async Task Saved_settings_are_reused_until_the_pc_changes()
+    public async Task Measuring_saves_what_a_start_then_uses()
     {
         var runner = new FakeRunner();
-        var config = Config();
+        var path = Path.Combine(_dir, "tuning.json");
+
+        var measured = await Tuner(runner).MeasureAsync(Config(), Laptop, path, CancellationToken.None);
+
+        Assert.Equal(("none", 6, true), (measured.Device, measured.Threads, measured.FlashAttention));
+        Assert.Equal(measured, DeviceTuner.ForStart(path, Laptop));
+    }
+
+    [Fact]
+    public void A_start_without_a_measurement_runs_on_safe_settings_and_measures_nothing()
+    {
+        var path = Path.Combine(_dir, "none yet.json");
+
+        Assert.Equal(DeviceTuner.FallBack(Laptop), DeviceTuner.ForStart(path, Laptop));
+        Assert.False(File.Exists(path)); // and nothing was saved: the update's question is still open
+    }
+
+    [Fact]
+    public async Task Each_measurement_measures_again()
+    {
+        var runner = new FakeRunner();
         var path = Path.Combine(_dir, "tuning.json");
         var tuner = Tuner(runner);
 
-        var first = await tuner.EnsureAsync(config, Laptop, path, CancellationToken.None);
+        await tuner.MeasureAsync(Config(), Laptop, path, CancellationToken.None);
         var afterFirst = runner.Benches;
-        var again = await tuner.EnsureAsync(config, Laptop, path, CancellationToken.None);
-        var afterAgain = runner.Benches;
-        var otherPc = await tuner.EnsureAsync(config, Laptop with { RamBytes = 16L << 30 }, path, CancellationToken.None);
+        await tuner.MeasureAsync(Config(), Laptop, path, CancellationToken.None);
 
-        Assert.Equal(("none", 6, true), (first.Device, first.Threads, first.FlashAttention));
-        Assert.Equal(first, again);
-        Assert.Equal(afterFirst, afterAgain); // reused, nothing measured
-        Assert.True(runner.Benches > afterAgain); // more RAM or less: measured again
-        Assert.NotEqual(first.Fingerprint, otherPc.Fingerprint);
+        Assert.True(runner.Benches > afterFirst);
+    }
+
+    [Fact]
+    public async Task Live_tuning_shows_every_step_in_one_block()
+    {
+        var output = new StringWriter();
+        var tuner = new DeviceTuner(new FakeRunner { Devices = "Available devices:\n  Vulkan0: Intel(R) Iris(R) Xe Graphics (16211 MiB, 15443 MiB free)\n" },
+            new Ui(output, new Theme(ColorMode.TrueColor, unicode: true), 100), _ => 2L << 30);
+
+        await tuner.MeasureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
+
+        var text = System.Text.RegularExpressions.Regex.Replace(output.ToString(), "\e\\[[0-9;]*[A-Za-z]", "");
+        Assert.Contains("Tuning for this PC", text);
+        Assert.Contains("✓ cpu 4,6,8 threads", text);
+        Assert.Contains("✓ flash attention", text);
+        Assert.Contains("✓ iris xe", text);
+        Assert.Contains("● pick fastest", text);
     }
 
     [Fact]
@@ -94,7 +125,7 @@ public class DeviceTunerTests : IDisposable
     {
         var runner = new FakeRunner { BenchExit = -1 }; // e.g. blocked by Windows Application Control
         var tuning = await Tuner(runner)
-            .EnsureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
+            .MeasureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
 
         Assert.Equal(("none", 6), (tuning.Device, tuning.Threads));
         Assert.Contains("safe CPU settings", _output.ToString());
@@ -112,17 +143,14 @@ public class DeviceTunerTests : IDisposable
     }
 
     [Fact]
-    public async Task A_failed_device_listing_keeps_the_saved_settings()
+    public async Task A_failed_device_listing_still_measures_the_cpu()
     {
-        var path = Path.Combine(_dir, "t.json");
-        var saved = Tuning.Default("an older fingerprint", 8, 16L << 30) with { Device = "Vulkan0", GpuLayers = 24 };
-        saved.Save(path);
         var runner = new FakeRunner { DevicesExit = 1 };
 
-        var tuning = await Tuner(runner).EnsureAsync(Config(), Laptop, path, CancellationToken.None);
+        var tuning = await Tuner(runner).MeasureAsync(Config(), Laptop, Path.Combine(_dir, "t.json"), CancellationToken.None);
 
-        Assert.Equal(saved, tuning);
-        Assert.Equal(0, runner.Benches);
+        Assert.Equal("none", tuning.Device);
+        Assert.True(runner.Benches > 0);
     }
 
     [Fact]

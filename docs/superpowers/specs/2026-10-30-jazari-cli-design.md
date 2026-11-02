@@ -32,7 +32,7 @@ Reference for interaction *quality* only: Claude Code. Jazari must not imitate i
 ## Decided by Eni-M
 
 - **Name:** Jazari. **Wordmark:** spaced capitals, `J A Z A R I` (rendered `JAZARI` with letter spacing, i.e. `J A Z A R I` in the terminal).
-- **Visual identity:** Eni-M's spec (pasted 2026-10-30) is the starting point: monochrome palette, monospaced type, labels instead of colors, `›` input marker, `✓`/`!` in gray, `ERROR` label, indented muted tool activity, no boxes. Eni-M called it a suggestion: details may be refined for what looks best, as long as the anti-goals hold.
+- **Visual identity (superseded 2026-11-02 by the Jazari CLI Interface canvas, see docs/OPTIMIZATION-LOG.md):** Eni-M's spec (pasted 2026-10-30) was the starting point: monochrome palette, monospaced type, labels instead of colors, `›` input marker, `✓`/`!` in gray, `ERROR` label, indented muted tool activity, no boxes. Eni-M called it a suggestion: details may be refined for what looks best, as long as the anti-goals hold.
 - **Streaming by default.** This supersedes the main design's "buffered by default"; the gateway keeps buffered as its API default, the CLI always asks for streaming.
 - The mockup shown on 2026-10-30 (welcome → question → inspecting → running → action required → error) is approved as the look.
 

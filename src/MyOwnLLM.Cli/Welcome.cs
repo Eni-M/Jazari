@@ -2,7 +2,7 @@ using MyOwnLLM.Cli.Terminal;
 
 namespace MyOwnLLM.Cli;
 
-/// <summary>The opening header: the wordmark, four rows and a hint, then it scrolls away with the conversation.</summary>
+/// <summary>The opening. Piped output gets the wordmark, four rows and a hint. A real terminal gets one row, and the rest lives on the prompt's panel.</summary>
 public static class Welcome
 {
     /// <param name="runningOn">Where this PC's tuning runs the model ("Intel(R) Iris(R) Xe Graphics · flash attention · 14.9 tok/s"), when known.</param>
@@ -31,6 +31,47 @@ public static class Welcome
         foreach (var step in NextSteps(state)) ui.Line(step, Tone.Muted);
     }
 
+    /// <summary>The first rows of an interactive session, printed before the servers are up.</summary>
+    public static void Opening(Ui ui, string version, string directory)
+    {
+        ui.Header(ShortPath(directory), Branch(directory));
+        ui.Wordmark(version);
+    }
+
+    /// <summary>
+    /// The servers have answered or given up. <paramref name="directlyBelowWordmark"/>: nothing was printed since the
+    /// opening, so "ready in 4 s" can replace the version; otherwise it goes on a new row.
+    /// </summary>
+    public static void Opened(Ui ui, ConnectionState state, TimeSpan took, bool directlyBelowWordmark, bool measured)
+    {
+        if (state == ConnectionState.Available)
+        {
+            // Up past the blank row the prompt left under the wordmark.
+            if (directlyBelowWordmark) ui.Output.Write("\e[2A\r\e[2K");
+            ui.Wordmark($"ready in {Math.Max(took.TotalSeconds, 1):0} s");
+            if (!measured) ui.Metadata("On safe CPU settings. jazari tune measures this PC for the fastest ones.");
+            ui.Blank();
+            return;
+        }
+        var (message, cause, fix, then) = Problem(state);
+        ui.Error(message, cause, fix);
+        ui.Metadata(then);
+        ui.Blank();
+    }
+
+    static (string Message, string Cause, string Fix, string Then) Problem(ConnectionState state) => state switch
+    {
+        ConnectionState.GatewayNotRunning =>
+            ("Can't reach the gateway.", "Nothing answered, and Jazari couldn't start its servers.", "jazari update",
+                $"Repairs the install and starts both servers. Logs: {ShortPath(ServerLauncher.DefaultLogDir)}"),
+        ConnectionState.KeyRejected =>
+            ("The gateway doesn't know this key.", "Its key file may have been reset.", "dotnet run --project src/MyOwnLLM.Gateway -- add-key",
+                "In your MyOwnLLM folder. Then setx JAZARI_KEY <the new key> and open a new terminal."),
+        _ =>
+            ("There's no key for the gateway yet.", "Jazari couldn't create one.", "jazari update",
+                "It repairs everything, then Jazari creates the key itself."),
+    };
+
     static string[] NextSteps(ConnectionState state) => state switch
     {
         ConnectionState.GatewayNotRunning =>
@@ -51,6 +92,26 @@ public static class Welcome
             "By hand: dotnet run --project src/MyOwnLLM.Gateway -- add-key, then setx JAZARI_KEY <the key>.",
         ],
     };
+
+    /// <summary>The checked-out branch, read from the repository's HEAD file; null outside a repository or on a detached HEAD.</summary>
+    public static string? Branch(string directory)
+    {
+        try
+        {
+            for (var dir = new DirectoryInfo(directory); dir is not null; dir = dir.Parent)
+            {
+                var git = Path.Combine(dir.FullName, ".git");
+                // A linked worktree's .git is a file naming the real folder.
+                if (File.Exists(git) && File.ReadAllText(git).Trim() is var link && link.StartsWith("gitdir: ", StringComparison.Ordinal))
+                    git = Path.GetFullPath(link["gitdir: ".Length..], dir.FullName);
+                else if (!Directory.Exists(git)) continue;
+                var head = File.ReadAllText(Path.Combine(git, "HEAD")).Trim();
+                return head.StartsWith("ref: refs/heads/", StringComparison.Ordinal) ? head["ref: refs/heads/".Length..] : null;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { }
+        return null;
+    }
 
     static string ShortPath(string directory)
     {

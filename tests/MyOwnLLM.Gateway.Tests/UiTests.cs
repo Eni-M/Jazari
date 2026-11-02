@@ -132,7 +132,6 @@ public class UiTests
 
         ui.Wordmark("0.2.0");
         ui.Rows([("Model", "x")]);
-        ui.Divider();
         ui.Label("you");
         ui.Error("e", "c", "n");
         ui.Metadata("ix-1 · 2.0 s");
@@ -151,12 +150,76 @@ public class UiTests
     }
 
     [Fact]
-    public void User_message_has_raised_background_in_color()
+    public void User_message_hangs_off_the_gutter_in_a_terminal()
     {
         var output = new StringWriter();
-        new Ui(output, new Theme(ColorMode.TrueColor, unicode: true), 40).UserMessage("hi");
+        new Ui(output, new Theme(ColorMode.TrueColor, unicode: true), 40).UserMessage("hi\nthere");
 
-        Assert.Contains("\e[48;2;28;28;28m", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("hi" + new string(' ', 36), output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(["     ›  hi", "        there"], Clean(output));
+    }
+
+    static string[] Clean(StringWriter output) =>
+        System.Text.RegularExpressions.Regex.Replace(output.ToString(), "\e\\[[0-9;]*[A-Za-z]", "").Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
+
+    static (Ui ui, StringWriter output) Live(int width = 80)
+    {
+        var output = new StringWriter();
+        return (new Ui(output, new Theme(ColorMode.TrueColor, unicode: true), width), output);
+    }
+
+    [Fact]
+    public void Rows_put_the_label_in_the_gutter_and_wrap_beside_it()
+    {
+        var (ui, output) = Live(width: 28);
+
+        ui.Row("read", "two files and some tokens", Tone.Muted);
+
+        Assert.Equal(["  read  two files and some", "        tokens"], Clean(output));
+    }
+
+    [Fact]
+    public void Errors_say_why_and_how_to_fix_it_in_the_gutter()
+    {
+        var (ui, output) = Live();
+
+        ui.Error("Can't reach the gateway.", "Nothing answered.", "jazari update");
+
+        Assert.Equal(["     ✕  Can't reach the gateway.", "   why  Nothing answered.", "   fix  jazari update"], Clean(output));
+    }
+
+    [Fact]
+    public void Header_names_the_place_and_the_branch()
+    {
+        var (ui, output) = Live(width: 40);
+
+        ui.Header("~/MyOwnLLM", "main");
+
+        var rows = Clean(output);
+        Assert.Equal("jazari — ~/MyOwnLLM                 main", rows[0]);
+        Assert.Equal(new string('─', 40), rows[1]);
+    }
+
+    [Fact]
+    public void Header_is_left_out_of_piped_output()
+    {
+        var (ui, output) = Plain();
+
+        ui.Header("~/MyOwnLLM", "main");
+
+        Assert.Equal("", output.ToString());
+    }
+
+    [Fact]
+    public void Tune_progress_redraws_in_place()
+    {
+        var (ui, output) = Live();
+
+        ui.TuneProgress(["cpu", "gpu"], 0, "a few minutes", redraw: false);
+        ui.TuneProgress(["cpu", "gpu"], 1, "about 1 min left", redraw: true);
+
+        var text = output.ToString();
+        Assert.Equal(1, text.Split("\e[3A").Length - 1);
+        Assert.Contains("✓", Clean(output)[^1]);
+        Assert.Contains("● gpu", Clean(output)[^1]);
     }
 }

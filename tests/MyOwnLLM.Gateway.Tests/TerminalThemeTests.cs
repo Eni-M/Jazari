@@ -32,12 +32,12 @@ public class TerminalThemeTests
     {
         var s = new Theme(ColorMode.TrueColor, unicode: true).Paint("x", Tone.Muted);
 
-        Assert.Contains("\e[38;2;119;119;119m", s, StringComparison.Ordinal);
+        Assert.Contains("\e[38;2;138;138;132m", s, StringComparison.Ordinal);
         Assert.EndsWith("\e[0m", s, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Paint_256_uses_index() => Assert.Contains("\e[38;5;243m", new Theme(ColorMode.Ansi256, true).Paint("x", Tone.Muted), StringComparison.Ordinal);
+    public void Paint_256_uses_index() => Assert.Contains("\e[38;5;245m", new Theme(ColorMode.Ansi256, true).Paint("x", Tone.Muted), StringComparison.Ordinal);
 
     [Fact]
     public void Paint_16_uses_basic_codes() => Assert.Contains("\e[97m", new Theme(ColorMode.Ansi16, true).Paint("x", Tone.Primary), StringComparison.Ordinal);
@@ -47,7 +47,7 @@ public class TerminalThemeTests
     {
         var s = new Theme(ColorMode.TrueColor, true).Code("y");
 
-        Assert.Contains("\e[48;2;21;21;21m", s, StringComparison.Ordinal);
+        Assert.Contains("\e[48;2;27;28;32m", s, StringComparison.Ordinal);
         Assert.EndsWith("\e[0m", s, StringComparison.Ordinal);
     }
 

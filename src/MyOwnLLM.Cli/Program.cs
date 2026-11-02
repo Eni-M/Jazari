@@ -4,6 +4,7 @@ using MyOwnLLM.Cli;
 using MyOwnLLM.Cli.Terminal;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
+ConsoleText.EnableEscapes();
 CliArgs cli;
 try { cli = CliArgs.Parse(args); }
 catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
@@ -30,8 +31,9 @@ if (cli.Command == "tune")
 {
     // The model must have the PC to itself while it's measured.
     if (ServerLauncher.StopServers(config!) > 0) Console.WriteLine("Stopped Jazari's servers; they start again with the new settings.");
-    var tuneUi = new Ui(Console.Out, new Theme(ColorMode.None, unicode: true), 100);
-    await new DeviceTuner(runner, tuneUi).EnsureAsync(config!, DeviceTuner.ReadMachine(), Tuning.DefaultPath, CancellationToken.None, force: true);
+    var tuneTheme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001);
+    var tuneUi = new Ui(Console.Out, tuneTheme, Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20));
+    await new DeviceTuner(runner, tuneUi).MeasureAsync(config!, DeviceTuner.ReadMachine(), Tuning.DefaultPath, CancellationToken.None);
     return 0;
 }
 Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0"); // git must never stop to ask for credentials
@@ -58,7 +60,9 @@ var gateway = new GatewayClient(http);
 var version = typeof(CliArgs).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
 var theme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001);
 // One less than the terminal's columns, so a full line never makes the terminal wrap (the renderer relies on this).
-var width = Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20);
+int Columns() => Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20);
+int ScreenRows() => Console.IsOutputRedirected ? 24 : Console.WindowHeight;
+var width = Columns();
 var directory = Path.GetFullPath(cli.RepoPath ?? Directory.GetCurrentDirectory());
 
 // Start llama-server and the gateway in the background if they aren't running yet.
@@ -68,15 +72,9 @@ async Task<bool> LlamaReady(CancellationToken ct)
     try { return (await health.GetAsync("http://127.0.0.1:8080/health", ct)).IsSuccessStatusCode; }
     catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { return false; }
 }
-var startupUi = new Ui(Console.Out, theme, width);
-if (cli.Command == "session") startupUi.TakeOverScreen();
-var tuner = new DeviceTuner(runner, startupUi);
-async Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) =>
-    (await tuner.EnsureAsync(c, DeviceTuner.ReadMachine(), Tuning.DefaultPath, ct)).ServerArgs(c.Model);
+// Tuning only ever runs when asked: a start uses what was measured, or safe CPU settings.
+Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine()).ServerArgs(c.Model));
 Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.FallBack(DeviceTuner.ReadMachine()).ServerArgs(c.Model));
-var serverState = await new ServerLauncher(runner, gateway, LlamaReady, startupUi, ServerLauncher.DefaultLogDir, Task.Delay,
-        llamaArgs: TunedArgs, fallbackArgs: SafeArgs)
-    .EnsureRunningAsync(config, CancellationToken.None);
 // A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run. It's kept only if the
 // gateway answering here accepts it: a 401 from some other server on the port mustn't replace a working key.
 async Task<bool> Accepted(string candidate, CancellationToken ct)
@@ -86,27 +84,52 @@ async Task<bool> Accepted(string candidate, CancellationToken ct)
     try { await gateway.InfoAsync(ct); return true; }
     catch (GatewayException) { http.DefaultRequestHeaders.Authorization = previous; return false; }
 }
-if (serverState == ConnectionState.KeyRejected && await provisioner.EnsureKeyAsync(key, config, CancellationToken.None, rejected: true, accepted: Accepted) is { } freshKey)
+async Task StartServersAsync(Ui reportTo, bool quiet)
 {
-    key = freshKey;
+    var serverState = await new ServerLauncher(runner, gateway, LlamaReady, reportTo, ServerLauncher.DefaultLogDir, Task.Delay,
+            llamaArgs: TunedArgs, fallbackArgs: SafeArgs, quiet: quiet)
+        .EnsureRunningAsync(config, CancellationToken.None);
+    if (serverState == ConnectionState.KeyRejected && await provisioner.EnsureKeyAsync(key, config, CancellationToken.None, rejected: true, accepted: Accepted) is { } freshKey)
+    {
+        key = freshKey;
+    }
 }
 
+var startupUi = new Ui(Console.Out, theme, Columns);
 if (cli.Command == "session")
 {
+    startupUi.TakeOverScreen();
     var ui = startupUi;
-    // PrettyPrompt needs a real console; pipes and some IDE terminals get plain line input instead.
+    var tuning = DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine());
+    // The panel prompt needs a real console; pipes and some IDE terminals get plain line input instead.
     var piped = Console.IsInputRedirected || Console.IsOutputRedirected;
-    ILineReader reader = piped ? new TextLineReader(Console.In) : new PromptLineReader(ui);
-    // In a real terminal the typed line becomes the "› question" row; piped input isn't echoed, so Jazari prints it.
-    var interactive = new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, width), directory)
+    var editor = piped ? null : new PromptEditor(ui, Directory.GetCurrentDirectory);
+    // In a real terminal the prompt puts the "› question" row on screen; piped input isn't echoed, so Jazari prints it.
+    var interactive = new Session(gateway, ui, () => new MarkdownStream(Console.Out, theme, Columns(), ScreenRows()), directory)
     {
         EchoQuestions = piped,
-        Confirm = question => { Console.Write($"{question} [y/n] "); return Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes"; },
+        Tuning = tuning,
+        Confirm = editor is not null ? editor.Ask : question => { Console.Write($"{question} [y/n] "); return Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes"; },
     };
-    await InputLoop.RunAsync(interactive, ui, version, directory, reader,
+    if (editor is not null)
+    {
+        interactive.StartingModel = Session.ModelFromFile(config?.Model);
+        // What starting has to say waits in a buffer: the prompt is open and being typed in meanwhile.
+        async Task<(bool, string)> Start()
+        {
+            var report = new StringWriter();
+            await StartServersAsync(new Ui(report, theme, Columns), quiet: true);
+            return (key is not null, report.ToString());
+        }
+        await InputLoop.RunInteractiveAsync(interactive, ui, version, directory, editor, Start, updateAvailable, measured: Tuning.Load(Tuning.DefaultPath) is not null);
+        return 0;
+    }
+    await StartServersAsync(ui, quiet: false);
+    await InputLoop.RunAsync(interactive, ui, version, directory, new TextLineReader(Console.In),
         hasKey: key is not null, updateAvailable: updateAvailable, runningOn: Tuning.Load(Tuning.DefaultPath)?.Summary(theme.Glyph('·')));
     return 0;
 }
+await StartServersAsync(startupUi, quiet: false);
 
 // One-off commands. --no-stream renders into a buffer and prints it when the answer is complete.
 var buffer = cli.Stream ? null : new StringWriter();

@@ -248,8 +248,8 @@ public class SessionTests
         await session.HandleAsync(input, CancellationToken.None);
 
         var text = output.ToString();
-        Assert.Contains("THINKING", text);
-        Assert.True(text.IndexOf("THINKING", StringComparison.Ordinal) < text.LastIndexOf("\r\e[2K", StringComparison.Ordinal), "indicator must be cleared after it shows");
+        Assert.Contains("Thinking", text);
+        Assert.True(text.IndexOf("Thinking", StringComparison.Ordinal) < text.LastIndexOf("\r\e[2K", StringComparison.Ordinal), "indicator must be cleared after it shows");
     }
 
     [Fact]

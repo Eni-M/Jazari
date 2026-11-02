@@ -16,7 +16,7 @@ public class ThinkingIndicatorTests
         await indicator.StopAsync();
 
         var text = output.ToString();
-        Assert.Contains("THINKING", text);
+        Assert.Contains("Thinking", text);
         Assert.Contains("1s", text);
         Assert.Contains("2s", text);
         Assert.EndsWith("\r\e[2K", text, StringComparison.Ordinal);
@@ -32,7 +32,7 @@ public class ThinkingIndicatorTests
         await indicator.StopAsync();
 
         var text = output.ToString();
-        Assert.Contains("READING 2,500 of 5,000 tokens · 50%", text);
+        Assert.Contains("Reading 2,500 of 5,000 tokens · 50%", text);
         Assert.Contains("\e]9;4;1;50\a", text);
         Assert.EndsWith("\e]9;4;0;0\a", text, StringComparison.Ordinal);
     }

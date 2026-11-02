@@ -48,6 +48,16 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     public Func<string, bool> Confirm { get; init; } = _ => false;
     /// <summary>Where reviews keep their progress and reports.</summary>
     public string ReviewDir { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "reviews");
+    /// <summary>The settings the model runs on, for the line under the prompt.</summary>
+    public Tuning? Tuning { get; init; }
+    /// <summary>While the servers start: the model's short name. Null once they've answered or given up.</summary>
+    public string? StartingModel { get; set; }
+
+    string? _hint; // the panel's hint, when something more useful than the default just happened
+    string? _chip; // what goes with the next question, short enough for the panel
+    bool _reachable = true;
+    AnswerTimings? _timings;
+    string? _lastAnswer; // the id and numbers an answer used to print, for /details
 
     const int MaxReadTokens = 5000; // answers fall from 5.5 to 2.8 tok/s at this size, and keep falling beyond it
     const int EditAnswerTokens = 1000;
@@ -63,17 +73,41 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         try
         {
             _info = await gateway.InfoAsync(ct);
+            _reachable = true;
             return ConnectionState.Available;
         }
         catch (GatewayException e)
         {
             _lastError = e;
+            _reachable = false;
             return e.Status == 401 ? ConnectionState.KeyRejected : ConnectionState.GatewayNotRunning;
         }
-        catch (OperationCanceledException) { return ConnectionState.GatewayNotRunning; }
+        catch (OperationCanceledException) { _reachable = false; return ConnectionState.GatewayNotRunning; }
     }
 
     public string ModelName => _info?.Model ?? "unknown";
+
+    /// <summary>"granite 3b" from "granite-4.1-3b-Q4_K_M.gguf"; "the model" when the name doesn't look like that.</summary>
+    public static string ModelFromFile(string? file) =>
+        ModelFile().Match(Path.GetFileName(file ?? "")) is { Success: true } m ? $"{m.Groups[1].Value} {m.Groups[2].Value}".ToLowerInvariant() : "the model";
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^([A-Za-z]+)-[\d.]+-([^-]+)-")] private static partial System.Text.RegularExpressions.Regex ModelFile();
+    [System.Text.RegularExpressions.GeneratedRegex(@"\s*\b\d+\.\d+\b")] private static partial System.Text.RegularExpressions.Regex ModelVersion();
+
+    /// <summary>What the panel around the prompt shows right now.</summary>
+    public PanelInfo Panel()
+    {
+        var dot = ui.Theme.Glyph('·');
+        if (StartingModel is { } starting)
+            return new(_chip, "Type now: it sends as soon as the model is ready", $"starting {starting}", Live: "Starting the model");
+
+        var speed = _timings is { AnswerPerSecond: > 0 } t ? t.AnswerPerSecond : Tuning?.AnswerPerSecond ?? 0;
+        string?[] parts = [ModelVersion().Replace(ModelName, "").ToLowerInvariant(), Tuning?.ShortName(), speed > 0 ? $"{speed:0} tok/s" : null];
+        var used = _timings is { } last ? last.PromptTokens + last.AnswerTokens : (_history.Sum(h => h.Content.Length) + (_context?.Length ?? 0)) / 4;
+        var total = Tuning?.ContextTokens ?? 16384;
+        return new(_chip, _hint ?? $"Enter sends {dot} / commands", string.Join($" {dot} ", parts.OfType<string>().Where(p => p.Length > 0)),
+            used > 0 ? (used, total) : null, Offline: !_reachable);
+    }
 
     public Task HandleAsync(string input, CancellationToken ct)
     {
@@ -94,7 +128,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/review": return new ProjectReview(gateway, ui, ReviewDir).RunAsync(Resolve(Argument(input) ?? project), ct);
             case "/edit": return Stoppable(() => EditAsync(Argument(input), ct), ct);
             case "/undo": Undo(); break;
-            case "/clear": _history.Clear(); _context = _contextLabel = null; ui.Metadata("Conversation cleared."); break;
+            case "/clear": _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; ui.Metadata("Conversation cleared."); break;
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
             case "/details": Details(); break;
             case "/exit": ExitRequested = true; break;
@@ -130,7 +164,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
                 {
                     StopThinking();
                     renderer.Complete();
-                    Fail(new GatewayException(chunk.Error, null, null));
+                    Stamp(renderer, watch);
+                    FailOrCut(new GatewayException(chunk.Error, null, null), answer.Length > 0);
                     return;
                 }
                 if (chunk.Content is { } text)
@@ -144,15 +179,24 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             StopThinking();
             renderer.Complete();
             Remember(question, answer.ToString());
+            _timings = timings ?? _timings;
+            _reachable = true;
+            _hint = null;
+            var dot = ui.Theme.Glyph('·');
             var blocks = CodeBlocks.Extract(answer.ToString()).Count;
-            var copyHint = blocks == 0 ? "" : $" {ui.Theme.Glyph('·')} {blocks} code block{(blocks == 1 ? "" : "s")}, /copy{(blocks == 1 ? "" : " 1")}";
-            ui.Metadata($"{id} {ui.Theme.Glyph('·')} {watch.Elapsed.TotalSeconds:0.0} s{Describe(timings)}{copyHint}");
-            if (cutOff) ui.Metadata("The answer reached its length limit. Say \"go on\" for the rest.");
+            var copyHint = blocks == 0 ? "" : $" {dot} {blocks} code block{(blocks == 1 ? "" : "s")}, /copy{(blocks == 1 ? "" : " 1")}";
+            _lastAnswer = $"{id} {dot} {watch.Elapsed.TotalSeconds:0.0} s{Describe(timings)}";
+            // On a real terminal the time goes in the gutter, /copy n beside each block and the speed under the prompt.
+            if (ui.Live) Stamp(renderer, watch);
+            else ui.Metadata($"{_lastAnswer}{copyHint}");
+            if (cutOff && ui.Live) ui.Row("cut", "The answer reached its length limit. Say \"go on\" for the rest.", Tone.Secondary, Tone.Danger);
+            else if (cutOff) ui.Metadata("The answer reached its length limit. Say \"go on\" for the rest.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             StopThinking();
             renderer.Complete();
+            Stamp(renderer, watch);
             if (answer.Length > 0) Remember(question, answer.ToString());
             ui.Metadata("stopped");
         }
@@ -160,7 +204,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         {
             StopThinking();
             renderer.Complete();
-            Fail(e);
+            Stamp(renderer, watch);
+            FailOrCut(e, answer.Length > 0);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -168,7 +213,23 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             renderer.Complete();
             Unexpected(e);
         }
-        finally { ui.Blank(); }
+        finally { if (!ui.Live) ui.Blank(); }
+    }
+
+    static void Stamp(MarkdownStream renderer, Stopwatch watch)
+    {
+        var seconds = watch.Elapsed.TotalSeconds;
+        renderer.StampTime(seconds < 100 ? $"{seconds:0.0}s" : $"{seconds:0}s");
+    }
+
+    /// <summary>An error before any text is a problem to fix; after some text, the answer was cut short and what came stays on screen.</summary>
+    void FailOrCut(GatewayException e, bool partial)
+    {
+        if (!(partial && ui.Live)) { Fail(e); return; }
+        _lastError = e;
+        LastFailed = true;
+        _hint = "/details shows the full error";
+        ui.Row("cut", $"{e.Message} /retry asks again, the part above is kept.", Tone.Secondary, Tone.Danger);
     }
 
     async Task StatusAsync(CancellationToken ct)
@@ -237,10 +298,13 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (read == 0) { ui.Metadata(files.Count == 0 ? "Nothing readable there." : $"{files[0].Path} is too big to read at once. Use /review for large files."); return; }
         _context = context.ToString();
         _contextLabel = $"{read} file{(read == 1 ? "" : "s")} from {path}";
+        _chip = File.Exists(target) ? Path.GetFileName(target) : $"{Path.GetFileName(target.TrimEnd('/', '\\'))}/ {ui.Theme.Glyph('·')} {read} file{(read == 1 ? "" : "s")}";
         // Reading takes minutes on a CPU: start now, while the question is typed, and the answer comes from the prompt cache.
         _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None).ContinueWith(t => _ = t.Exception, TaskScheduler.Default); // only a head start: failures don't matter
         var left = files.Count - read;
-        ui.Metadata($"Read {read} file{(read == 1 ? "" : "s")}, about {_context.Length / 4} tokens{(left > 0 ? $". {left} didn't fit, riskiest went first; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}.");
+        var extras = $"{(left > 0 ? $". {left} didn't fit, riskiest went first; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}";
+        if (ui.Live) ui.Metadata($"{read} file{(read == 1 ? "" : "s")}, {PromptPanel.Tokens(_context.Length / 4)} tokens{extras}. They go with every question until /clear.", "read");
+        else ui.Metadata($"Read {read} file{(read == 1 ? "" : "s")}, about {_context.Length / 4} tokens{extras}.");
     }
 
     /// <summary>Text piped into <c>jazari ask</c> (a diff, a log, an error): goes with the question the way /read does.</summary>
@@ -248,7 +312,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     {
         var limit = MaxReadTokens * 4;
         _context = $"--- piped input ---\n{(text.Length > limit ? text[..limit] : text)}\n";
-        _contextLabel = "piped input";
+        _contextLabel = _chip = "piped input";
         if (text.Length > limit) ui.Metadata($"Only the first {MaxReadTokens} tokens or so of the piped input were used.");
     }
 
@@ -312,9 +376,10 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         _context = $"--- git diff {since ?? "HEAD"} ---\n{(diff.Length > limit ? diff[..limit] : diff)}\n";
         var files = diff.Split('\n').Count(l => l.StartsWith("diff --git "));
         _contextLabel = $"git diff {since ?? "HEAD"}, {files} file{(files == 1 ? "" : "s")}";
+        _chip = $"git diff {ui.Theme.Glyph('·')} {files} file{(files == 1 ? "" : "s")}";
         _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None).ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
-        ui.Metadata($"Read the changes in {files} file{(files == 1 ? "" : "s")}, about {_context.Length / 4} tokens" +
-                    $"{(diff.Length > limit ? $"; only the first {MaxReadTokens} or so fit" : "")}. Ask about them, for example: review these changes.");
+        ui.Metadata($"{(ui.Live ? "The" : "Read the")} changes in {files} file{(files == 1 ? "" : "s")}, about {_context.Length / 4} tokens" +
+                    $"{(diff.Length > limit ? $"; only the first {MaxReadTokens} or so fit" : "")}. Ask about them, for example: review these changes.", ui.Live ? "read" : null);
     }
 
     void ShowContext()
@@ -383,6 +448,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (original.Length / 4 > MaxReadTokens) { ui.Metadata("That file is too big to edit in one go."); return; }
 
         var asked = FileEdit.Instructions + request;
+        var watch = Stopwatch.StartNew();
         if (await WithThinking(() => gateway.CompleteAsync(asked, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct), ct) is not (true, var reply)) return;
 
         if (FileEdit.Parse(reply) is not { } edits) { ui.Metadata("The model's answer couldn't be read. Nothing changed."); return; }
@@ -390,18 +456,28 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var (text, problem) = FileEdit.Apply(original, edits, applied);
         if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return; }
 
+        if (ui.Live) ui.Row($"{watch.Elapsed.TotalSeconds:0.0}s", applied.Count == 1
+            ? $"One change in {file}{(LineOf(original, applied[0].Search) is var at and > 0 ? $", line {at}" : "")}:"
+            : $"{applied.Count} changes in {file}:");
         foreach (var edit in applied) // what will be written, not what the model sent
         {
-            foreach (var line in edit.Search.Split('\n')) ui.Line("- " + ConsoleText.Sanitize(line.TrimEnd('\r')), Tone.Muted);
-            foreach (var line in edit.Replace.Split('\n')) ui.Line("+ " + ConsoleText.Sanitize(line.TrimEnd('\r')), Tone.Primary);
+            if (ui.Live && LineOf(original, edit.Search) is var at and > 1) ui.DiffLine((at - 1).ToString(), original.Split('\n')[at - 2].TrimEnd('\r'), Tone.Muted);
+            var minus = ui.Live ? ui.Theme.Glyph('−').ToString() : "-";
+            foreach (var line in edit.Search.Split('\n')) ui.DiffLine(minus, line.TrimEnd('\r'), ui.Live ? Tone.Removed : Tone.Muted, Surface.Removed);
+            foreach (var line in edit.Replace.Split('\n')) ui.DiffLine("+", line.TrimEnd('\r'), ui.Live ? Tone.Added : Tone.Primary, Surface.Added);
             ui.Blank();
         }
         if (!Confirm($"Apply this change to {file}?")) { ui.Metadata("Nothing changed."); return; }
         var written = FileEdit.Encode(text, stored.Encoding);
         File.WriteAllBytes(path, written);
         _undo = (path, stored.Bytes, written);
+        _hint = "/undo puts it back";
         ui.Metadata("Changed. /undo puts it back.");
     }
+
+    /// <summary>The line a piece of text starts on, from 1; 0 when it isn't there.</summary>
+    static int LineOf(string text, string piece) =>
+        text.IndexOf(piece, StringComparison.Ordinal) is var at and >= 0 ? text.AsSpan(0, at).Count('\n') + 1 : 0;
 
     void Undo()
     {
@@ -415,6 +491,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         }
         File.WriteAllBytes(path, before);
         _undo = null;
+        _hint = null;
         ui.Metadata($"Put back {path}.");
     }
 
@@ -461,7 +538,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     static readonly (string Key, string Value)[] Keys =
     [
         ("Enter", "Send"), ("Alt+Enter", "New line (also Shift+Enter, Ctrl+J)"), ("Tab", "Complete commands and paths"),
-        ("Up / Down", "History"), ("Ctrl+C", "Stop the answer; twice on an empty line quits"),
+        ("Up / Down", "History; in a menu, choose"), ("Esc", "Close the menu"), ("Ctrl+C", "Stop the answer; twice on an empty line quits"),
     ];
 
     void Help()
@@ -493,7 +570,12 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
     void Details()
     {
-        if (_lastError is null) { ui.Metadata("No error details."); return; }
+        if (_lastError is null)
+        {
+            // A real terminal doesn't print these under each answer, and `jazari feedback` needs the id.
+            ui.Metadata(ui.Live && _lastAnswer is { } last ? $"Last answer: {last}" : "No error details.");
+            return;
+        }
         ui.Rows([("Error", _lastError.Message), ("Cause", (_lastError as GatewayException)?.Cause ?? "-"), ("Type", _lastError.InnerException?.GetType().Name ?? _lastError.GetType().Name)]);
     }
 
@@ -501,6 +583,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     {
         _lastError = e;
         LastFailed = true;
+        _hint = "/details shows the full error";
+        if (e.Status is null) _reachable = false;
         var next = e.Status switch
         {
             null => "Is the gateway running? See docs/phase1-runbook.md, then /retry.",
@@ -515,6 +599,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     {
         _lastError = e;
         LastFailed = true;
+        _hint = "/details shows the full error";
         ui.Error("Something went wrong.", e.Message, "/details for more, /retry to try again.");
     }
 

@@ -4,32 +4,37 @@ using System.Text.RegularExpressions;
 namespace MyOwnLLM.Cli.Terminal;
 
 /// <summary>
-/// Renders a streamed answer as restrained Markdown. In color mode tokens appear as they arrive and each
-/// finished line is redrawn once with its styling; in plain mode (no color / piped) only finished lines are written.
+/// Renders a streamed answer as restrained Markdown. In a real terminal it sits beside the gutter: tokens appear as they
+/// arrive, each row is word-wrapped as it fills and redrawn once with its styling. In plain mode (no color / piped) only
+/// finished lines are written, with no gutter.
 /// </summary>
-public sealed partial class MarkdownStream(TextWriter output, Theme theme, int width)
+public sealed partial class MarkdownStream(TextWriter output, Theme theme, int width, int screenRows = 24)
 {
     enum State { Text, InFence }
 
+    const int Measure = 86; // the design's 720 px text column, in characters
+
     readonly StringBuilder _line = new();
     readonly List<string[]> _table = [];
+    readonly Ui _ui = new(output, theme, width);
     State _state;
-    int _shown; // characters of the current line already echoed raw (color mode)
     int _blocks; // code blocks so far in this answer
+    int _committed; // finished rows of the current line (live)
+    string _echo = ""; // what the current row shows so far (live)
+    int _rows; // rows written since the answer began (live)
+    bool _startsWithCode;
     bool Live => theme.Mode != ColorMode.None;
+    int Body => Math.Max(Math.Min(width - Ui.Gutter, Measure), 12);
 
     public void Write(string token)
     {
         foreach (var c in ConsoleText.Sanitize(token))
         {
             if (c == '\n') { FinishLine(); continue; }
+            if (c == '\t' && Live) { _line.Append("    "); continue; }
             _line.Append(c);
         }
-        if (Live && _line.Length > _shown)
-        {
-            output.Write(theme.Paint(_line.ToString(_shown, _line.Length - _shown), Tone.Primary));
-            _shown = _line.Length;
-        }
+        if (Live) Echo();
     }
 
     public void Complete()
@@ -39,27 +44,141 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
         if (Live) output.Write(Theme.Reset);
     }
 
+    /// <summary>
+    /// Puts the answer's time in the gutter beside its first row, now that it's known. An answer taller than the screen
+    /// has scrolled that row away, and a code block on the first row has "copy 1" there, so then the time goes on a row of its own.
+    /// </summary>
+    public void StampTime(string time)
+    {
+        if (!Live) return;
+        if (_rows == 0 || _startsWithCode || _rows >= screenRows - 1) { output.WriteLine(_ui.Cell(time)); return; }
+        output.Write($"\e[{_rows}A\r{_ui.Cell(time)}\e[{_rows}B\r");
+    }
+
     void FinishLine()
     {
         var line = _line.ToString();
-        var restyle = EraseEcho(line);
         _line.Clear();
-        _shown = 0;
+        if (Live) FinishLive(line);
+        else FinishPlain(line);
+    }
 
+    // -------- real terminal --------
+
+    /// <summary>Shows the unfinished line: rows that filled up are finished for good; the last one grows as tokens arrive.</summary>
+    void Echo()
+    {
+        var line = _line.ToString();
+        if (line.Length == 0 || Held(line)) return;
+        var (prefix, rows) = Layout(line);
+        while (_committed < rows.Count - 1)
+        {
+            ClearEcho();
+            WriteRow(prefix, rows[_committed], _committed);
+            _committed++;
+        }
+        var last = rows[^1];
+        if (_echo.Length > 0 && last.StartsWith(_echo, StringComparison.Ordinal) && _state != State.InFence)
+            output.Write(theme.Paint(last[_echo.Length..], Tone.Primary)); // only what's new, so the row doesn't flicker
+        else
+        {
+            ClearEcho();
+            output.Write(_ui.Cell() + (_state == State.InFence ? theme.Band(Surface.Code, theme.Paint(" " + last, Tone.Primary)) : Pad(prefix, _committed) + theme.Paint(last, Tone.Primary)));
+        }
+        _echo = last;
+    }
+
+    /// <summary>Fences and tables wait for their whole line: they're drawn differently from what the raw text looks like.</summary>
+    bool Held(string line)
+    {
+        var start = line.TrimStart();
+        return _state == State.InFence ? start.StartsWith('`') : start.StartsWith('`') && start.Length < 3 || ConsoleText.IsFence(line) || start.StartsWith('|');
+    }
+
+    void ClearEcho()
+    {
+        if (_echo.Length > 0) output.Write("\r\e[2K");
+        _echo = "";
+    }
+
+    void FinishLive(string line)
+    {
+        ClearEcho();
         if (_state == State.InFence)
         {
-            if (ConsoleText.IsFence(line)) { _state = State.Text; if (!restyle) output.WriteLine(); return; }
-            if (!restyle) { output.WriteLine(); return; }
-            // Printed untouched, no padding and no splitting: a mouse copy must give back exactly the code.
-            output.WriteLine(theme.Code(line));
+            if (ConsoleText.IsFence(line)) { _state = State.Text; _committed = 0; return; }
+            var rows = Split(line, Body - 1);
+            for (var i = _committed; i < rows.Count; i++)
+            {
+                output.WriteLine(_ui.Cell() + theme.Band(Surface.Code, theme.Paint(" " + rows[i], Tone.Primary)));
+                _rows++;
+            }
+            _committed = 0;
             return;
         }
 
-        if (!restyle)
+        if (line.TrimStart().StartsWith('|')) { _table.Add(Cells(line)); return; }
+        FlushTable();
+
+        if (ConsoleText.IsFence(line))
         {
-            // The raw echo stays as printed; keep the fence state right for the lines that follow.
-            if (ConsoleText.IsFence(line)) { _state = State.InFence; _blocks++; }
-            output.WriteLine();
+            _state = State.InFence;
+            _blocks++;
+            _startsWithCode |= _rows == 0;
+            var info = line.Trim()[3..].Trim();
+            // Numbered in the gutter so /copy n can name it.
+            output.WriteLine(_ui.Cell($"copy {_blocks}") + theme.Band(Surface.Code, theme.Paint(" " + (info.Length > 0 ? info : "code"), Tone.Muted)));
+            _rows++;
+            return;
+        }
+
+        var (prefix, wrapped) = Layout(line);
+        for (var i = _committed; i < wrapped.Count; i++) WriteRow(prefix, wrapped[i], i);
+        _committed = 0;
+    }
+
+    void WriteRow(string prefix, string row, int index)
+    {
+        output.WriteLine(_ui.Cell() + (_state == State.InFence
+            ? theme.Band(Surface.Code, theme.Paint(" " + row, Tone.Primary))
+            : Pad(prefix, index) + Inline(Link().Replace(row, "$1 ($2)"))));
+        _rows++;
+    }
+
+    static string Pad(string prefix, int index) => index == 0 ? prefix : new string(' ', prefix.Length);
+
+    /// <summary>
+    /// How a line falls into rows. Bold markers are gone before wrapping: once a row is finished it can't change, and a
+    /// marker closing later would otherwise shift it. Text with wide characters wraps early, since each takes two columns.
+    /// </summary>
+    (string Prefix, IReadOnlyList<string> Rows) Layout(string line)
+    {
+        if (_state == State.InFence) return ("", Split(line, Body - 1));
+        var (prefix, body) = Parts(line);
+        body = body.Replace("**", "");
+        var room = Body - prefix.Length;
+        return (prefix, Ui.Wrap(body, body.Any(ConsoleText.IsWide) ? room / 2 : room));
+    }
+
+    /// <summary>Code keeps every space, so it's cut by columns instead of wrapped at words.</summary>
+    static List<string> Split(string line, int room)
+    {
+        if (line.Any(ConsoleText.IsWide)) room /= 2;
+        List<string> rows = [];
+        for (var i = 0; i < line.Length; i += room) rows.Add(line.Substring(i, Math.Min(room, line.Length - i)));
+        if (rows.Count == 0) rows.Add("");
+        return rows;
+    }
+
+    // -------- plain output --------
+
+    void FinishPlain(string line)
+    {
+        if (_state == State.InFence)
+        {
+            if (ConsoleText.IsFence(line)) { _state = State.Text; return; }
+            // Printed untouched, no padding and no splitting: a mouse copy must give back exactly the code.
+            output.WriteLine(theme.Code(line));
             return;
         }
 
@@ -74,38 +193,25 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
             return;
         }
 
-        var (prefix, body) = Heading().Match(line) is { Success: true } h ? ("", h.Groups[1].Value)
-            : Bullet().Match(line) is { Success: true } b ? ("  - ", b.Groups[1].Value)
-            : Numbered().Match(line) is { Success: true } n ? ($"  {n.Groups[1].Value}. ", n.Groups[2].Value)
-            : ("", line);
+        var (prefix, body) = Parts(line);
         body = Link().Replace(Bold().Replace(body, "$1"), "$1 ($2)");
-
         var lines = Ui.Wrap(body, width - prefix.Length);
         for (var i = 0; i < lines.Count; i++)
             output.WriteLine((i == 0 ? prefix : new string(' ', prefix.Length)) + Inline(lines[i]));
     }
 
-    /// <summary>
-    /// Removes the raw echo so the styled line can replace it (one redraw). Only when that's safe: the echo fits on one
-    /// terminal row (width is one less than the terminal's columns) and has no tabs or wide characters whose columns we
-    /// can't count. Otherwise returns false and the raw echo stays. Plain mode never echoes, so it always restyles.
-    /// </summary>
-    bool EraseEcho(string line)
-    {
-        if (!Live || _shown == 0) return true;
-        if (_shown > width || line.Any(c => c == '\t' || IsWide(c))) return false;
-        output.Write("\r\e[2K");
-        return true;
-    }
-
-    static bool IsWide(char c) =>
-        c is >= 'ᄀ' and <= 'ᅟ' or >= '⺀' and <= '꓏' or >= '가' and <= '힣'
-            or >= '豈' and <= '﫿' or >= '︰' and <= '﹏' or >= '＀' and <= '｠' or >= '￠' and <= '￦'
-        || char.IsSurrogate(c);
+    static (string Prefix, string Body) Parts(string line) =>
+        Heading().Match(line) is { Success: true } h ? ("", h.Groups[1].Value)
+        : Bullet().Match(line) is { Success: true } b ? ("  - ", b.Groups[1].Value)
+        : Numbered().Match(line) is { Success: true } n ? ($"  {n.Groups[1].Value}. ", n.Groups[2].Value)
+        : ("", line);
 
     string Inline(string text) => InlineCode().Replace(text, m => theme.Code(m.Groups[1].Value)) is var styled && Live
-        ? theme.Paint(styled, Tone.Primary)
+        ? theme.Paint(styled.Replace(Theme.Reset, Theme.Reset + PrimaryStart()), Tone.Primary)
         : styled;
+
+    /// <summary>What Paint puts before its text, to carry on in the primary color after inline code ends.</summary>
+    string PrimaryStart() => theme.Paint("", Tone.Primary).Replace(Theme.Reset, "");
 
     void FlushTable()
     {
@@ -116,7 +222,8 @@ public sealed partial class MarkdownStream(TextWriter output, Theme theme, int w
         for (var r = 0; r < rows.Count; r++)
         {
             var text = string.Join("  ", rows[r].Select((c, i) => c.PadRight(widths[i]))).TrimEnd();
-            output.WriteLine(r == 0 && rows.Count > 1 ? theme.Paint(text, Tone.Muted) : Live ? theme.Paint(text, Tone.Primary) : text);
+            output.WriteLine(_ui.Cell() + (r == 0 && rows.Count > 1 ? theme.Paint(text, Tone.Muted) : Live ? theme.Paint(text, Tone.Primary) : text));
+            _rows++;
         }
         _table.Clear();
     }

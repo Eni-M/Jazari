@@ -11,7 +11,7 @@ public sealed class ServerLauncher(
     IProcessRunner runner, IGatewayClient gateway, Func<CancellationToken, Task<bool>> llamaReady, Ui ui, string logDir,
     Func<TimeSpan, CancellationToken, Task> delay, int maxWaits = 180, Func<string, bool>? fileExists = null,
     Func<JazariConfig, CancellationToken, Task<string[]>>? llamaArgs = null,
-    Func<JazariConfig, CancellationToken, Task<string[]>>? fallbackArgs = null, Func<bool>? llamaAlive = null)
+    Func<JazariConfig, CancellationToken, Task<string[]>>? fallbackArgs = null, Func<bool>? llamaAlive = null, bool quiet = false)
 {
     static readonly TimeSpan PollEvery = TimeSpan.FromMilliseconds(500);
 
@@ -31,7 +31,7 @@ public sealed class ServerLauncher(
             return ConnectionState.GatewayNotRunning;
         }
 
-        ui.Label("starting");
+        if (!quiet) ui.Label("starting"); // the interactive session says so on its panel
         if (!llamaUp)
             // The settings measured best on this PC (see DeviceTuner), or the T480's measured CPU setup.
             runner.StartDetached(config.LlamaServer, llamaArgs is null

@@ -1,7 +1,3 @@
-using PrettyPrompt;
-using PrettyPrompt.Completion;
-using PrettyPrompt.Consoles;
-using PrettyPrompt.Documents;
 using MyOwnLLM.Cli.Terminal;
 
 namespace MyOwnLLM.Cli;
@@ -18,74 +14,64 @@ public sealed class TextLineReader(TextReader input) : ILineReader
     public async Task<(bool Ok, string? Text)> ReadAsync() => (true, await input.ReadLineAsync());
 }
 
-/// <summary>The full editor: multi-line input, persistent history, Tab completion of / commands.</summary>
-public sealed class PromptLineReader : ILineReader
-{
-    readonly Prompt _prompt;
-    readonly Ui _ui;
-    /// <summary>What the next question carries (files read, conversation), shown on the line above the prompt.</summary>
-    public Func<string?>? Status { get; set; }
-
-    public PromptLineReader(Ui ui)
-    {
-        _ui = ui;
-        var theme = ui.Theme;
-        var historyFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "history");
-        Directory.CreateDirectory(Path.GetDirectoryName(historyFile)!);
-        var keys = new KeyBindings(newLine: new KeyPressPattern[]
-        {
-            new(ConsoleModifiers.Shift, ConsoleKey.Enter), new(ConsoleModifiers.Alt, ConsoleKey.Enter), new(ConsoleModifiers.Control, ConsoleKey.J),
-        });
-        _prompt = new Prompt(historyFile, new Callbacks(), configuration: new PromptConfiguration(keys, prompt: $"{theme.Glyph('›')} "));
-    }
-
-    public async Task<(bool Ok, string? Text)> ReadAsync()
-    {
-        _ui.Blank();
-        _ui.Divider(Status?.Invoke());
-        var result = await _prompt.ReadLineAsync();
-        if (result.IsSuccess && FitsOneRow(result.Text))
-        {
-            // Turn the line just typed into the highlighted "› question" row. Only for a single line that fits the
-            // terminal, so we know it took exactly one row; anything else stays as typed (never shown twice either way).
-            _ui.Output.Write("\e[1A\r\e[2K");
-            _ui.UserMessage(result.Text);
-        }
-        return (result.IsSuccess, result.Text);
-    }
-
-    bool FitsOneRow(string text) =>
-        text.Length > 0 && !text.Contains('\n') && text.Length + 2 < _ui.Width && text.All(c => c < 'ᄀ' && c != '\t');
-
-    sealed class Callbacks : PromptCallbacks
-    {
-        static string Here => Directory.GetCurrentDirectory();
-
-        protected override Task<bool> ShouldOpenCompletionWindowAsync(string text, int caret, KeyPress keyPress, CancellationToken ct) =>
-            Task.FromResult(Completions.For(text, caret, Here).Items.Count > 0);
-
-        protected override Task<TextSpan> GetSpanToReplaceByCompletionAsync(string text, int caret, CancellationToken ct)
-        {
-            var start = Completions.For(text, caret, Here).Start;
-            return Task.FromResult(new TextSpan(start, caret - start));
-        }
-
-        protected override Task<IReadOnlyList<CompletionItem>> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<CompletionItem>>(Completions.For(text, caret, Here).Items.Select(i => new CompletionItem(i)).ToList());
-    }
-}
-
 /// <summary>The interactive session: welcome once, then read → answer until /exit, end of input, or Ctrl+C twice.</summary>
 public static class InputLoop
 {
+    /// <summary>
+    /// Plain input: opens once setup has been looked at. A real console (<see cref="PromptEditor"/>) goes through
+    /// <see cref="RunInteractiveAsync"/> instead, which opens at once and lets the user type while the servers start.
+    /// </summary>
     public static async Task RunAsync(Session session, Ui ui, string version, string directory, ILineReader reader, bool hasKey = true,
         Task<bool>? updateAvailable = null, string? runningOn = null)
     {
         // Like any good CLI, open even when setup is incomplete, and say what's missing instead of exiting.
         var state = hasKey ? await session.ConnectAsync(CancellationToken.None) : ConnectionState.NoKey;
         Welcome.Render(ui, version, session.ModelName, directory, state, runningOn);
-        if (reader is PromptLineReader prompt) prompt.Status = () => session.StatusLine;
         ui.Blank();
+        await LoopAsync(session, ui, reader, updateAvailable, Task.CompletedTask, () => { });
+    }
+
+    /// <param name="start">Starts the servers; whatever it reported is printed once it's done. Returns whether there's a key.</param>
+    /// <param name="measured">Whether this PC's best settings were measured.</param>
+    public static async Task RunInteractiveAsync(Session session, Ui ui, string version, string directory, PromptEditor editor,
+        Func<Task<(bool HasKey, string Report)>> start, Task<bool>? updateAvailable, bool measured)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        editor.Panel = session.Panel;
+        Welcome.Opening(ui, version, directory);
+
+        var untouched = true; // nothing printed since the wordmark
+        async Task OpenAsync()
+        {
+            ConnectionState state;
+            var report = "";
+            try
+            {
+                (var hasKey, report) = await start();
+                state = hasKey ? await session.ConnectAsync(CancellationToken.None) : ConnectionState.NoKey;
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                session.Unexpected(e);
+                state = ConnectionState.GatewayNotRunning;
+            }
+            session.StartingModel = null;
+            editor.Post(() =>
+            {
+                ui.Output.Write(report);
+                Welcome.Opened(ui, state, clock.Elapsed, untouched && report.Length == 0, measured);
+                untouched = false;
+            });
+        }
+
+        var opening = OpenAsync();
+        await LoopAsync(session, ui, editor, updateAvailable, opening, () => untouched = false);
+    }
+
+    /// <param name="opening">Finishes when the servers are up; a question typed sooner waits for it.</param>
+    /// <param name="onInput">Called when a line was read, before anything is done with it.</param>
+    static async Task LoopAsync(Session session, Ui ui, ILineReader reader, Task<bool>? updateAvailable, Task opening, Action onInput)
+    {
 
         // While an answer streams nobody is reading keys, so Ctrl+C arrives as a console signal: stop the answer.
         CancellationTokenSource? generating = null;
@@ -111,6 +97,7 @@ public static class InputLoop
                     noticeShown = true;
                 }
                 var (ok, text) = await reader.ReadAsync();
+                onInput();
                 if (!ok)
                 {
                     if (!string.IsNullOrEmpty(text)) { lastEmptyCancel = null; continue; }
@@ -121,6 +108,7 @@ public static class InputLoop
                 }
                 if (text is null) break;
                 lastEmptyCancel = null;
+                await opening;
 
                 generating = new CancellationTokenSource();
                 try { await session.HandleAsync(text, generating.Token); }

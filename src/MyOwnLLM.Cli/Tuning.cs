@@ -1,13 +1,14 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace MyOwnLLM.Cli;
 
 /// <summary>
 /// The llama-server settings measured best on this PC by <see cref="DeviceTuner"/>, saved next to config.json.
-/// <see cref="Fingerprint"/> names the hardware, llama.cpp build and model they were measured with; when any of
-/// those change, Jazari measures again.
+/// <see cref="Fingerprint"/> names the hardware, llama.cpp build and model they were measured with. Measuring only
+/// ever happens when the user asks: <c>jazari tune</c>, or yes to the question at the end of <c>jazari update</c>.
 /// </summary>
-public sealed record Tuning(
+public sealed partial record Tuning(
     string Fingerprint, string Device, int Threads, int GpuLayers, bool FlashAttention, int ContextTokens, int CacheRamMiB,
     double PromptPerSecond = 0, double AnswerPerSecond = 0, string? DeviceName = null)
 {
@@ -27,6 +28,12 @@ public sealed record Tuning(
     public string Summary(char dot) =>
         (Device == "none" ? $"CPU, {Threads} threads" : $"{DeviceName ?? Device}{(GpuLayers is > 0 and < 99 ? $", {GpuLayers} layers" : "")}")
         + (FlashAttention ? $" {dot} flash attention" : "") + (AnswerPerSecond > 0 ? $" {dot} {AnswerPerSecond:0.0} tok/s" : "");
+
+    /// <summary>For the line under the prompt: "iris xe", "mx150", "cpu 6 threads".</summary>
+    public string ShortName() => Device == "none" ? $"cpu {Threads} threads" : Vendor().Replace(DeviceName ?? Device, "").Trim().ToLowerInvariant();
+
+    [GeneratedRegex(@"\(R\)|\(TM\)|\b(Intel|NVIDIA|AMD|GeForce|Radeon|Graphics)\b\s*", RegexOptions.IgnoreCase)]
+    private static partial Regex Vendor();
 
     public string[] ServerArgs(string model) =>
     [

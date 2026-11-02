@@ -24,27 +24,24 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
     const int TypicalPromptTokens = 2000, TypicalAnswerTokens = 300;
     readonly Func<string, long?> _fileSize = fileSize ?? (path => File.Exists(path) ? new FileInfo(path).Length : null);
 
-    /// <summary>The saved settings while they still fit this PC; otherwise measures (once, a few minutes) and saves new ones.</summary>
-    public async Task<Tuning> EnsureAsync(JazariConfig config, Machine machine, string path, CancellationToken ct, bool force = false)
-    {
-        var gpus = await ListGpusAsync(config.LlamaServer, ct);
-        var saved = Tuning.Load(path);
-        // A device listing that failed or hung says nothing about the PC: keep what was measured instead of re-tuning
-        // for a PC without GPUs (and again when the GPU is back).
-        if (!force && gpus is null && saved is not null) return saved;
-        var fingerprint = Fingerprint(machine, gpus ?? [], config, _fileSize);
-        if (!force && saved is not null && saved.Fingerprint == fingerprint) return saved;
+    /// <summary>What a start runs on: the saved settings, or safe CPU settings until the user asks for a measurement. Never measures.</summary>
+    public static Tuning ForStart(string path, Machine machine) => Tuning.Load(path) ?? FallBack(machine);
 
-        ui.Metadata("Finding the fastest settings for this PC. This runs once and takes a few minutes.");
-        var tuning = await TuneAsync(config, machine, gpus ?? [], fingerprint, ct);
+    /// <summary>Measures this PC (a few minutes) and saves the result. Only when the user asked: it takes the whole machine.</summary>
+    public async Task<Tuning> MeasureAsync(JazariConfig config, Machine machine, string path, CancellationToken ct)
+    {
+        var gpus = await ListGpusAsync(config.LlamaServer, ct) ?? [];
+        var fingerprint = Fingerprint(machine, gpus, config, _fileSize);
+        if (!ui.Live) ui.Metadata("Finding the fastest settings for this PC. This takes a few minutes.");
+        var tuning = await TuneAsync(config, machine, gpus, fingerprint, ct);
         try { tuning.Save(path); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { ui.Metadata($"Couldn't save the settings ({e.Message}); they'll be measured again next time."); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { ui.Metadata($"Couldn't save the settings ({e.Message}); Jazari stays on the ones it has."); }
         return tuning;
     }
 
     /// <summary>
-    /// Safe CPU settings for this one start after the tuned ones failed. Not saved: one bad start (a port in use, a
-    /// moment without VRAM) mustn't replace what was measured; <c>jazari tune</c> measures again when it keeps failing.
+    /// Safe CPU settings, before anything is measured or for this one start after the tuned ones failed. Not saved: one
+    /// bad start (a port in use, a moment without VRAM) mustn't replace what was measured; <c>jazari tune</c> measures again.
     /// </summary>
     public static Tuning FallBack(Machine machine) => Tuning.Default("", machine.LogicalCores, machine.RamBytes);
 
@@ -57,25 +54,39 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         // CPU threads first, then flash attention only at the best thread count: a slow laptop measures 4 options, not 6.
         var results = new List<(Tuning Settings, double Seconds)>();
         var threads = string.Join(',', ThreadCounts(machine.LogicalCores));
-        ui.Metadata($"Measuring the CPU ({machine.CpuName.Trim()}) at {threads} threads.");
-        var cpu = await BenchAsync(bench, config.Model, best, ["-dev", "none", "-ngl", "0", "-t", threads], "0", ct);
-        results.AddRange(cpu);
-        var bestThreads = cpu.Count > 0 ? cpu.MinBy(r => r.Item2).Item1.Threads : best.Threads;
-        ui.Metadata($"Measuring flash attention at {bestThreads} threads.");
-        results.AddRange(await BenchAsync(bench, config.Model, best, ["-dev", "none", "-ngl", "0", "-t", bestThreads.ToString()], "1", ct));
-
         // Each GPU gets the whole model when it fits, else as many layers as fit: the T480's 2 GB MX150 reads prompts
         // about 38% faster with 24 of 40 layers, at the same answer speed.
         var modelMiB = (int)((_fileSize(config.Model) ?? 0) >> 20);
-        foreach (var gpu in gpus)
+        var usable = gpus.Select(g => (Gpu: g, Layers: LayersThatFit(g.FreeMiB, modelMiB, best.ContextTokens))).Where(g => g.Layers >= MinUsefulLayers).ToList();
+
+        string[] steps = [$"cpu {threads} threads", "flash attention", .. usable.Select(g => (best with { Device = g.Gpu.Id, DeviceName = g.Gpu.Name }).ShortName()), "pick fastest"];
+        var done = 0;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        void Step()
         {
-            var layers = LayersThatFit(gpu.FreeMiB, modelMiB, best.ContextTokens);
-            if (layers < MinUsefulLayers) continue;
-            ui.Metadata($"Measuring the GPU {gpu.Name}{(layers < ModelLayers ? $" with {layers} of {ModelLayers} layers" : "")}.");
+            var left = done == 0 ? "a few minutes" : $"about {Math.Max(1, Math.Ceiling(clock.Elapsed.TotalMinutes / done * (steps.Length - 1 - done))):0} min left";
+            ui.TuneProgress(steps, done, left, redraw: done > 0);
+            done++;
+        }
+
+        Step();
+        if (!ui.Live) ui.Metadata($"Measuring the CPU ({machine.CpuName.Trim()}) at {threads} threads.");
+        var cpu = await BenchAsync(bench, config.Model, best, ["-dev", "none", "-ngl", "0", "-t", threads], "0", ct);
+        results.AddRange(cpu);
+        var bestThreads = cpu.Count > 0 ? cpu.MinBy(r => r.Item2).Item1.Threads : best.Threads;
+        Step();
+        if (!ui.Live) ui.Metadata($"Measuring flash attention at {bestThreads} threads.");
+        results.AddRange(await BenchAsync(bench, config.Model, best, ["-dev", "none", "-ngl", "0", "-t", bestThreads.ToString()], "1", ct));
+
+        foreach (var (gpu, layers) in usable)
+        {
+            Step();
+            if (!ui.Live) ui.Metadata($"Measuring the GPU {gpu.Name}{(layers < ModelLayers ? $" with {layers} of {ModelLayers} layers" : "")}.");
             var ngl = layers >= ModelLayers ? 99 : layers;
             results.AddRange(await BenchAsync(bench, config.Model, best with { Device = gpu.Id, GpuLayers = ngl, DeviceName = gpu.Name },
                 ["-dev", gpu.Id, "-ngl", ngl.ToString(), "-t", bestThreads.ToString()], "0,1", ct));
         }
+        Step();
 
         if (results.Count == 0) { ui.Metadata("Nothing could be measured, so Jazari uses safe CPU settings."); return best; }
         foreach (var (option, turn) in results.OrderBy(r => r.Seconds))
