@@ -35,6 +35,20 @@ public class SseChunkTests
         Assert.Equal(0, SseChunk.Parse("""data: {"id":"ix-7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""")!.DroppedTurns);
 
     [Fact]
+    public void Final_chunk_carries_sources()
+    {
+        var chunk = SseChunk.Parse("""data: {"id":"ix-7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"sources":[{"title":"Records","url":"https://learn.microsoft.com/dotnet/csharp/fundamentals/types/records#value-equality"}]}""")!;
+        Assert.Equal([new DocSource("Records", "https://learn.microsoft.com/dotnet/csharp/fundamentals/types/records#value-equality")], chunk.Sources!);
+    }
+
+    [Fact]
+    public void Missing_sources_means_none()
+    {
+        Assert.Null(SseChunk.Parse("""data: {"id":"ix-7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""")!.Sources);
+        Assert.Null(SseChunk.Parse("""data: {"id":"ix-7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"sources":null}""")!.Sources);
+    }
+
+    [Fact]
     public void Progress_chunk() =>
         Assert.Equal(new ReadProgress(100, 40, 60), SseChunk.Parse("""data: {"progress":{"total":100,"cached":40,"processed":60}}""")!.Progress);
 

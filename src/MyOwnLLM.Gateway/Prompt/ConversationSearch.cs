@@ -15,7 +15,7 @@ public static partial class ConversationSearch
     const int MinHistoryTokens = 2000, RecentMessages = 4, MaxPinTokens = 250, MaxLineChars = 300, MaxLines = 8;
     const double K1 = 1.5, B = 0.75;
 
-    static readonly HashSet<string> Stopwords =
+    internal static readonly HashSet<string> Stopwords =
     [
         "a", "about", "an", "and", "are", "at", "be", "can", "do", "does", "for", "from", "how", "i", "in", "is", "it", "many", "me",
         "much", "my", "of", "on", "or", "our", "that", "the", "this", "to", "was", "we", "what", "when", "where", "which", "who", "why",

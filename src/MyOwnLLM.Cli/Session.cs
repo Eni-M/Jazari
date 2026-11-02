@@ -165,6 +165,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         AnswerTimings? timings = null;
         var cutOff = false;
         var dropped = 0;
+        IReadOnlyList<DocSource>? sources = null;
         var watch = Stopwatch.StartNew();
         try
         {
@@ -174,6 +175,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
                 timings = chunk.Timings ?? timings;
                 cutOff |= chunk.CutOff;
                 dropped = Math.Max(dropped, chunk.DroppedTurns);
+                sources = chunk.Sources ?? sources;
                 if (chunk.Error is not null)
                 {
                     await FinishAsync();
@@ -201,6 +203,13 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             // On a real terminal the time goes in the gutter, /copy n beside each block and the speed under the prompt.
             if (ui.Live) Stamp(renderer, watch);
             else ui.Metadata($"{_lastAnswer}{copyHint}");
+            // The docs page the answer drew on, once per page. It stays out of the answer, so /copy and the history are unchanged.
+            foreach (var source in (sources ?? []).DistinctBy(s => s.Url.Split('#')[0]))
+            {
+                var text = $"{source.Title} {dot} {source.Url}";
+                if (ui.Live) ui.Row("source", text, Tone.Secondary);
+                else ui.Metadata(text);
+            }
             if (cutOff && ui.Live) ui.Row("cut", "The answer reached its length limit. Say \"go on\" for the rest.", Tone.Secondary, Tone.Danger);
             else if (cutOff) ui.Metadata("The answer reached its length limit. Say \"go on\" for the rest.");
             // Once per cut: the gateway still searches the dropped turns (ConversationSearch), so say so too.

@@ -460,4 +460,70 @@ public class EndpointTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
         await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
+
+    const string CoveredQuestion = "How do I send a not found result from a minimal API?";
+
+    void WriteLawBook() => LawBookTests.Write(Path.Combine(_dir, "law-book.db"), LawBookTests.SmallBook);
+
+    [Fact]
+    public async Task A_plain_question_carries_the_passage()
+    {
+        WriteLawBook();
+        await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(CoveredQuestion));
+        var question = Assert.Single(_llama.Calls).Messages[^1].Content;
+        Assert.StartsWith("From the .NET docs:\n", question);
+        Assert.Contains("Results.NotFound()", question);
+        Assert.EndsWith("\n\n" + CoveredQuestion, question);
+    }
+
+    [Fact]
+    public async Task Without_a_law_book_the_question_goes_plain()
+    {
+        await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(CoveredQuestion));
+        Assert.Equal(CoveredQuestion, Assert.Single(_llama.Calls).Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task A_question_with_read_files_does_not_search()
+    {
+        WriteLawBook();
+        await _client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[] { new { role = "user", content = CoveredQuestion } }, context = "class A;" });
+        Assert.Equal(CoveredQuestion, Assert.Single(_llama.Calls).Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task A_json_schema_request_does_not_search()
+    {
+        WriteLawBook();
+        await _client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[] { new { role = "user", content = CoveredQuestion } }, json_schema = "{\"type\":\"object\"}" });
+        Assert.Equal(CoveredQuestion, Assert.Single(_llama.Calls).Messages[^1].Content);
+    }
+
+    static JsonElement FinalEvent(string body) =>
+        JsonDocument.Parse(body.Split("\n").Last(l => l.Contains("\"id\":"))["data: ".Length..]).RootElement;
+
+    [Fact]
+    public async Task Stream_final_event_names_the_sources()
+    {
+        WriteLawBook();
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(CoveredQuestion, stream: true));
+        var sources = FinalEvent(await response.Content.ReadAsStringAsync()).GetProperty("sources");
+        Assert.Equal(LawBookTests.SmallBook[0].Url, sources[0].GetProperty("url").GetString());
+        Assert.Equal(LawBookTests.SmallBook[0].Title, sources[0].GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Stream_final_event_has_no_sources_without_passages()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(CoveredQuestion, stream: true));
+        Assert.False(FinalEvent(await response.Content.ReadAsStringAsync()).TryGetProperty("sources", out _));
+    }
+
+    [Fact]
+    public async Task Warm_does_not_search()
+    {
+        WriteLawBook();
+        await _client.PostAsJsonAsync("/v1/warm", new { messages = new[] { new { role = "user", content = CoveredQuestion } } });
+        Assert.DoesNotContain(Assert.Single(_llama.Calls).Messages, m => m.Content.Contains("From the .NET docs"));
+    }
 }

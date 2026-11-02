@@ -1,0 +1,23 @@
+[
+  {
+    "repo": "dotnet/docs",
+    "commit": "40fbd4674d72503f18781f67dec0fa69315bb84a",
+    "folders": ["docs/csharp", "docs/fundamentals", "docs/core", "docs/standard", "docs/architecture"],
+    "snippet_folders": ["samples/snippets/csharp", "samples/snippets/standard", "samples/snippets/core"],
+    "tilde_root": ""
+  },
+  {
+    "repo": "dotnet/AspNetCore.Docs",
+    "commit": "9dfb3e392d31b33761e7cc5070ea4a7d92082907",
+    "folders": ["aspnetcore"],
+    "snippet_folders": [],
+    "tilde_root": "aspnetcore"
+  },
+  {
+    "repo": "dotnet/EntityFramework.Docs",
+    "commit": "b0c8daf21d4dd8157e9696e77942278b9722b226",
+    "folders": ["entity-framework/core"],
+    "snippet_folders": ["samples/core"],
+    "tilde_root": ""
+  }
+]

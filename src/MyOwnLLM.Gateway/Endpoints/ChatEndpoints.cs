@@ -37,13 +37,13 @@ public static class ChatEndpoints
         return group;
     }
 
-    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, ModelLimits Limits, ConversationNotes Notes);
+    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, ModelLimits Limits, ConversationNotes Notes, LawBook LawBook);
 
     static Services Resolve(HttpContext http) => new(
         http.RequestServices.GetRequiredService<ILlamaClient>(), http.RequestServices.GetRequiredService<RequestQueue>(),
         http.RequestServices.GetRequiredService<ProjectStateStore>(), http.RequestServices.GetRequiredService<InteractionLog>(),
         http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<ModelLimits>(),
-        http.RequestServices.GetRequiredService<ConversationNotes>());
+        http.RequestServices.GetRequiredService<ConversationNotes>(), http.RequestServices.GetRequiredService<LawBook>());
 
     static async Task<string?> NoteFor(Services s, string? project) =>
         project is not null && GitSummary.IsRepo(project) ? await s.State.GetAsync(project) : null;
@@ -59,7 +59,11 @@ public static class ChatEndpoints
         var question = request.Messages.LastOrDefault()?.Content ?? "";
         var history = request.Messages.SkipLast(1).ToList();
         var note = await ConversationNoteFor(s, project, history.Count == 0);
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages);
+        // ponytail: questions on /read files, and /edit and /commit (JSON answers), don't search yet: passages beside the
+        // user's own code are untested, and earlier work showed a small model describes the wrong thing when given extra
+        // material. Add them when a test set covers them.
+        var passages = request.Context is null && request.JsonSchema is null ? s.LawBook.Search(question) : [];
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question, passages), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages, out var usedPassages);
         var watch = Stopwatch.StartNew();
 
         string answer;
@@ -95,7 +99,12 @@ public static class ChatEndpoints
                 return;
             }
             id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
-            await WriteEventAsync(http, new { id = $"ix-{id}", choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } }, timings = stats, dropped_turns = droppedMessages / 2 }, http.RequestAborted);
+            var choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } };
+            // sources only when the law book's passages went in, so the CLI names the page the answer drew on.
+            object final = usedPassages
+                ? new { id = $"ix-{id}", choices, timings = stats, dropped_turns = droppedMessages / 2, sources = passages.Select(p => new { title = p.Title, url = p.Url }) }
+                : new { id = $"ix-{id}", choices, timings = stats, dropped_turns = droppedMessages / 2 };
+            await WriteEventAsync(http, final, http.RequestAborted);
             await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
         }
         else
