@@ -228,3 +228,15 @@ A full install into a temporary folder on this PC, then `jazari update` the way 
 - PrettyPrompt is gone: it can't draw below the input or put the menu above it. `Terminal/PromptEditor.cs` replaces it, and reads the old history file.
 - Deliberately not like the canvas: the header and panel are printed inline instead of pinned to the window. Text scrolled out of a terminal's scroll margins never reaches its scrollback, so pinning would lose the conversation. The canvas's window background also isn't painted: the terminal's own shows.
 - An answer no longer prints its id, tokens and cache use in a real terminal; `/details` has them.
+
+## Made-up answers traced and fixed (2026-11-02)
+
+Answers like "tokens are limited by your subscription plan" and a fake GitHub link had three causes:
+
+- **A junk project note.** The gateway kept a note for the home folder, written by the model from an early "hello" and full of invented tasks, and sent it with every question. Notes now exist only inside a git repository: they're neither sent nor updated elsewhere. The note prompt also forbids inventing anything, and the old row in the database is left alone, unused.
+- **The system prompt.** "add only the details" came back as an "Additional Details:" section padded with invented bullets, and later answers copied that shape.
+- **No facts about itself.** The model assumed an online service. The prompt now says it runs on this PC, is unlimited and free, and has no account, website or support team.
+
+Tried on Granite 4.1 3B with a temporary llama-server on port 8099, not through Jazari. "As few words as the question needs" gave one-word, often wrong answers; "one to three complete sentences" gave correct ones to the questions tried, at 40-160 tokens. That undoes part of the 68% cut from 2026-10-31, so answers take longer: accuracy comes first. Still wrong: it says Jazari has no GitHub repository, because the prompt doesn't name one.
+
+The panel now sits at the bottom of the window. It's drawn at a fixed position while the conversation scrolls normally, so scrollback still works; scroll margins aren't used.

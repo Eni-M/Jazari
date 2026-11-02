@@ -44,12 +44,15 @@ public static class ChatEndpoints
         http.RequestServices.GetRequiredService<ProjectStateStore>(), http.RequestServices.GetRequiredService<InteractionLog>(),
         http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<ModelLimits>());
 
+    static async Task<string?> NoteFor(Services s, string? project) =>
+        project is not null && GitSummary.IsRepo(project) ? await s.State.GetAsync(project) : null;
+
     static Task Chat(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
         var project = ProjectPath(http);
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultChatTokens, 1, MaxChatTokens);
         var question = request.Messages.LastOrDefault()?.Content ?? "";
-        var note = project is null ? null : await s.State.GetAsync(project);
+        var note = await NoteFor(s, project);
         var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages.SkipLast(1).ToList(), question), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens);
         var watch = Stopwatch.StartNew();
 
@@ -121,7 +124,7 @@ public static class ChatEndpoints
     static Task Warm(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
         var project = ProjectPath(http);
-        var note = project is null ? null : await s.State.GetAsync(project);
+        var note = await NoteFor(s, project);
         var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, ""), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
         await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, 1, t), http.RequestAborted);
         http.Response.StatusCode = StatusCodes.Status204NoContent;
@@ -143,7 +146,7 @@ public static class ChatEndpoints
 
     static Task Status(HttpContext http, StatusRequest request) => Guard(http, async s =>
     {
-        var note = await s.State.GetAsync(request.ProjectPath);
+        var note = await NoteFor(s, request.ProjectPath);
         var git = await GitSummary.GetAsync(request.ProjectPath, http.RequestAborted);
         var prompt = PromptBuilder.Build(new PromptParts(note ?? "(no notes yet)", git, [], StatusQuestion), await s.Limits.ContextTokensAsync(http.RequestAborted), StatusTokens);
         var watch = Stopwatch.StartNew();

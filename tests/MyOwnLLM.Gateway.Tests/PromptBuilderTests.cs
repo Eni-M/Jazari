@@ -74,6 +74,15 @@ public class PromptBuilderTests
     public void SystemPrompt_names_Jazari() => Assert.StartsWith("You are Jazari", PromptBuilder.SystemPrompt);
 
     [Fact]
+    public void SystemPrompt_says_what_the_model_cannot_know()
+    {
+        Assert.Contains("entirely on this PC", PromptBuilder.SystemPrompt);
+        Assert.Contains("no account, subscription", PromptBuilder.SystemPrompt);
+        Assert.Contains("unlimited", PromptBuilder.SystemPrompt);
+        Assert.DoesNotContain("details", PromptBuilder.SystemPrompt); // it came back as an "Additional Details:" section
+    }
+
+    [Fact]
     public void Build_throws_when_over_budget()
     {
         var parts = new PromptParts(null, null, [], new string('x', 70_000));

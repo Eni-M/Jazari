@@ -208,10 +208,28 @@ public class EndpointTests : IDisposable
         Assert.Single(_llama.Calls);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Chat_sends_the_note_only_inside_a_repository(bool repo)
+    {
+        var project = Directory.CreateDirectory(Path.Combine(_dir, repo ? "a-repo" : "a-folder")).FullName;
+        if (repo) Directory.CreateDirectory(Path.Combine(project, ".git"));
+        await _factory.Services.GetRequiredService<MyOwnLLM.Gateway.State.ProjectStateStore>().SetAsync(project, "NOTE: invented task");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(ChatBody("hello")) };
+        request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project));
+
+        (await _client.SendAsync(request)).EnsureSuccessStatusCode();
+
+        var sent = string.Join("\n", Assert.Single(_llama.Calls).Messages.Select(m => m.Content));
+        Assert.Equal(repo, sent.Contains("NOTE: invented task"));
+    }
+
     [Fact]
     public async Task Status_uses_state_note_and_caps_tokens_at_150()
     {
         var project = Directory.CreateDirectory(Path.Combine(_dir, "proj")).FullName;
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
         await _factory.Services.GetRequiredService<MyOwnLLM.Gateway.State.ProjectStateStore>().SetAsync(project, "NOTE: building the queue");
 
         var response = await _client.PostAsJsonAsync("/v1/status", new { project_path = project });

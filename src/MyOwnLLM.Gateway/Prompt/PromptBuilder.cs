@@ -18,17 +18,21 @@ public sealed class InputTooLargeException(int estimated, int limit)
 public static class PromptBuilder
 {
     public const string SystemPrompt =
-        // Every answer token costs about 1/6 s on a T480: this wording cut answers by 68% on five test questions
-        // (762 to 246 tokens) with the same findings. Avoid phrases the model can echo as headings.
+        // Tried on the real model (2026-11-02). "As few words as the question needs" gave one-word answers that were often
+        // wrong ("Use ScopedServiceProvider"); asking for sentences gave AddScoped with a sample, at 40-160 tokens. Every
+        // answer token costs about 1/6 s on a T480, so "brief but complete" isn't worth it: it ran to the 220-token cap.
+        // Avoid phrases the model can echo as headings: "add only the details" came back as "Additional Details:" with
+        // invented bullets. The facts are here because the model knows nothing about itself and assumes an online service.
         "You are Jazari, a coding assistant for ASP.NET Core, C#, .NET, networking, system design, system architecture " +
-        "and cybersecurity. Answer in as few words as the question needs. Lead with the answer, then add only the details " +
-        "needed to act on it. Show code as the smallest change, never a whole file unless asked. No preamble, no restating " +
-        "the question, no closing summary.";
+        "and cybersecurity. You run entirely on this PC, so usage is unlimited and free. There is no account, subscription, " +
+        "website or support team, and you can't reach the internet. Answer directly in one to three complete sentences, plus " +
+        "code when it helps. Show code as the smallest change, never a whole file unless asked. No preamble, no headings, no " +
+        "closing summary. If you don't know, say you don't know; never make up links, names or products.";
 
     public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens)
     {
         List<ChatMessage> fixedStart = [new("system", SystemPrompt)];
-        if (parts.StateNote is { Length: > 0 } note) fixedStart.Add(new("system", "Project state:\n" + note));
+        if (parts.StateNote is { Length: > 0 } note) fixedStart.Add(new("system", "Notes on this project, possibly out of date. Use them only when asked about the project, and never repeat them otherwise:\n" + note));
         if (parts.RepoContext is { Length: > 0 } context) fixedStart.Add(new("system", "Relevant code:\n" + context));
         var question = new ChatMessage("user", parts.Question);
 

@@ -6,6 +6,25 @@ namespace MyOwnLLM.Gateway.Tests;
 
 public class ProjectStateTests : IDisposable
 {
+
+    [Fact]
+    public void A_project_is_a_folder_inside_a_repository()
+    {
+        var root = Directory.CreateTempSubdirectory("jazari repo").FullName;
+        try
+        {
+            var inner = Directory.CreateDirectory(Path.Combine(root, "src", "deep")).FullName;
+            Assert.False(GitSummary.IsRepo(inner));
+
+            Directory.CreateDirectory(Path.Combine(root, ".git"));
+            Assert.True(GitSummary.IsRepo(inner));
+
+            Directory.Delete(Path.Combine(root, ".git"));
+            File.WriteAllText(Path.Combine(root, ".git"), "gitdir: elsewhere"); // a linked worktree
+            Assert.True(GitSummary.IsRepo(inner));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
     readonly string _dir = Directory.CreateTempSubdirectory("mollm-state").FullName;
 
     public void Dispose()

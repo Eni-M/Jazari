@@ -86,7 +86,7 @@ public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, Pro
             _queued.Remove(project); // exchanges recorded from now on queue a fresh update
             exchanges = _pending.Remove(project, out var list) ? list : [];
         }
-        if (exchanges.Count == 0) return 0;
+        if (exchanges.Count == 0 || !GitSummary.IsRepo(project)) return 0;
         exchanges = WithinBudget(exchanges);
 
         try
@@ -98,7 +98,9 @@ public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, Pro
             [
                 new("system", "You maintain a short project state note for a developer."),
                 new("user", $"Current note:\n{note ?? "(none)"}\n\nLatest exchanges:\n{recent}\n\n{git}\n\n" +
-                            "Write the updated project state note: current task, recent changes, open problems, last decisions. At most 150 words."),
+                            "Write the updated project state note: current task, recent changes, open problems, last decisions. " +
+                            "Use only what the note, the exchanges and the git output above actually say. Leave out any part they don't " +
+                            "support; small talk adds nothing. Never invent tasks, changes or decisions. At most 150 words."),
             ];
             await state.SetAsync(project, await llama.ChatAsync(prompt, NoteTokens, ct));
             return 0;

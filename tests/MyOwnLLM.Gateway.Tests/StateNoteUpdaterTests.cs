@@ -16,7 +16,11 @@ public class StateNoteUpdaterTests : IAsyncLifetime
     Task _runner = null!;
     string Project => _dir;
 
-    public Task InitializeAsync() => Start(capacity: 8);
+    public Task InitializeAsync()
+    {
+        Directory.CreateDirectory(Path.Combine(_dir, ".git")); // notes only exist for repositories
+        return Start(capacity: 8);
+    }
 
     Task Start(int capacity)
     {
@@ -49,6 +53,18 @@ public class StateNoteUpdaterTests : IAsyncLifetime
     {
         for (var i = 0; i < 100 && await _state.GetAsync(Project) != expected; i++) await Task.Delay(50);
         Assert.Equal(expected, await _state.GetAsync(Project));
+    }
+
+    [Fact]
+    public async Task A_folder_outside_a_repository_gets_no_note()
+    {
+        Directory.Delete(Path.Combine(_dir, ".git"));
+
+        _updater.Record(Project, "hello", "hello");
+        await Task.Delay(300);
+
+        Assert.Null(await _state.GetAsync(Project));
+        Assert.Empty(_llama.Calls);
     }
 
     [Fact]
