@@ -31,10 +31,15 @@ class RecallTests(unittest.TestCase):
 class HarnessTests(unittest.TestCase):
     def test_server_runs_the_t480_cpu_settings_on_the_temporary_port(self):
         args = llama_args("l.exe", "m.gguf", 4, 10240)
-        self.assertEqual(args[:3], ["l.exe", "-m", "m.gguf"])
+        self.assertEqual(args[:3], [os.path.abspath("l.exe"), "-m", "m.gguf"])
         joined = " ".join(args)
         for setting in ["-dev none", "-ngl 0", "-t 4", "--poll 0", "-fa off", "-c 10240", "-ctxcp 8", "--cache-ram 1024", "-np 1", "--cache-reuse 256", "--no-webui", "--port 8099"]:
             self.assertIn(setting, joined)
+
+    def test_a_relative_server_path_is_made_absolute(self):
+        server = llama_args("spike/bin/llama-server.exe", "m.gguf", 4, 16384)[0]
+        self.assertTrue(os.path.isabs(server))
+        self.assertEqual(server, os.path.abspath(os.path.join("spike", "bin", "llama-server.exe")))
 
     def test_filler_is_this_repos_code_in_full_chunks_without_generated_files(self):
         chunks = filler()
