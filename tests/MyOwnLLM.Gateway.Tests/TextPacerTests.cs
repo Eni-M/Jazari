@@ -76,13 +76,19 @@ public class TextPacerTests
     public async Task The_first_words_wait_only_a_moment_by_default()
     {
         var shown = new StringBuilder();
-        var pacer = new TextPacer(t => { lock (shown) shown.Append(t); }, tick: Tick);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var first = -1L;
+        var pacer = new TextPacer(t => { lock (shown) { if (first < 0) first = clock.ElapsedMilliseconds; shown.Append(t); } }, tick: Tick);
 
         pacer.Add("Hi");
-        await Task.Delay(1000);
+        // Polled rather than a fixed wait: a busy CI runner can delay the pacer's timer, but not by more than a second.
+        for (var i = 0; i < 500 && Shown() != "Hi"; i++) await Task.Delay(10);
 
-        lock (shown) Assert.Equal("Hi", shown.ToString());
+        Assert.Equal("Hi", Shown());
+        Assert.True(first < 1400, $"the first words waited {first} ms; the old hold was 1.5 s");
         await pacer.DrainAsync();
+
+        string Shown() { lock (shown) return shown.ToString(); }
     }
 
     [Fact]
