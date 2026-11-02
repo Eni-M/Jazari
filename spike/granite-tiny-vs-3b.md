@@ -20,4 +20,4 @@ llama.cpp b11982 Vulkan build, CPU only (`-dev none -t 8 --poll 0`), both Q4_K_M
 | Granite 4.0-H Tiny | 0/6 | writes the right body, then keeps going (repeats the suffix, markdown, prose) until the 160-token cap; no FIM tokens detected in its GGUF |
 
 ## Takeaway
-Tiny is a faster **chat** model on this laptop but is not usable for **fill-in-the-middle**. If chosen, pair it with Qwen2.5-Coder-1.5B on the MX150 for autocomplete. Not yet compared: chat answer quality on .NET questions, and prompt-cache reuse (hybrids can't KV-shift).
+Tiny is a faster **chat** model on this laptop but is not usable for **fill-in-the-middle**. If chosen, pair it with Qwen2.5-Coder-1.5B on the MX150 for autocomplete. Not yet compared: chat answer quality on .NET questions, and prompt-cache reuse (hybrids can't KV-shift). **Correction, 2026-11-02:** they can on llama.cpp build 11982, which shifts the attention cache on a history cut ("reusing chunk with size 8531, shifting KV cache"): 11 s instead of 228 s from scratch, same score. See `reports/Local inference sources for Jazari.md`.

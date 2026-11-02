@@ -18,12 +18,13 @@ if (args is ["add-key", ..])
     return;
 }
 
-builder.WebHost.UseUrls("http://127.0.0.1:5080");
+builder.WebHost.UseUrls($"http://127.0.0.1:{options.Port}");
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(new ApiKeyStore(options.KeyFile));
 builder.Services.AddSingleton(new LocalDb(options.DbFile));
 builder.Services.AddSingleton<ProjectStateStore>();
+builder.Services.AddSingleton<ConversationNotes>();
 builder.Services.AddSingleton<InteractionLog>();
 builder.Services.AddSingleton<StateNoteUpdater>();
 builder.Services.AddSingleton<RequestQueue>();

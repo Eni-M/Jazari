@@ -29,15 +29,26 @@ public static class PromptBuilder
         "code when it helps. Show code as the smallest change, never a whole file unless asked. No preamble, no headings, no " +
         "closing summary. If you don't know, say you don't know; never make up links, names or products.";
 
-    public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens)
+    public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens) =>
+        Build(parts, contextTokens, maxOutputTokens, out _);
+
+    /// <param name="droppedMessages">How many of the oldest history messages didn't fit.</param>
+    public static IReadOnlyList<ChatMessage> Build(PromptParts parts, int contextTokens, int maxOutputTokens, out int droppedMessages)
     {
         List<ChatMessage> fixedStart = [new("system", SystemPrompt)];
         if (parts.StateNote is { Length: > 0 } note) fixedStart.Add(new("system", "Notes on this project, possibly out of date. Use them only when asked about the project, and never repeat them otherwise:\n" + note));
         if (parts.RepoContext is { Length: > 0 } context) fixedStart.Add(new("system", "Relevant code:\n" + context));
-        var question = new ChatMessage("user", parts.Question);
+
+        // The user's matching earlier lines go inside the question, never into history, so the prompt's start stays cached.
+        // The whole history is searched, so a line the cut below drops is still found.
+        var pin = ConversationSearch.Pin(parts.History, parts.Question);
+        var question = new ChatMessage("user", pin is null ? parts.Question : "From earlier in this conversation:\n" + pin + "\n\n" + parts.Question);
 
         var limit = contextTokens - maxOutputTokens;
-        var required = fixedStart.Sum(m => EstimateTokens(m.Content)) + EstimateTokens(question.Content);
+        var fixedTokens = fixedStart.Sum(m => EstimateTokens(m.Content));
+        var required = fixedTokens + EstimateTokens(question.Content);
+        if (required > limit && pin is not null) // only the pin is too much: ask without it rather than refuse
+            (question, required) = (new("user", parts.Question), fixedTokens + EstimateTokens(parts.Question));
         if (required > limit) throw new InputTooLargeException(required, limit);
 
         // Long conversations: drop the oldest history until it fits. The cut moves in steps of DropStep messages counted from
@@ -47,7 +58,8 @@ public static class PromptBuilder
         var historyTokens = history.Sum(m => EstimateTokens(m.Content));
         var drop = 0;
         while (drop < history.Count && required + historyTokens > limit) historyTokens -= EstimateTokens(history[drop++].Content);
-        if (drop > 0) history.RemoveRange(0, Math.Min(history.Count, (drop + DropStep - 1) / DropStep * DropStep));
+        droppedMessages = drop > 0 ? Math.Min(history.Count, (drop + DropStep - 1) / DropStep * DropStep) : 0;
+        history.RemoveRange(0, droppedMessages);
 
         return [.. fixedStart, .. history, question];
     }

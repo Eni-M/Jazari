@@ -30,5 +30,5 @@ public sealed class ProjectStateStore(LocalDb db)
         await cmd.ExecuteNonQueryAsync();
     }
 
-    static string Key(string projectPath) => Path.GetFullPath(projectPath).TrimEnd('\\', '/').ToLowerInvariant();
+    internal static string Key(string projectPath) => Path.GetFullPath(projectPath).TrimEnd('\\', '/').ToLowerInvariant();
 }

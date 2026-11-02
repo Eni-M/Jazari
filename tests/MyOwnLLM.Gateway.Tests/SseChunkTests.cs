@@ -27,6 +27,14 @@ public class SseChunkTests
         Assert.True(SseChunk.Parse("""data: {"id":"ix-7","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}""")!.CutOff);
 
     [Fact]
+    public void Final_chunk_carries_dropped_turns() =>
+        Assert.Equal(4, SseChunk.Parse("""data: {"id":"ix-7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"dropped_turns":4}""")!.DroppedTurns);
+
+    [Fact]
+    public void Missing_dropped_turns_means_none() =>
+        Assert.Equal(0, SseChunk.Parse("""data: {"id":"ix-7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""")!.DroppedTurns);
+
+    [Fact]
     public void Progress_chunk() =>
         Assert.Equal(new ReadProgress(100, 40, 60), SseChunk.Parse("""data: {"progress":{"total":100,"cached":40,"processed":60}}""")!.Progress);
 

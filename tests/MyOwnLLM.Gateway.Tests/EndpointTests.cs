@@ -159,6 +159,23 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task Stream_final_event_says_how_many_turns_were_cut()
+    {
+        _llama.ContextTokens = 2048;
+        var messages = Enumerable.Range(0, 10).SelectMany(i => new[]
+        {
+            new { role = "user", content = $"q{i} " + new string('u', 400) },
+            new { role = "assistant", content = $"a{i} " + new string('a', 400) },
+        }).Append(new { role = "user", content = "QUESTION" }).ToArray();
+
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", new { messages, stream = true });
+
+        var final = (await response.Content.ReadAsStringAsync()).Split("\n").Last(l => l.Contains("\"id\":"));
+        var dropped = JsonDocument.Parse(final["data: ".Length..]).RootElement.GetProperty("dropped_turns").GetInt32();
+        Assert.True(dropped > 0);
+    }
+
+    [Fact]
     public async Task Warm_reads_the_conversation_and_context_without_answering()
     {
         var response = await _client.PostAsJsonAsync("/v1/warm", new { messages = new[] { new { role = "user", content = "earlier" } }, context = "class A;" });
@@ -223,6 +240,78 @@ public class EndpointTests : IDisposable
 
         var sent = string.Join("\n", Assert.Single(_llama.Calls).Messages.Select(m => m.Content));
         Assert.Equal(repo, sent.Contains("NOTE: invented task"));
+    }
+
+    string NewRepo()
+    {
+        var project = Directory.CreateDirectory(Path.Combine(_dir, "repo-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        return project;
+    }
+
+    Task SetNote(string project, string note) =>
+        _factory.Services.GetRequiredService<MyOwnLLM.Gateway.State.ProjectStateStore>().SetAsync(project, note);
+
+    /// <summary>Posts <paramref name="turns"/> as the conversation, in the project, and returns what reached the model.</summary>
+    async Task<IReadOnlyList<ChatMessage>> InProject(string path, string project, params string[] turns)
+    {
+        var messages = turns.Select((t, i) => new { role = i % 2 == 0 ? "user" : "assistant", content = t }).ToArray();
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(new { messages }) };
+        request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project));
+        (await _client.SendAsync(request)).EnsureSuccessStatusCode();
+        return _llama.Calls.Last().Messages;
+    }
+
+    [Fact]
+    public async Task A_note_updated_mid_conversation_stays_out_of_the_prompt()
+    {
+        var project = NewRepo();
+        await SetNote(project, "NOTE A");
+        await InProject("/v1/chat/completions", project, "first?");
+        await SetNote(project, "NOTE B");
+
+        var sent = await InProject("/v1/chat/completions", project, "first?", "answer", "second?");
+
+        Assert.Contains("NOTE A", sent[1].Content);
+        Assert.DoesNotContain("NOTE B", sent[1].Content);
+    }
+
+    [Fact]
+    public async Task A_new_conversation_uses_the_latest_note()
+    {
+        var project = NewRepo();
+        await SetNote(project, "NOTE A");
+        await InProject("/v1/chat/completions", project, "first?");
+        await SetNote(project, "NOTE B");
+        await InProject("/v1/chat/completions", project, "first?", "answer", "second?");
+
+        var sent = await InProject("/v1/chat/completions", project, "fresh start?");
+
+        Assert.Contains("NOTE B", sent[1].Content);
+    }
+
+    [Fact]
+    public async Task After_a_restart_the_conversation_takes_the_current_note()
+    {
+        var project = NewRepo();
+        await SetNote(project, "NOTE NOW");
+
+        var sent = await InProject("/v1/chat/completions", project, "first?", "answer", "second?");
+
+        Assert.Contains("NOTE NOW", sent[1].Content);
+    }
+
+    [Fact]
+    public async Task Warm_uses_the_same_note_as_the_conversation()
+    {
+        var project = NewRepo();
+        await SetNote(project, "NOTE A");
+        await InProject("/v1/chat/completions", project, "first?");
+        await SetNote(project, "NOTE B");
+
+        var sent = await InProject("/v1/warm", project, "first?", "answer");
+
+        Assert.Contains("NOTE A", sent[1].Content);
     }
 
     [Fact]
