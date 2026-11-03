@@ -265,7 +265,9 @@ Recall test through the real gateway, before (`1f72651`) and after (`6de629b`), 
 | `cut` | 8/12 | 12/12 | at least 10/12 | Pass |
 | `median_s` short / deep / cut | 2.05 / 1.95 / 1.8 | 2.25 / 2.9 / 2.25 | at most 30 | Pass |
 | `working_set_mib` | 8,767 | 8,711 | at most 7,231 | **Fail**, 56 MiB lower, not 1,536 |
-| Regression, 37/45 and limits | | not run | | **Not run** |
+| Regression, 37/45 and limits | 37/45 | 39/45 | at least 37/45 | Pass, see below |
+
+Regression check, run on 2026-11-03 on the same T480, against the saved `tiny-cpu` baseline: 39/45, median 8.5 s, longest 40.5 s, first answer after `/read` 37.3 s (was 46.7), follow-up 8.3 s (was 12.0), `/edit` and `/review` inside their limits. So `-ctxcp 8 --cache-ram 1024` did no harm to quality. It shows no more than that: the saved answers gained 4 questions and lost 1 (`xss-razor`, which missed `Html.Raw`), too few to tell from chance. The faster `/read` and follow-up may also come from the stray `find.exe`, which was using a full core during the baseline and was stopped for this run. The run used `feat/conversation-memory` (`3f70dce`), not `main`. The server flags and the system prompt text are the same on both, compared by diff rather than by a run on `main`. Raw result: `research_notes/Local inference sources/tiny-regress.json`.
 
 Eni-M chose to push to `main` before a 17:00 deadline whatever the result, and will pick it up from `docs/HANDOFF-task-6.md`. `ORD` and `CUS` with ignore-case also match "order" and "customer": one baseline `deep` answer ("prefix CUS-" for order ids) scored right only because of that, so the true baseline `deep` is 8/12. No after answer depends on it. None of the 72 answers echoes the "From earlier" heading. Also new in the after `short` run: 5 of 12 answers add an invented "in an ASP.NET Core application", where the baseline's add nothing like it. Those answers are still right, and the cause isn't known.
 

@@ -15,9 +15,9 @@ Recall test, H-Tiny Q4_K_M on the T480, one run each. Before is `1f72651`, after
 | `cut` | 8/12 | 12/12 | at least 10/12 | Pass |
 | `median_s` short / deep / cut | 2.05 / 1.95 / 1.8 | 2.25 / 2.9 / 2.25 | at most 30 | Pass |
 | `working_set_mib` | 8,767 | 8,711 | at most 7,231 | **Fail** |
-| Regression, 37/45 and limits | | | | **Not run** |
+| Regression, 37/45 and limits | 37/45 | 39/45 | at least 37/45 | Pass |
 
-The raw results are in `research_notes/Local inference sources/tiny-before-recall.json` and `tiny-after-recall.json`.
+The raw results are in `research_notes/Local inference sources/tiny-before-recall.json`, `tiny-after-recall.json` and `tiny-regress.json`. The regression ran on 2026-11-03; what it does and doesn't show is in `docs/OPTIMIZATION-LOG.md`, under "Context and outside sources (2026-11-02)".
 
 The recall fix works. The memory change, `-ctxcp 8 --cache-ram 1024`, saved only 56 MiB where the gate wants 1,536, and the cause hasn't been looked into. Both flags are in `eval/recall.py`'s server arguments. One lead, not checked: the model file is 4.2 GB and memory-mapped, and the 9.9 GB the first probe saw may have needed more turns than this test runs.
 
@@ -25,27 +25,7 @@ The recall fix works. The memory change, `-ctxcp 8 --cache-ram 1024`, saved only
 
 1. **Find out why memory barely moved** (see above), and decide what the gate should measure on purpose. Don't lower it just to pass.
 
-2. **Run the regression check.** It didn't fit before the deadline, so nothing has checked the new server flags against the 37/45 quality floor:
-
-   ```bash
-   py -I eval/run_eval.py --label tiny-regress --model C:/MyOwnLLM/spike/models/granite-4.0-h-tiny-Q4_K_M.gguf --llama C:/MyOwnLLM/spike/bin/llama-server.exe --threads 4 --scenarios
-   ```
-
-   ```bash
-   py -I eval/compare.py
-   ```
-
-   Pass: at least 37/45, first answer after `/read` about 2 minutes at most, follow-up 30 s at most, `/edit` and `/review` inside their limits.
-
-3. **Check the servers are stopped.** This must print nothing (PowerShell):
-
-   ```powershell
-   netstat -ano | Select-String ":8099 |:5099 " | Select-String LISTENING
-   ```
-
-4. **Update the docs with the result:** the regression line in `docs/OPTIMIZATION-LOG.md`, under "Context and outside sources (2026-11-02)".
-
-5. **Your own last step:** run `jazari update` from your own terminal, have a long conversation, and watch for the `cut` row.
+2. **Your own last step:** run `jazari update` from your own terminal, have a long conversation, and watch for the `cut` row.
 
 ## If you change the code
 
@@ -64,10 +44,10 @@ Pass: `deep` at least 11/12, `cut` at least 10/12, `short` 12/12, every `median_
 - **Run the checks with the laptop otherwise idle.** The recall test uses about 8.8 GB, and a second eval on the same PC spoils both runs' timing and memory. Check first that port 8099 is free. Another session was running a model comparison there on 2026-11-02.
 - **That comparison looks unfinished.** The loop ended at 16:25 with only `gsq-qwen3-q2` saved. `gsq-qwen35-q2xl`, `gsq-qwen3-q3` and `tiny-q3` have no results.
 - **Never run the real Jazari app, `jazari update` or the installer from a Claude Desktop session.** See Traps in the log.
-- **A stray `find.exe` may still be running.** `find / -iname *granite*4.1*.gguf`, running since 2026-10-30 and using a full core. It was running during these measurements. End it before timing anything.
 
 ## Known caveats
 
+- **A stray `find.exe` ran during the recall measurements**, using a full core, both before and after. It was stopped on 2026-11-03, so later timings aren't strictly comparable with them.
 - **Weak scoring on the two prefix facts.** The patterns `ORD` and `CUS` with ignore-case also match "order" and "customer", so an answer that only repeats the question scores as right. Before and after are still comparable, since the original probe scored the same way.
 - **`scripts/start-llama.ps1` (the manual start)** still passes `--cache-ram 2048` without `-ctxcp 8`. It wasn't in the plan and was left as is.
 - **Prefix scoring in these runs:** one baseline `deep` answer ("prefix CUS-" for order ids) scored right only because of the weak pattern, so the true baseline `deep` is 8/12. No after answer depends on it.
