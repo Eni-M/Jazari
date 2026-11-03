@@ -113,8 +113,10 @@ public static class Welcome
 
     static string ShortPath(string directory)
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var path = directory.StartsWith(home, StringComparison.OrdinalIgnoreCase) ? "~" + directory[home.Length..] : directory;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd('\\', '/');
+        // C:\Users\enim2 starts with C:\Users\enim too: only the folder itself or one under it is home.
+        var inHome = directory.StartsWith(home, StringComparison.OrdinalIgnoreCase) && (directory.Length == home.Length || directory[home.Length] is '\\' or '/');
+        var path = inHome ? "~" + directory[home.Length..] : directory;
         return path.Replace('\\', '/');
     }
 }

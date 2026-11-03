@@ -41,7 +41,6 @@ public sealed class Ui
     const int KeyColumn = 12;
 
     public Theme Theme => _theme;
-    public TextWriter Output => _output;
     public IBlockSink? Sink => _sink;
     public int Width => Math.Max(_width(), 20);
     /// <summary>Drawn on a real terminal (a screen), not written as plain text.</summary>
@@ -55,9 +54,6 @@ public sealed class Ui
         if (Live) Add(new BlankBlock());
         else _output.WriteLine();
     }
-
-    /// <summary>Kept for callers that cleared the screen themselves; the session's screen now does it when it starts.</summary>
-    public void TakeOverScreen() { }
 
     /// <summary>Adds blocks collected elsewhere (what starting the servers had to say).</summary>
     public void Replay(BlockBuffer buffer)
@@ -151,38 +147,6 @@ public sealed class Ui
     /// <summary>The key column that fits every key in all of <paramref name="groups"/>, so grouped rows line up.</summary>
     public static int KeyWidth(IEnumerable<IEnumerable<(string Key, string Value)>> groups) =>
         Math.Max(KeyColumn, groups.SelectMany(g => g).Select(r => TextWidth.Of(r.Key) + 2).DefaultIfEmpty(0).Max());
-
-    public void ToolLines(string label, IEnumerable<string> doneSteps)
-    {
-        var steps = doneSteps.Select(ConsoleText.Sanitize).ToList();
-        var title = ConsoleText.Sanitize(label).ToUpperInvariant();
-        if (!Live)
-        {
-            WriteLines([_theme.Paint("  " + title, Tone.Muted), .. steps.Select(step => _theme.Paint($"  {_theme.Glyph('✓')} {step}", Tone.Muted))]);
-            return;
-        }
-        Add(_ => [Layout.Row().Add(title, Tone.Muted).Build(), .. steps.Select(step => Layout.Row().Add($"{_theme.Glyph('✓')} {step}", Tone.Muted).Build())]);
-    }
-
-    public void ActionRequired(string what, string command)
-    {
-        var bar = _theme.Glyph('│') + " ";
-        var (cleanWhat, cleanCommand) = (ConsoleText.Sanitize(what), ConsoleText.Sanitize(command));
-        if (!Live)
-        {
-            var rule = _theme.Paint(_theme.Glyph('│').ToString(), Tone.Secondary) + " ";
-            WriteLines([rule + "ACTION REQUIRED", rule + _theme.Paint(cleanWhat + ":", Tone.Secondary),
-                rule + cleanCommand, rule + _theme.Paint("[y] Allow once  [n] Deny  [a] Always allow", Tone.Secondary)]);
-            return;
-        }
-        Add(_ =>
-        [
-            Layout.Row().Add(bar, Tone.Secondary).Add("ACTION REQUIRED").Build(),
-            Layout.Row().Add(bar, Tone.Secondary).Add(cleanWhat + ":", Tone.Secondary).Build(),
-            Layout.Row().Add(bar, Tone.Secondary).Add(cleanCommand).Build(),
-            Layout.Row().Add(bar, Tone.Secondary).Add("[y] Allow once  [n] Deny  [a] Always allow", Tone.Secondary).Build(),
-        ]);
-    }
 
     /// <summary>
     /// "✕ message", "why cause", "fix next". When <paramref name="nextIsCommand"/>, the fix is a command to type and is

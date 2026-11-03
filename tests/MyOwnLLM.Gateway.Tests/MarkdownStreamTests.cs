@@ -105,7 +105,7 @@ public class MarkdownStreamTests
     }
 
     [Fact]
-    public void Separator_only_table_does_not_crash() => Assert.Empty(PlainLines("|---|---|\n").Where(l => l.Length > 0));
+    public void Separator_only_table_does_not_crash() => Assert.DoesNotContain(PlainLines("|---|---|\n"), l => l.Length > 0);
 
     [Fact]
     public void Long_lines_are_never_redrawn_across_rows()
@@ -237,30 +237,17 @@ public class MarkdownStreamTests
     }
 
     [Fact]
-    public void An_answer_taller_than_the_screen_gets_its_time_on_a_new_row()
+    public void A_finished_answer_is_never_redrawn_to_add_its_time()
     {
+        // Printed rows are final in a one-off command: the time goes on a new row instead of moving back up.
         var output = new StringWriter();
-        var stream = new MarkdownStream(output, new Theme(ColorMode.TrueColor, true), 80, screenRows: 3);
+        var stream = new MarkdownStream(output, new Theme(ColorMode.TrueColor, true), 80);
         stream.Write("1\n2\n3\n4\n");
         stream.Complete();
 
         stream.StampTime("3.2s");
 
-        Assert.DoesNotMatch(@"\e\[\d+A", output.ToString());
+        Assert.DoesNotMatch(@"\e\[\d+A", output.ToString()[output.ToString().LastIndexOf('4')..]);
         Assert.Contains("3.2s", Screen(output.ToString())[^1]);
-    }
-
-    [Fact]
-    public void The_panel_below_counts_against_the_rows_the_answer_has()
-    {
-        // 30 rows of window, but the panel takes 28 of them: a 4-row answer has scrolled its first row away.
-        var output = new StringWriter();
-        var stream = new MarkdownStream(output, new Theme(ColorMode.TrueColor, true), 80, screenRows: 30, visibleRows: () => 2);
-        stream.Write("1\n2\n3\n4\n");
-        stream.Complete();
-
-        stream.StampTime("3.2s");
-
-        Assert.DoesNotMatch(@"\e\[\d+A", output.ToString());
     }
 }

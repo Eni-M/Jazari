@@ -15,7 +15,7 @@ public sealed record JazariConfig(
     public static JazariConfig? Load(string path)
     {
         try { return File.Exists(path) ? JsonSerializer.Deserialize<JazariConfig>(File.ReadAllText(path), JsonSerializerOptions.Web) : null; }
-        catch (JsonException) { return null; }
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) { return null; } // like no install: jazari says to repair it
     }
 
     public void Save(string path)

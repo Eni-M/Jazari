@@ -14,15 +14,15 @@ public static class ColorModeDetector
     }
 
     /// <summary>
-    /// Whether the terminal draws the one-eighth blocks used for thin box edges itself (Windows Terminal and VS Code do);
-    /// a classic console font may not have them.
-    /// </summary>
-    /// <summary>
     /// <c>jazari --plain</c> or JAZARI_PLAIN=1, for screen readers and simple terminals: plain lines, as when piped,
     /// with no colors, no redrawn panel and ASCII instead of symbols.
     /// </summary>
     public static bool IsPlain(Func<string, string?> getEnv) => getEnv("JAZARI_PLAIN") is "1" or "true";
 
+    /// <summary>
+    /// Whether the terminal draws the one-eighth blocks used for thin box edges itself (Windows Terminal and VS Code do);
+    /// a classic console font may not have them.
+    /// </summary>
     public static bool DrawsEdges(Func<string, string?> getEnv) =>
         !string.IsNullOrEmpty(getEnv("WT_SESSION")) || getEnv("TERM_PROGRAM") == "vscode";
 }

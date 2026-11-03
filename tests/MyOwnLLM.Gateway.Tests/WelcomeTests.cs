@@ -47,6 +47,10 @@ public class WelcomeTests
         Assert.Contains("Directory   D:/work/api", Render(ConnectionState.Available, directory: @"D:\work\api"));
 
     [Fact]
+    public void A_folder_whose_name_starts_like_home_is_not_home() =>
+        Assert.Contains("Directory   " + (Home + "2\\api").Replace('\\', '/'), Render(ConnectionState.Available, directory: Home + "2\\api"));
+
+    [Fact]
     public void Welcome_fits_40_columns() =>
         Assert.All(Render(ConnectionState.GatewayNotRunning, width: 40, directory: Path.Combine(Home, "a-very-long-folder-name", "another-long-folder-name"), runningOn: IrisXe),
             l => Assert.True(l.Length <= 40, $"too long: '{l}'"));

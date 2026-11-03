@@ -23,7 +23,7 @@ public sealed partial class MarkdownStream
     int _blocks; // code blocks so far in this answer
 
     /// <summary>To a writer: plain without color, otherwise drawn by the writer's shared flow-mode screen.</summary>
-    public MarkdownStream(TextWriter output, Theme theme, int width, int screenRows = 24, Func<int>? visibleRows = null)
+    public MarkdownStream(TextWriter output, Theme theme, int width)
     {
         _output = output;
         _theme = theme;

@@ -133,8 +133,6 @@ public sealed class Theme(ColorMode mode, bool unicode, bool? edges = null)
         };
     }
 
-    public string Bold(string text) => mode == ColorMode.None ? text : $"\e[1m{text}{Reset}";
-
     string Background(Surface surface)
     {
         var (rgb, index) = Surfaces[surface];
@@ -151,16 +149,6 @@ public sealed class Theme(ColorMode mode, bool unicode, bool? edges = null)
     {
         var background = Background(surface);
         return background.Length == 0 ? text : background + text.Replace(Reset, Reset + background) + Reset;
-    }
-
-    /// <summary>
-    /// A row on a background out to the terminal's edge. Filled by "erase to end of line", so it adds no characters
-    /// that a mouse selection would pick up.
-    /// </summary>
-    public string Band(Surface surface, string text)
-    {
-        var background = Background(surface);
-        return background.Length == 0 ? text : background + text.Replace(Reset, Reset + background) + "\e[K" + Reset;
     }
 
     /// <summary>Inline code.</summary>

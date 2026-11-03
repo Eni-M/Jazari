@@ -11,6 +11,7 @@ import argparse, json, os, re, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PROJECT = os.path.join(ROOT, "src", "MyOwnLLM.Gateway")
+DLL = os.path.join(PROJECT, "bin", "Debug", "net10.0", "MyOwnLLM.Gateway.dll")  # what main's `dotnet build` makes
 NEED_FOUND, NEED_REFUSED = 16, 14
 
 
@@ -46,8 +47,8 @@ def score(results):
 
 
 def search(book, question):
-    out = subprocess.run(["dotnet", "run", "--no-build", "--project", PROJECT, "--", "search-law", question,
-                          f"--Gateway:LawBookFile={os.path.abspath(book)}"],
+    # The built DLL itself: `dotnet run` evaluates the whole project again for each of the 35 questions.
+    out = subprocess.run(["dotnet", DLL, "search-law", question, f"--Gateway:LawBookFile={os.path.abspath(book)}"],
                          check=True, capture_output=True, text=True, encoding="utf-8").stdout
     return json.loads(out.strip().splitlines()[-1])
 

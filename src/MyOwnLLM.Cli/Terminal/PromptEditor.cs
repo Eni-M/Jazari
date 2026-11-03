@@ -447,14 +447,24 @@ public sealed class PromptEditor : ILineReader, IPanel
 
     object Gate => _screen.Gate;
 
-    /// <summary>Base64, one entry a line: a typed line break can't split an entry.</summary>
+    const int KeptHistory = 500;
+
+    /// <summary>
+    /// Base64, one entry a line: a typed line break can't split an entry. Every question sent adds a line, so once the file
+    /// holds twice what's kept, it's cut back to the newest: otherwise it grows for as long as Jazari is used.
+    /// </summary>
     static IEnumerable<string> LoadHistory(string path)
     {
         string[] lines;
         try { lines = File.Exists(path) ? File.ReadAllLines(path) : []; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
+        if (lines.Length > 2 * KeptHistory)
+        {
+            try { File.WriteAllLines(path, lines.TakeLast(KeptHistory)); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // history is a convenience
+        }
         var entries = new List<string>();
-        foreach (var line in lines.TakeLast(500))
+        foreach (var line in lines.TakeLast(KeptHistory))
         {
             try { entries.Add(Encoding.UTF8.GetString(Convert.FromBase64String(line))); }
             catch (FormatException) { } // not an entry; the rest are still good
