@@ -1,5 +1,9 @@
-"""Prints every candidate's results and the model the selection rule picks."""
-import glob, json, os, sys
+"""Prints every candidate's results and the model the selection rule picks.
+
+    py -I eval/compare.py                              # every saved result
+    py -I eval/compare.py --pair tiny-regress tiny-law # also: question by question, what the second run won and lost
+"""
+import argparse, glob, json, math, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -39,10 +43,67 @@ def by_category(results):
     return "\n".join(rows)
 
 
+def mcnemar_p(wins, losses):
+    """Exact two-sided McNemar p: how likely a split at least this uneven is when neither run is better. Only the
+    questions the two runs disagree on count."""
+    n = wins + losses
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, i) for i in range(min(wins, losses) + 1)) / 2 ** n
+    return min(1.0, 2 * tail)
+
+
+def paired(base, candidate):
+    """The two runs question by question, matched by id. A question in only one run isn't counted."""
+    b = {a["id"]: a for a in base["answers"]}
+    c = {a["id"]: a for a in candidate["answers"]}
+    common = [i for i in b if i in c]
+    return {
+        "gained": [i for i in common if c[i]["passed"] and not b[i]["passed"]],
+        "lost": [i for i in common if b[i]["passed"] and not c[i]["passed"]],
+        "both": sum(b[i]["passed"] and c[i]["passed"] for i in common),
+        "neither": sum(not b[i]["passed"] and not c[i]["passed"] for i in common),
+        "missing": sorted(set(b) ^ set(c)),
+        "passages": {i: c[i].get("passages") for i in common},
+    }
+
+
+def pair_report(base, candidate):
+    """What the candidate won and lost against the base. On 45 questions a few wins can't be told from chance: +3 with no
+    losses gives p = 0.25, and it takes 6 wins and 0 losses to get under 0.05 (reports/Jazari enhancements after law book.md)."""
+    p = paired(base, candidate)
+    wins, losses = len(p["gained"]), len(p["lost"])
+    value = mcnemar_p(wins, losses)
+
+    def note(i):
+        given = p["passages"].get(i)
+        return i if given is None else f'{i} ({"given a passage" if given else "no passage"})'
+
+    lines = [f'{candidate["label"]} against {base["label"]}: {wins} gained, {losses} lost, {p["both"]} right in both, {p["neither"]} wrong in both',
+             f"exact McNemar p = {value:.2f}: " + ("unlikely to be chance" if value < 0.05 else "could be chance; a gain this size can't be told from noise")]
+    if p["gained"]:
+        lines.append("gained: " + ", ".join(note(i) for i in p["gained"]))
+    if p["lost"]:
+        lines.append("lost (right before, wrong now): " + ", ".join(note(i) for i in p["lost"]))
+    if p["missing"]:
+        lines.append("in one run only, not counted: " + ", ".join(p["missing"]))
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--pair", nargs=2, metavar=("BASE", "CANDIDATE"), help="labels of two saved runs to compare question by question")
+    args = parser.parse_args()
     with open(os.path.join(HERE, "questions.json"), encoding="utf-8") as f:
         questions = json.load(f)
     all_results = [rescore(r, questions) for r in load()]
+    if args.pair:
+        found = {r["label"]: r for r in all_results if "failed" not in r}
+        missing = [label for label in args.pair if label not in found]
+        if missing:
+            sys.exit(f"no saved run named {', '.join(missing)} in eval/results")
+        print(pair_report(found[args.pair[0]], found[args.pair[1]]))
+        print()
     print(table(all_results))
     print()
     print(by_category(all_results))

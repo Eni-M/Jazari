@@ -2,7 +2,7 @@ import os, socket, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import argparse, json, tempfile
-from compare import by_category, table
+from compare import by_category, mcnemar_p, pair_report, paired, table
 from run_eval import PortInUse, conversation, plain_through_gateway, with_passages, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, save_failure, server_args, start_server, system_prompt
 
 PROMPT_BUILDER = os.path.join(HERE, "..", "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
@@ -174,6 +174,42 @@ class LawBookRunTests(unittest.TestCase):
         ask = plain_through_gateway(lambda messages: sent.append(messages) or "ok")
         self.assertEqual(ask({"question": "Q?"}), "ok")
         self.assertEqual(sent, [[{"role": "user", "content": "Q?"}]])  # the gateway adds the system prompt itself
+
+
+
+def _run(label, passed, passages=None):
+    return {"label": label, "answers": [{"id": i, "passed": ok, **({"passages": passages.get(i, [])} if passages is not None else {})}
+                                        for i, ok in passed.items()]}
+
+
+class PairedTests(unittest.TestCase):
+    def test_exact_mcnemar_p_matches_the_binomial(self):
+        self.assertAlmostEqual(mcnemar_p(3, 0), 0.25)
+        self.assertAlmostEqual(mcnemar_p(6, 0), 0.03125)
+        self.assertAlmostEqual(mcnemar_p(5, 1), 0.21875)
+        self.assertEqual(mcnemar_p(0, 0), 1.0)
+        self.assertEqual(mcnemar_p(2, 2), 1.0)
+
+    def test_questions_are_paired_by_id(self):
+        base = _run("base", {"a": True, "b": False, "c": True, "d": False})
+        cand = _run("cand", {"a": True, "b": True, "c": False, "d": False, "e": True})
+        p = paired(base, cand)
+        self.assertEqual((p["gained"], p["lost"], p["both"], p["neither"]), (["b"], ["c"], 1, 1))
+        self.assertEqual(p["missing"], ["e"])  # in one run only: not counted
+
+    def test_the_report_names_what_was_lost_and_whether_a_passage_was_given(self):
+        base = _run("tiny-regress", {"a": True, "b": True, "c": False})
+        cand = _run("tiny-law", {"a": False, "b": False, "c": True}, passages={"a": ["https://learn.microsoft.com/x"]})
+        text = pair_report(base, cand)
+        self.assertIn("1 gained, 2 lost", text)
+        self.assertIn("a (given a passage)", text)
+        self.assertIn("b (no passage)", text)
+        self.assertIn("p = 1.00", text)
+
+    def test_a_small_gain_is_called_noise(self):
+        base = _run("base", {str(i): i >= 3 for i in range(45)})
+        cand = _run("cand", {str(i): True for i in range(45)})
+        self.assertIn("could be chance", pair_report(base, cand))
 
 
 if __name__ == "__main__":
