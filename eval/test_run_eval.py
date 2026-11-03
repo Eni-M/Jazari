@@ -3,7 +3,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import argparse, json, tempfile
 from compare import by_category, mcnemar_p, pair_report, paired, table
-from run_eval import PortInUse, conversation, plain_through_gateway, with_passages, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, save_failure, server_args, start_server, system_prompt
+from run_eval import PortInUse, conversation, plain_through_gateway, with_passages, csharp_int, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, save_failure, server_args, start_server, system_prompt
 
 PROMPT_BUILDER = os.path.join(HERE, "..", "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
 Q1 = {"id": "a", "category": "api", "question": "boom", "must_have": [["x"]], "must_not": []}
@@ -98,6 +98,18 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn('"findings"', csharp_string("ProjectReview.cs", "Schema"))
         self.assertIn("senior security-minded", csharp_string("ProjectReview.cs", "Instructions"))
 
+    def test_the_table_shows_review_found_and_false_alarms(self):
+        result = {"label": "a", "score": 1, "total": 1, "plain_p50_s": 1, "plain_max_s": 1, "read_first_s": 1, "followup_s": 1, "edit_ok": True,
+                  "review_ok": True, "review_found": 2, "review_false_alarms": 7, "turn_times_s": []}
+        header, row = table([result]).splitlines()
+        self.assertIn("found", header)
+        self.assertIn("false", header)
+        self.assertRegex(row, r"2\s+7")
+
+    def test_an_older_result_without_those_numbers_still_prints(self):
+        older = {"label": "a", "score": 1, "total": 1, "plain_p50_s": 1, "plain_max_s": 1, "read_first_s": 1, "followup_s": 1, "edit_ok": True, "review_ok": True, "turn_times_s": []}
+        self.assertIn("None", table([older]).splitlines()[1])
+
     def test_a_followup_repeats_the_first_turn_so_the_cache_can_serve_it(self):
         ask, calls = replying("first answer", "second answer")
         first_s, followup_s = read_scenario(ask, "SYSTEM", "CODE")
@@ -124,19 +136,52 @@ class ScenarioTests(unittest.TestCase):
         ask, _ = replying("Sure! Change it to 32.")
         self.assertFalse(edit_scenario(ask, "SYSTEM", "int limit = 16;"))
 
+    def finding(self, file, problem):
+        return {"file": file, "quote": "x", "problem": problem, "severity": "low"}
+
+    def reviewing(self, mixed, clean=()):
+        ask, calls = replying(json.dumps({"findings": list(mixed)}), json.dumps({"findings": list(clean)}))
+        return review_scenario(ask, "SYSTEM"), calls
+
     def test_a_review_counts_when_it_reports_the_planted_password(self):
-        reply = {"findings": [{"file": "AuthService.cs", "quote": "x", "problem": "Hardcoded password in the code", "severity": "high", "fix": "y"}]}
-        ask, _ = replying(json.dumps(reply))
-        self.assertTrue(review_scenario(ask, "SYSTEM"))
+        result, _ = self.reviewing([self.finding("AuthService.cs", "Hardcoded password in the code")])
+        self.assertTrue(result["review_ok"])
 
     def test_a_review_fails_when_it_misses_the_password(self):
-        reply = {"findings": [{"file": "Order.cs", "quote": "x", "problem": "Weak naming", "severity": "low", "fix": "y"}]}
-        ask, _ = replying(json.dumps(reply))
-        self.assertFalse(review_scenario(ask, "SYSTEM"))
+        result, _ = self.reviewing([self.finding("Order.cs", "Weak naming")])
+        self.assertFalse(result["review_ok"])
 
     def test_a_review_fails_on_a_reply_that_is_not_json(self):
         ask, _ = replying("Looks fine")
-        self.assertFalse(review_scenario(ask, "SYSTEM"))
+        self.assertEqual(review_scenario(ask, "SYSTEM"), {"review_ok": False, "review_found": None, "review_false_alarms": None})
+
+    def test_a_review_counts_each_planted_bug_it_found(self):
+        result, _ = self.reviewing([self.finding("AuthService.cs", "Hardcoded password"), self.finding("OrderRepository.cs", "SQL injection from joined text"),
+                                    self.finding("RefundController.cs", "Anyone can refund an order they don't own")])
+        self.assertEqual(result["review_found"], 3)
+
+    def test_a_planted_bug_counts_only_on_its_own_file(self):
+        result, _ = self.reviewing([self.finding("Program.cs", "Anyone can refund an order they don't own")])
+        self.assertEqual(result["review_found"], 0)
+
+    def test_findings_on_clean_code_are_false_alarms(self):
+        result, _ = self.reviewing([self.finding("Order.cs", "Weak naming"), self.finding("AuthService.cs", "Hardcoded password")],
+                                   [self.finding("StoreDbContext.cs", "No authorization check"), self.finding("StoreDbContext.cs", "Possible SQL injection")])
+        self.assertEqual(result["review_false_alarms"], 3)
+
+    def test_a_good_review_of_clean_code_has_no_false_alarms(self):
+        result, _ = self.reviewing([self.finding("AuthService.cs", "Hardcoded password")])
+        self.assertEqual(result["review_false_alarms"], 0)
+
+    def test_the_second_review_part_holds_only_the_clean_schema_file(self):
+        _, calls = self.reviewing([])
+        code = " ".join(m["content"] for m in calls[1]["messages"])
+        self.assertIn("StoreDbContext", code)
+        self.assertNotIn("AuthService", code)
+
+    def test_a_review_is_allowed_the_answer_length_the_cli_asks_for(self):
+        _, calls = self.reviewing([])
+        self.assertEqual(calls[0]["max_tokens"], csharp_int("ProjectReview.cs", "AnswerTokens"))
 
     def test_a_conversation_times_six_turns_with_a_growing_history(self):
         ask, calls = replying("reply")

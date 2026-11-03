@@ -4,7 +4,10 @@ using System.Text.Json;
 
 namespace MyOwnLLM.Gateway.Llama;
 
-public sealed class LlamaClient(HttpClient http) : ILlamaClient
+/// <param name="keyFile">llama-server's API key, which jazari writes and starts it with, so only the gateway can call it.
+/// Read on every request: a key made again, or a server started before the gateway, never leaves the two out of step. No
+/// file (eval/ runs its own server without one): no key is sent.</param>
+public sealed class LlamaClient(HttpClient http, string? keyFile = null) : ILlamaClient
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
     const double CodeTemperature = 0.2; // llama-server's default of 0.8 is meant for prose; code wants the likeliest answer
@@ -96,7 +99,8 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
     {
         try
         {
-            using var response = await http.GetAsync("/props", ct);
+            using var request = WithKey(new HttpRequestMessage(HttpMethod.Get, "/props"));
+            using var response = await http.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode) return null;
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
             var root = doc.RootElement;
@@ -111,7 +115,7 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
 
     async Task<HttpResponseMessage> SendAsync(string path, object body, bool stream, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: Json) };
+        using var request = WithKey(new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: Json) });
         HttpResponseMessage response;
         try
         {
@@ -125,6 +129,15 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
 
         using (response)
             throw new LlamaErrorException((int)response.StatusCode, await ErrorMessageAsync(response, ct));
+    }
+
+    HttpRequestMessage WithKey(HttpRequestMessage request)
+    {
+        string? key = null;
+        try { if (keyFile is not null && File.Exists(keyFile)) key = File.ReadAllText(keyFile).Trim(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // jazari writing it right now: the server answers 401, which says so
+        if (key is { Length: > 0 }) request.Headers.Authorization = new("Bearer", key);
+        return request;
     }
 
     static async Task<string> ErrorMessageAsync(HttpResponseMessage response, CancellationToken ct)

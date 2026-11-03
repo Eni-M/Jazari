@@ -96,8 +96,8 @@ var gateway = new GatewayClient(http);
 
 // Start llama-server and the gateway in the background if they aren't running yet.
 // Tuning only ever runs when asked: a start uses what was measured, or safe CPU settings.
-Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), c.Model).ServerArgs(c.Model));
-Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.FallBack(DeviceTuner.ReadMachine()).ServerArgs(c.Model));
+Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), c.Model).ServerArgs(c.Model, ServerLauncher.EnsureLlamaKey(ServerLauncher.LlamaKeyFile)));
+Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.FallBack(DeviceTuner.ReadMachine()).ServerArgs(c.Model, ServerLauncher.EnsureLlamaKey(ServerLauncher.LlamaKeyFile)));
 // A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run. It's kept only if the
 // gateway answering here accepts it: a 401 from some other server on the port mustn't replace a working key.
 async Task<bool> Accepted(string candidate, CancellationToken ct)

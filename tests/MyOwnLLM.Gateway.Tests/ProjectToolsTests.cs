@@ -157,6 +157,35 @@ public class ProjectToolsTests : IDisposable
         Assert.Contains("Can't find", _output.ToString());
     }
 
+    [Theory]
+    [InlineData("`return user.Password;`")]
+    [InlineData("3: return user.Password;")]
+    [InlineData("line 3: `return user.Password;`")]
+    public void A_quote_with_backticks_or_its_line_number_still_verifies(string quote)
+    {
+        List<ProjectFile> unit = [new("a.cs", "if (ok)\n{\n    return user.Password;\n}\n")];
+
+        var found = ProjectReview.Parse($$"""{"findings":[{"file":"a.cs","quote":"{{quote}}","problem":"leaks it","severity":"high"}]}""", unit)!;
+
+        Assert.True(Assert.Single(found).Verified);
+        Assert.Equal(3, found[0].Line);
+    }
+
+    [Fact]
+    public async Task The_report_names_the_parts_that_werent_reviewed_and_merges_repeats()
+    {
+        Add("a.cs", "var sql = 1;");
+        Add("b.cs", "bbbb");
+        _gateway.Complete = (_, context) => Task.FromResult(context.Contains("b.cs") ? "{\"findings\":["
+            : """{"findings":[{"file":"a.cs","quote":"var sql = 1;","problem":"bad","severity":"high"},{"file":"a.cs","quote":"var sql = 1;","problem":"bad","severity":"high"}]}""");
+
+        var text = File.ReadAllText((await Review(unitTokens: 1).RunAsync(_dir, CancellationToken.None))!);
+
+        Assert.Contains("## Not reviewed this run (1)", text);
+        Assert.Contains("- b.cs", text);
+        Assert.Contains("Verified (1)", text); // the repeat is one finding
+    }
+
     [Fact]
     public async Task An_ambiguous_finding_gets_its_own_section_and_no_empty_fix()
     {
