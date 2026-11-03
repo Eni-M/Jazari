@@ -17,19 +17,23 @@ class ServerDidNotStart(Exception):
     pass
 
 
-def start_server(args, port, **popen):
-    """`popen` goes to subprocess.Popen: the gateway starts with its own settings and folder."""
+def start_server(args, port, log=None, **popen):
+    """`popen` goes to subprocess.Popen: the gateway starts with its own settings and folder. `log`: a file the server's
+    own output is added to, so what it did (checkpoints, cached prompts) can be read afterwards; without one it's dropped."""
     with socket.socket() as probe:
         probe.settimeout(1)
         if probe.connect_ex(("127.0.0.1", port)) == 0:
             raise PortInUse(f"port {port} is in use: stop whatever is on it, then run this again")
-    return subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen)
+    if not log:
+        return subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen)
+    with open(log, "ab") as out:  # the server keeps its own handle to it
+        return subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT, **popen)
 
 
-def launch(args, port, **popen):
+def launch(args, port, log=None, **popen):
     """start_server, with a missing or blocked program reported like a server that didn't start."""
     try:
-        return start_server(args, port, **popen)
+        return start_server(args, port, log, **popen)
     except OSError as e:
         raise ServerDidNotStart(f"couldn't start {args[0]}: {e}")
 

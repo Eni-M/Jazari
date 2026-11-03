@@ -19,13 +19,37 @@ Recall test, H-Tiny Q4_K_M on the T480, one run each. Before is `1f72651`, after
 
 The raw results are in `research_notes/Local inference sources/tiny-before-recall.json`, `tiny-after-recall.json` and `tiny-regress.json`. The regression ran on 2026-11-03; what it does and doesn't show is in `docs/OPTIMIZATION-LOG.md`, under "Context and outside sources (2026-11-02)".
 
-The recall fix works. The memory change, `-ctxcp 8 --cache-ram 1024`, saved only 56 MiB where the gate wants 1,536, and the cause hasn't been looked into. Both flags are in `eval/recall.py`'s server arguments. One lead, not checked: the model file is 4.2 GB and memory-mapped, and the 9.9 GB the first probe saw may have needed more turns than this test runs.
+The recall fix works. The memory change, `-ctxcp 8 --cache-ram 1024`, saved only 56 MiB where the gate wants 1,536.
+
+## Checked on 2026-11-03
+
+**Why memory barely moved: the 1,536 MiB target was never a measurement of the flags.** It comes from the first probe (`research_notes/Local inference sources/recall_probe.py` and `.jsonl`). The 9,565 MiB reading there was a 12,752-token conversation after 13 requests, and the 7,315 MiB "with `-ctxcp 8`" reading was a different conversation, `deep[1:13]`, of 6,567 tokens after 1 request. Half the conversation and a fifth of the requests explain the 2.2 GB gap at least as well as the flag does. The flags' own saving has never been measured.
+
+The recall test couldn't show it either:
+- It compared two commits (`1f72651` and `6de629b`) that differ in the gateway's code as well as in the flags.
+- It sent llama-server's output nowhere, so the checkpoints and cached prompts it made weren't recorded.
+- It took one `tasklist` reading, the working set. That includes the resident pages of the 4.2 GB memory-mapped model file, which Windows fills and trims as it likes. The checkpoints and prompt cache are private bytes, which weren't recorded.
+
+**Changed so the next run can tell** (`eval/recall.py`, `eval/gateway.py`):
+- `--cache-ram` and `--ctxcp` options (defaults: the shipped 1024 and 8), so the old and new flags can run on one commit.
+- llama-server's output is kept in `eval/results/recall/<label>-llama.log`.
+- `deep_server_mib` in the result: Windows' working set, peak working set, private bytes and peak private bytes for the deep server, read with `GetProcessMemoryInfo`. `working_set_mib` from `tasklist` stays, for comparison with the old runs.
+- The `ORD` and `CUS` facts now match only the capitals, so "order" and "customer" no longer count. Rescoring the saved answers: before `deep` is 8/12, not 9/12; after is unchanged at 12/12, 12/12, 12/12. The recall gates still pass.
 
 ## Still to do
 
-1. **Find out why memory barely moved** (see above), and decide what the gate should measure on purpose. Don't lower it just to pass.
+1. **Measure the flags alone**, from your own terminal on the T480, laptop otherwise idle, port 8099 free. Same commit, only the flags differ:
 
-2. **Your own last step:** run `jazari update` from your own terminal, have a long conversation, and watch for the `cut` row.
+   ```bash
+   py -I eval/recall.py --label flags-old --cache-ram 2048 --ctxcp 32 --model C:/MyOwnLLM/spike/models/granite-4.0-h-tiny-Q4_K_M.gguf --llama C:/MyOwnLLM/spike/bin/llama-server.exe
+   py -I eval/recall.py --label flags-new --model C:/MyOwnLLM/spike/models/granite-4.0-h-tiny-Q4_K_M.gguf --llama C:/MyOwnLLM/spike/bin/llama-server.exe
+   ```
+
+   Then compare `deep_server_mib.peak_private` in the two results, and count the checkpoint lines in each log: `Select-String "checkpoint" eval/results/recall/flags-old-llama.log`.
+
+2. **Decide the gate, on purpose.** The flags exist to cap what llama-server allocates in a long conversation, so the gate should measure peak private bytes, old flags against new, on one commit. A proposal, yours to accept or change: the new flags' peak private bytes must be lower than the old flags', by at least the checkpoints the old log shows beyond 8, at about 55 MiB each. The log then says how much the flags could save, and the A/B says whether they did. If the old log shows fewer than 9 checkpoints, this test is too short to reach the cap, and the conversation needs more requests: the first probe's 9.9 GB came after about 73. Don't lower the gate just to pass.
+
+3. **Your own last step:** run `jazari update` from your own terminal, have a long conversation, and watch for the `cut` row.
 
 ## If you change the code
 
@@ -48,8 +72,8 @@ Pass: `deep` at least 11/12, `cut` at least 10/12, `short` 12/12, every `median_
 ## Known caveats
 
 - **A stray `find.exe` ran during the recall measurements**, using a full core, both before and after. It was stopped on 2026-11-03, so later timings aren't strictly comparable with them.
-- **Weak scoring on the two prefix facts.** The patterns `ORD` and `CUS` with ignore-case also match "order" and "customer", so an answer that only repeats the question scores as right. Before and after are still comparable, since the original probe scored the same way.
-- **`scripts/start-llama.ps1` (the manual start)** still passes `--cache-ram 2048` without `-ctxcp 8`. It wasn't in the plan and was left as is.
+- **Weak scoring on the two prefix facts** (fixed 2026-11-03). The patterns `ORD` and `CUS` with ignore-case also matched "order" and "customer". They now match only the capitals. Saved runs scored the old way.
+- **`scripts/start-llama.ps1` (the manual start)** passed `--cache-ram 2048` without `-ctxcp 8`. Fixed on 2026-11-03: it now matches `Tuning.ServerArgs`.
 - **Prefix scoring in these runs:** one baseline `deep` answer ("prefix CUS-" for order ids) scored right only because of the weak pattern, so the true baseline `deep` is 8/12. No after answer depends on it.
 - **New in the after `short` run:** 5 of 12 answers add an invented "in an ASP.NET Core application". The baseline's don't. They're still scored right, and the cause isn't known. Short conversations are under the 2,000-token pin limit, so look at more than the pin.
 - **Conversation size:** `deep_tokens` was 14,063 and 14,261, not the plan's 12,700.
@@ -57,6 +81,7 @@ Pass: `deep` at least 11/12, `cut` at least 10/12, `short` 12/12, every `median_
 
 ## Other branches, not part of this
 
-- `research/jazari-enhancements`: not finished, for later.
-- `claude/festive-cori-6q3i6t`: CI changes.
-- `jazari-update-wip`: keeps Jazari working when an update or install fails part-way.
+Checked on 2026-11-03: all three are on `main` now, so none holds unfinished work.
+
+- `research/jazari-enhancements` and `jazari-update-wip`: every commit is on `main`.
+- `claude/festive-cori-6q3i6t`: every commit is on `main` in equivalent form, apart from one change and its own revert, which cancel out. Safe to delete when you like.

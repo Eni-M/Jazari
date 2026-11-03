@@ -1,7 +1,8 @@
-import os, sys, unittest
+import os, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from recall import CHUNK, FACTS, ServerDidNotStart, conversation, estimated_tokens, exam, filler, gateway_env, is_right, launch, llama_args, parse_working_set
+from gateway import start_server
+from recall import CHUNK, FACTS, ServerDidNotStart, conversation, estimated_tokens, exam, filler, gateway_env, is_right, launch, llama_args, memory_mib, parse_working_set
 
 
 def replying(answer_for=lambda messages: "ok"):
@@ -21,6 +22,14 @@ class RecallTests(unittest.TestCase):
         self.assertTrue(is_right("Invoices are kept for 7 years.", FACTS[1].want))
         self.assertFalse(is_right("Invoices are kept for 2 years.", FACTS[1].want))
 
+    def test_a_prefix_counts_only_as_written_not_as_the_word_it_starts(self):
+        orders, customers = FACTS[3].want, FACTS[9].want
+        self.assertTrue(is_right("Order ids start with ORD-.", orders))
+        self.assertTrue(is_right("The prefix is CUS-", customers))
+        self.assertFalse(is_right("Order ids start with a prefix.", orders))  # "Ord" in "Order" is no answer
+        self.assertFalse(is_right("Customer ids start with a prefix.", customers))
+        self.assertFalse(is_right("They start with ORDER-.", orders))
+
     def test_gateway_is_pointed_at_the_temporary_server_and_folder(self):
         env = gateway_env("C:/tmp/x", 8099, 5099)
         self.assertEqual(env["Gateway__LlamaUrl"], "http://127.0.0.1:8099")
@@ -35,6 +44,27 @@ class HarnessTests(unittest.TestCase):
         joined = " ".join(args)
         for setting in ["-dev none", "-ngl 0", "-t 4", "--poll 0", "-fa off", "-c 10240", "-ctxcp 8", "--cache-ram 1024", "-np 1", "--cache-reuse 256", "--no-webui", "--port 8099"]:
             self.assertIn(setting, joined)
+
+    def test_the_old_cache_flags_can_be_run_for_comparison(self):
+        joined = " ".join(llama_args("l.exe", "m.gguf", 4, 16384, cache_ram=2048, ctxcp=32))
+        self.assertIn("--cache-ram 2048", joined)
+        self.assertIn("-ctxcp 32", joined)
+
+    def test_the_servers_own_output_is_kept_when_asked(self):
+        log = os.path.join(tempfile.mkdtemp(), "server.log")
+        server = start_server([sys.executable, "-c", "print('created context checkpoint 1 of 8')"], 59998, log)
+        server.wait()
+        with open(log, encoding="utf-8") as f:
+            self.assertIn("created context checkpoint 1 of 8", f.read())
+
+    @unittest.skipUnless(os.name == "nt", "Windows' own memory counters")
+    def test_memory_is_read_as_windows_reports_it(self):
+        mib = memory_mib(os.getpid())
+        self.assertEqual(set(mib), {"working_set", "peak_working_set", "private", "peak_private"})
+        self.assertGreater(mib["private"], 0)
+        self.assertGreaterEqual(mib["peak_working_set"], mib["working_set"])
+        self.assertGreaterEqual(mib["peak_private"], mib["private"])
+        self.assertEqual(memory_mib(2 ** 31 - 1), {})  # no such process
 
     def test_a_relative_server_path_is_made_absolute(self):
         server = llama_args("spike/bin/llama-server.exe", "m.gguf", 4, 16384)[0]
