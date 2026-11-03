@@ -8,6 +8,10 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
     const double CodeTemperature = 0.2; // llama-server's default of 0.8 is meant for prose; code wants the likeliest answer
+    // llama-server's own defaults at b11982, written out so an upgrade that changes them can't change Jazari's answers
+    // (reports/Jazari CLI and model enhancements.md, section 2). Changing them needs an eval/ run.
+    const int TopK = 40;
+    const double TopP = 0.95, MinP = 0.05;
 
     public async Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null) =>
         (await ChatWithEndAsync(messages, maxTokens, ct, jsonSchema)).Text;
@@ -16,7 +20,7 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
     {
         var body = jsonSchema is null
             ? ChatBody(messages, maxTokens, stream: false)
-            : new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = false, Temperature = CodeTemperature, JsonSchema = JsonDocument.Parse(jsonSchema).RootElement };
+            : new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = false, Temperature = CodeTemperature, TopK, TopP, MinP, JsonSchema = JsonDocument.Parse(jsonSchema).RootElement };
         using var response = await SendAsync("/v1/chat/completions", body, stream: false, ct);
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var choice = doc.RootElement.GetProperty("choices")[0];
@@ -27,7 +31,7 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
     public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
     {
         // return_progress: llama-server reports how far it has read the prompt, which takes minutes on a CPU.
-        var body = new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = true, Temperature = CodeTemperature, ReturnProgress = true };
+        var body = new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = true, Temperature = CodeTemperature, TopK, TopP, MinP, ReturnProgress = true };
         using var response = await SendAsync("/v1/chat/completions", body, stream: true, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
         while (await reader.ReadLineAsync(ct) is { } line)
@@ -103,7 +107,7 @@ public sealed class LlamaClient(HttpClient http) : ILlamaClient
     }
 
     static object ChatBody(IReadOnlyList<ChatMessage> messages, int maxTokens, bool stream) =>
-        new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = stream, Temperature = CodeTemperature };
+        new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = stream, Temperature = CodeTemperature, TopK, TopP, MinP };
 
     async Task<HttpResponseMessage> SendAsync(string path, object body, bool stream, CancellationToken ct)
     {

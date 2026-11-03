@@ -77,7 +77,7 @@ public sealed class ServerLauncher(
         return ConnectionState.GatewayNotRunning;
     }
 
-    static string ReadLog(string path)
+    internal static string ReadLog(string path)
     {
         try
         {

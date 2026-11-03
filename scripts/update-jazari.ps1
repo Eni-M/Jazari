@@ -79,6 +79,8 @@ function Repair-Llama {
     foreach ($leftover in $new, $zip) { if (Test-Path $leftover) { Remove-Item -Recurse -Force $leftover } }
     if (Test-Llama $llama) { Say-Ok "llama.cpp"; return }
     Download "https://github.com/ggml-org/llama.cpp/releases/download/$($manifest.llamaRelease)/$($manifest.llamaZip)" $zip
+    # Checked before it's unpacked or run, like the model: the version it prints is no proof the files weren't changed.
+    if ((Get-FileHash -Algorithm SHA256 $zip).Hash -ne $manifest.llamaSha256) { Remove-Item -Force $zip; throw "the download doesn't match the pinned checksum" }
     Expand-Archive $zip $new
     Remove-Item -Force $zip
     if (-not (Test-Llama $new)) { Remove-Item -Recurse -Force $new; throw "the download doesn't report release $($manifest.llamaRelease)" }

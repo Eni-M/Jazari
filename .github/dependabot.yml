@@ -1,0 +1,8 @@
+# Keeps the GitHub Actions in ci.yml current: one pull request a week at most, which CI then checks.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1

@@ -24,11 +24,15 @@ jazari                       # interactive session in the current folder
 jazari ask "How do I register a scoped service?"
 jazari status                # "Where are we left at?" for the current folder
 jazari feedback ix-4 up
+jazari doctor                # checks the install, servers, key and logs, and says what to fix; changes nothing
+jazari --plain               # plain lines, no colors or symbols, for screen readers (or set JAZARI_PLAIN=1)
 ```
 
-In the session: `/help`, `/status`, `/model`, `/clear`, `/retry`, `/details`, `/exit`. Enter sends; Shift+Enter, Alt+Enter or Ctrl+J add a new line; ↑/↓ browse history; Tab completes `/` commands; Ctrl+C stops an answer (twice at the prompt exits).
+In the session: `/help`, `/status`, `/model`, `/docs <question>` (the .NET docs passage, without the model), `/save [file]` (the conversation as Markdown, never overwriting a file), `/clear`, `/retry`, `/details`, `/exit`. A mistyped command gets a "did you mean". Paths with spaces go in quotes: `/edit "My File.cs" make it async`. `/edit` on a `.cs` file warns before asking if the change would break the C# syntax. Enter sends; Shift+Enter, Alt+Enter or Ctrl+J add a new line; ↑/↓ browse history; Tab completes `/` commands; Ctrl+C stops an answer (twice at the prompt exits).
 
 Answers stream by default. `jazari ask "…" --no-stream` prints the answer when it's complete. Piped output (`jazari ask "…" > out.txt`) and `NO_COLOR=1` give plain text with no color codes.
+
+**In your IDE.** The gateway speaks the OpenAI chat API, so VS Code (BYOK custom endpoint), Continue, Rider and Visual Studio can use Jazari for chat: base URL `http://127.0.0.1:5080/v1`, API key your `JAZARI_KEY`, model `jazari`. Chat and edits work; agent modes need tool calling, which Jazari doesn't offer. Requests from web pages are refused (403), so a site can't reach it through your browser.
 
 Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with project notes and the feedback log) and `%APPDATA%\Jazari\history`. Nothing leaves the laptop.
 

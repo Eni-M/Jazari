@@ -471,9 +471,27 @@ public class EndpointTests : IDisposable
         WriteLawBook();
         await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(CoveredQuestion));
         var question = Assert.Single(_llama.Calls).Messages[^1].Content;
-        Assert.StartsWith("From the .NET docs:\n", question);
+        Assert.StartsWith(MyOwnLLM.Gateway.Prompt.PromptBuilder.DocsStart, question);
         Assert.Contains("Results.NotFound()", question);
         Assert.EndsWith("\n\n" + CoveredQuestion, question);
+    }
+
+    [Fact]
+    public async Task Docs_returns_the_passages_without_asking_the_model()
+    {
+        WriteLawBook();
+        var json = await Json(await _client.PostAsJsonAsync("/v1/docs", new { question = CoveredQuestion }));
+        Assert.True(json.GetProperty("available").GetBoolean());
+        Assert.Contains("Results.NotFound()", json.GetProperty("passages")[0].GetProperty("text").GetString());
+        Assert.Empty(_llama.Calls);
+    }
+
+    [Fact]
+    public async Task Docs_says_when_there_is_no_law_book()
+    {
+        var json = await Json(await _client.PostAsJsonAsync("/v1/docs", new { question = CoveredQuestion }));
+        Assert.False(json.GetProperty("available").GetBoolean());
+        Assert.Equal(0, json.GetProperty("passages").GetArrayLength());
     }
 
     [Fact]
@@ -524,6 +542,6 @@ public class EndpointTests : IDisposable
     {
         WriteLawBook();
         await _client.PostAsJsonAsync("/v1/warm", new { messages = new[] { new { role = "user", content = CoveredQuestion } } });
-        Assert.DoesNotContain(Assert.Single(_llama.Calls).Messages, m => m.Content.Contains("From the .NET docs"));
+        Assert.DoesNotContain(Assert.Single(_llama.Calls).Messages, m => m.Content.Contains("<docs>"));
     }
 }

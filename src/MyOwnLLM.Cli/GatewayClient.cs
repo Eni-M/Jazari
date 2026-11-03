@@ -24,7 +24,12 @@ public interface IGatewayClient
     Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct);
     /// <summary>Has the model read the conversation and context now, so the next question only adds itself.</summary>
     Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct);
+    /// <summary>The law book's passages for a question, and whether there is a law book at all.</summary>
+    Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct);
 }
+
+/// <summary>A passage of Microsoft's .NET docs, with the page it's from.</summary>
+public sealed record DocPassage(string Title, string Url, string Text);
 
 public sealed class GatewayClient(HttpClient http) : IGatewayClient
 {
@@ -73,6 +78,14 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/warm") { Content = JsonContent.Create(new { messages, context }) };
         request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project)); // header values must be ASCII, and folders can have accents
         using var _ = await SendAsync(request, ct);
+    }
+
+    public async Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct)
+    {
+        using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Post, "/v1/docs") { Content = JsonContent.Create(new { question }) }, ct);
+        var json = await ReadJson(response, ct);
+        return Unexpected(() => (json.GetProperty("available").GetBoolean(), (IReadOnlyList<DocPassage>)json.GetProperty("passages").EnumerateArray()
+            .Select(p => new DocPassage(p.GetProperty("title").GetString() ?? "", p.GetProperty("url").GetString() ?? "", p.GetProperty("text").GetString() ?? "")).ToList()));
     }
 
     public async Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct)

@@ -17,11 +17,17 @@ public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, boo
 public sealed record InfillRequest(string Prefix, string Suffix, int? MaxTokens);
 public sealed record StatusRequest(string ProjectPath);
 public sealed record FeedbackRequest(string Id, bool Accepted);
+public sealed record DocsRequest(string Question);
+
+/// <summary>A request the gateway can't act on: answered 400 with this message.</summary>
+public sealed class BadRequestException(string message) : Exception(message);
 
 public static class ChatEndpoints
 {
     const int DefaultChatTokens = 512, MaxChatTokens = 1024, DefaultInfillTokens = 64, StatusTokens = 150;
     static readonly string Version = typeof(ChatEndpoints).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false) is [System.Reflection.AssemblyInformationalVersionAttribute v, ..] ? v.InformationalVersion.Split('+')[0] : "0.0.0";
+    /// <summary>The name OpenAI-style clients (VS Code, Continue, Rider) list and send back; any name they send is accepted.</summary>
+    const string ModelId = "jazari";
     const string StatusQuestion = "Where are we left at? Answer with a short summary.";
     static readonly HybridCacheEntryOptions CacheFor = new() { Expiration = TimeSpan.FromHours(1), LocalCacheExpiration = TimeSpan.FromHours(1) };
     static readonly JsonSerializerOptions SnakeCase = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
@@ -33,6 +39,11 @@ public static class ChatEndpoints
         group.MapPost("/status", Status);
         group.MapPost("/warm", Warm);
         group.MapPost("/feedback", Feedback);
+        // /docs in the CLI: what the law book holds for a question, without asking the model. Available: whether there's a law book at all.
+        group.MapPost("/docs", (DocsRequest request, LawBook book, GatewayOptions o) => string.IsNullOrWhiteSpace(request.Question)
+            ? Results.BadRequest(new { error = "question is required" })
+            : Results.Json(new { available = File.Exists(o.LawBookFile), passages = book.Search(request.Question).Select(p => new { title = p.Title, url = p.Url, text = p.Text }) }));
+        group.MapGet("/models", () => Results.Json(new { @object = "list", data = new[] { new { id = ModelId, @object = "model", created = 0, owned_by = "jazari" } } }));
         group.MapGet("/info", (GatewayOptions o) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version }));
         return group;
     }
@@ -54,6 +65,8 @@ public static class ChatEndpoints
 
     static Task Chat(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
+        if (request.Messages is not { Count: > 0 } || request.Messages.Any(m => m?.Content is null)) throw new BadRequestException("messages must hold the question, each with its content");
+        if (request.JsonSchema is { } schema && !IsJson(schema)) throw new BadRequestException("json_schema isn't valid JSON");
         var project = ProjectPath(http);
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultChatTokens, 1, MaxChatTokens);
         var question = request.Messages.LastOrDefault()?.Content ?? "";
@@ -138,6 +151,7 @@ public static class ChatEndpoints
     /// </summary>
     static Task Warm(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
+        if (request.Messages is null || request.Messages.Any(m => m?.Content is null)) throw new BadRequestException("messages is required, each with its content");
         var project = ProjectPath(http);
         var note = await ConversationNoteFor(s, project, request.Messages.Count == 0);
         var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, ""), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
@@ -147,6 +161,7 @@ public static class ChatEndpoints
 
     static Task Infill(HttpContext http, InfillRequest request) => Guard(http, async s =>
     {
+        if (request.Prefix is null || request.Suffix is null) throw new BadRequestException("prefix and suffix are required");
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultInfillTokens, 1, MaxChatTokens);
         var estimated = PromptBuilder.EstimateTokens(request.Prefix) + PromptBuilder.EstimateTokens(request.Suffix);
         var context = await s.Limits.ContextTokensAsync(http.RequestAborted);
@@ -161,6 +176,7 @@ public static class ChatEndpoints
 
     static Task Status(HttpContext http, StatusRequest request) => Guard(http, async s =>
     {
+        if (string.IsNullOrWhiteSpace(request.ProjectPath)) throw new BadRequestException("project_path is required");
         var note = await NoteFor(s, request.ProjectPath);
         var git = await GitSummary.GetAsync(request.ProjectPath, http.RequestAborted);
         var prompt = PromptBuilder.Build(new PromptParts(note ?? "(no notes yet)", git, [], StatusQuestion), await s.Limits.ContextTokensAsync(http.RequestAborted), StatusTokens);
@@ -195,6 +211,7 @@ public static class ChatEndpoints
         QueueFullException => StatusCodes.Status429TooManyRequests,
         InputTooLargeException => StatusCodes.Status413PayloadTooLarge,
         SupersededException => StatusCodes.Status409Conflict,
+        BadRequestException => StatusCodes.Status400BadRequest,
         _ => null,
     };
 

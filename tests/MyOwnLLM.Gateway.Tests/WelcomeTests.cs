@@ -55,12 +55,13 @@ public class WelcomeTests
     public void Available_has_no_setup_hint() => Assert.DoesNotContain(Render(ConnectionState.Available), l => l.StartsWith("TO GET STARTED"));
 
     [Theory]
-    [InlineData(ConnectionState.NoKey, "add-key", "JAZARI_KEY")]
+    [InlineData(ConnectionState.NoKey, "jazari update", "creates the key")]
     [InlineData(ConnectionState.GatewayNotRunning, "jazari update", "start-llama.ps1")]
-    [InlineData(ConnectionState.KeyRejected, "add-key", "JAZARI_KEY")]
+    [InlineData(ConnectionState.KeyRejected, "jazari update", "new key")]
     public void Problems_come_with_next_steps(ConnectionState state, string first, string second)
     {
         var text = string.Join("\n", Render(state));
+        if (state != ConnectionState.GatewayNotRunning) Assert.DoesNotContain("dotnet run", text); // installed users may have no clone
 
         Assert.Contains("TO GET STARTED", text);
         Assert.Contains(first, text);

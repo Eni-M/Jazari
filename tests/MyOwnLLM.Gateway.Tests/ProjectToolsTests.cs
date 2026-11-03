@@ -284,6 +284,91 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Edit_takes_a_quoted_path_with_spaces()
+    {
+        var path = Add("My Docs/a b.cs", "int a;");
+        var asked = "";
+        _gateway.Complete = (question, _) => { asked = question; return Task.FromResult(OneEdit); };
+
+        await Session().HandleAsync("/edit \"My Docs/a b.cs\" rename it", CancellationToken.None);
+
+        Assert.Equal("int b;", File.ReadAllText(path));
+        Assert.EndsWith("rename it", asked);
+    }
+
+    [Theory]
+    [InlineData("a.cs", "a.cs", "")]
+    [InlineData("a.cs make it async", "a.cs", "make it async")]
+    [InlineData("\"My Docs/a b.cs\"  make it async", "My Docs/a b.cs", "make it async")]
+    public void A_path_and_its_request_are_split(string text, string path, string rest) =>
+        Assert.Equal((path, rest), MyOwnLLM.Cli.Session.PathAndRest(text));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("  ")]
+    [InlineData("\"unclosed a.cs fix")]
+    public void Nothing_usable_gives_no_path(string? text) => Assert.Null(MyOwnLLM.Cli.Session.PathAndRest(text));
+
+    [Fact]
+    public async Task Save_writes_the_conversation_and_never_overwrites()
+    {
+        var session = Session();
+        await session.HandleAsync("/save", CancellationToken.None);
+        Assert.Contains("Nothing to save yet.", _output.ToString());
+
+        await session.HandleAsync("what is DI?", CancellationToken.None);
+        await session.HandleAsync("/save notes/chat.md", CancellationToken.None);
+        var saved = File.ReadAllText(Path.Combine(_dir, "notes", "chat.md"));
+        Assert.Contains("### You\n\nwhat is DI?\n\n### Jazari\n\nHello\n", saved);
+
+        File.WriteAllText(Path.Combine(_dir, "notes", "chat.md"), "mine");
+        await session.HandleAsync("/save notes/chat.md", CancellationToken.None);
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(_dir, "notes", "chat.md")));
+        Assert.Contains("already exists", _output.ToString());
+    }
+
+    [Fact]
+    public async Task Docs_shows_the_passage_and_its_page()
+    {
+        _gateway.Docs = (true, [new DocPassage("Minimal APIs", "https://learn.microsoft.com/aspnet/core/minimal", "Use Results.NotFound().")]);
+        await Session().HandleAsync("/docs not found result", CancellationToken.None);
+        Assert.Contains("Use Results.NotFound().", _output.ToString());
+        Assert.Contains("Minimal APIs · https://learn.microsoft.com/aspnet/core/minimal", _output.ToString());
+        Assert.Equal(0, _gateway.Completions);
+    }
+
+    [Theory]
+    [InlineData(false, "No law book is installed")]
+    [InlineData(true, "no passage that clearly covers that")]
+    public async Task Docs_says_why_nothing_came_back(bool available, string said)
+    {
+        _gateway.Docs = (available, []);
+        await Session().HandleAsync("/docs anything", CancellationToken.None);
+        Assert.Contains(said, _output.ToString());
+    }
+
+    [Fact]
+    public async Task Edit_warns_before_asking_when_the_change_breaks_csharp_syntax()
+    {
+        Add("a.cs", "class A { int a; }");
+        _gateway.Complete = (_, _) => Task.FromResult("""{"edits":[{"search":"int a;","replace":"int b"}]}""");
+        string? shownWhenAsked = null;
+
+        await Session(_ => { shownWhenAsked = _output.ToString(); return false; }).HandleAsync("/edit a.cs rename it", CancellationToken.None);
+
+        Assert.Contains("breaks the C# syntax", shownWhenAsked);
+        Assert.Contains("; expected", shownWhenAsked);
+    }
+
+    [Theory]
+    [InlineData("a.cs", "class A { int a; }", "class A { int b; }", 0)] // fine
+    [InlineData("a.cs", "class A { int a }", "class A { int b }", 0)]   // already broken the same way: not the edit's doing
+    [InlineData("a.cs", "class A { }", "class A { ", 1)]
+    [InlineData("a.txt", "x", "class A {", 0)]                         // not C#
+    public void Only_syntax_errors_the_edit_adds_are_reported(string path, string before, string after, int errors) =>
+        Assert.Equal(errors, FileEdit.NewSyntaxErrors(path, before, after).Count);
+
+    [Fact]
     public async Task Edit_writes_nothing_on_no()
     {
         var path = Add("a.cs", "int a;");

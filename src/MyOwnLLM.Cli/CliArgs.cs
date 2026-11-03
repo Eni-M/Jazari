@@ -15,8 +15,10 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
           jazari tune                     measure the fastest settings for this PC (a few minutes)
           jazari stop                     stop the background servers to free memory
           jazari update                   update Jazari
+          jazari doctor                   check the install, servers, key and logs, and say what to fix
           jazari --version
         options for ask, diff and status: --repo <path>   ask and diff: --no-stream
+        before any command: --plain       plain lines without colors or symbols, for screen readers (or JAZARI_PLAIN=1)
         """;
 
     public static CliArgs Parse(string[] args)
@@ -38,6 +40,8 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
                 return new("tune", null, null, true, null, null);
             case ["stop"]:
                 return new("stop", null, null, true, null, null);
+            case ["doctor"]:
+                return new("doctor", null, null, true, null, null);
             case ["review"]:
                 return new("review", null, null, true, null, null);
             case ["review", var path] when !path.StartsWith("--"):

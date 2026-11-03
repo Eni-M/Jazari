@@ -37,6 +37,11 @@ def system_prompt(source_path=PROMPT_BUILDER):
     return _constant(source_path, "SystemPrompt")
 
 
+def relevant_code(text, source_path=PROMPT_BUILDER):
+    """Shared files as the gateway puts them in the prompt: marked as data, not instructions."""
+    return _constant(source_path, "FilesStart") + text + _constant(source_path, "FilesEnd")
+
+
 def csharp_string(cli_file, name):
     return _constant(os.path.join(REPO, "src", "MyOwnLLM.Cli", cli_file), name)
 
@@ -61,7 +66,7 @@ def _timed(call):
 
 def read_scenario(ask, system, code):
     """What /read then two questions cost. The gateway sends the code as a system message after the system prompt."""
-    messages = [{"role": "system", "content": system}, {"role": "system", "content": "Relevant code:\n" + code},
+    messages = [{"role": "system", "content": system}, {"role": "system", "content": relevant_code(code)},
                 {"role": "user", "content": "What does this code do when the queue is full?"}]
     answer, first_s = _timed(lambda: ask(messages))
     messages = messages + [{"role": "assistant", "content": answer}, {"role": "user", "content": "Which class should I change to raise that limit?"}]
@@ -70,7 +75,7 @@ def read_scenario(ask, system, code):
 
 
 def edit_scenario(ask, system, file_text, request='Change the user name it compares against from "admin" to "root".'):
-    messages = [{"role": "system", "content": system}, {"role": "system", "content": f"Relevant code:\n--- file ---\n{file_text}"},
+    messages = [{"role": "system", "content": system}, {"role": "system", "content": relevant_code(f"--- file ---\n{file_text}")},
                 {"role": "user", "content": csharp_string("FileEdit.cs", "Instructions") + request}]
     reply = ask(messages, 1000, csharp_string("FileEdit.cs", "Schema"))
     try:
@@ -83,7 +88,7 @@ def edit_scenario(ask, system, file_text, request='Change the user name it compa
 def review_scenario(ask, system):
     """One /review part: the fixture with planted bugs. It must at least report the hardcoded password."""
     fixture = [f"spike/review-test/{name}.cs" for name in ["AuthService", "EmailSender", "Order", "OrderRepository", "Program", "RefundController"]]
-    messages = [{"role": "system", "content": system}, {"role": "system", "content": "Relevant code:\n" + _files(fixture)},
+    messages = [{"role": "system", "content": system}, {"role": "system", "content": relevant_code(_files(fixture))},
                 {"role": "user", "content": csharp_string("ProjectReview.cs", "Instructions")}]
     reply = ask(messages, 500, csharp_string("ProjectReview.cs", "Schema"))
     try:

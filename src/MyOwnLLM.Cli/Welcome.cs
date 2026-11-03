@@ -63,8 +63,8 @@ public static class Welcome
             ("Can't reach the gateway.", "Nothing answered, and Jazari couldn't start its servers.", "jazari update",
                 $"Repairs the install and starts both servers. Logs: {ShortPath(ServerLauncher.DefaultLogDir)}"),
         ConnectionState.KeyRejected =>
-            ("The gateway doesn't know this key.", "Its key file may have been reset.", "dotnet run --project src/MyOwnLLM.Gateway -- add-key",
-                "In your MyOwnLLM folder. Then setx JAZARI_KEY <the new key> and open a new terminal."),
+            ("The gateway doesn't know this key.", "Jazari couldn't make a new one the gateway accepts.", "jazari update",
+                "It repairs everything, then Jazari makes a new key itself."),
         _ =>
             ("There's no key for the gateway yet.", "Jazari couldn't create one.", "jazari update",
                 "It repairs everything, then Jazari creates the key itself."),
@@ -80,14 +80,12 @@ public static class Welcome
         ],
         ConnectionState.KeyRejected =>
         [
-            "The gateway doesn't know this key.",
-            "In your MyOwnLLM folder: dotnet run --project src/MyOwnLLM.Gateway -- add-key",
-            "then setx JAZARI_KEY <the new key> and open a new terminal.",
+            "The gateway doesn't know this key, and Jazari couldn't make one it accepts.",
+            "Run jazari update: it repairs everything, then Jazari makes a new key itself.",
         ],
         _ =>
         [
             "Run jazari update: it repairs everything, then Jazari creates the key itself.",
-            "By hand: dotnet run --project src/MyOwnLLM.Gateway -- add-key, then setx JAZARI_KEY <the key>.",
         ],
     };
 

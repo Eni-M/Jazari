@@ -16,7 +16,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         ("/read <path>", "Read a file or folder for the next questions"), ("/diff [ref]", "Read your uncommitted changes (or the changes since ref)"),
         ("/context", "What the next question will send"), ("/review [path]", "Review a whole project and write a report"),
         ("/edit <file> <what>", "Change a file, after showing you the change"), ("/undo", "Undo the last /edit"),
-        ("/commit", "Write a commit message for the staged changes"),
+        ("/commit", "Write a commit message for the staged changes"), ("/docs <question>", "Look it up in the .NET docs, without the model"),
+        ("/save [file]", "Save the conversation as Markdown"),
         ("/clear", "Clear conversation and files read"), ("/retry", "Ask the last question again"), ("/details", "Details of the last error"), ("/exit", "Quit"),
     ];
 
@@ -130,13 +131,15 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/context": ShowContext(); break;
             case "/commit": return Stoppable(() => CommitAsync(ct), ct);
             case "/review": return new ProjectReview(gateway, ui, ReviewDir).RunAsync(Resolve(Argument(input) ?? project), ct);
-            case "/edit": return Stoppable(() => EditAsync(Argument(input), ct), ct);
+            case "/edit": return Stoppable(() => EditAsync(input.Split(' ', 2) is [_, var rest] ? rest : null, ct), ct);
             case "/undo": Undo(); break;
+            case "/docs": return DocsAsync(Argument(input), ct);
+            case "/save": Save(Argument(input)); break;
             case "/clear": _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ui.Metadata("Conversation cleared."); break;
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
             case "/details": Details(); break;
             case "/exit": ExitRequested = true; break;
-            default: ui.Metadata($"Unknown command {input.Split(' ', 2)[0]}. Try /help."); break;
+            default: UnknownCommand(input.Split(' ', 2)[0]); break;
         }
         return Task.CompletedTask;
     }
@@ -306,6 +309,35 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     }
 
     static string? Argument(string input) => input.Split(' ', 2) is [_, var rest] && rest.Trim().Trim('"') is { Length: > 0 } text ? text : null;
+
+    /// <summary>"\"My File.cs\" make it async" or "File.cs make it async": the path, in quotes when it has spaces, and the rest.</summary>
+    public static (string Path, string Request)? PathAndRest(string? text)
+    {
+        if (text?.Trim() is not { Length: > 0 } trimmed) return null;
+        if (trimmed.StartsWith('"'))
+            return trimmed.IndexOf('"', 1) is var end and > 1 ? (trimmed[1..end], trimmed[(end + 1)..].Trim()) : null;
+        return trimmed.Split(' ', 2) is [var path, var rest] ? (path, rest.Trim()) : (trimmed, "");
+    }
+
+    void UnknownCommand(string typed)
+    {
+        var near = CommandNames.MinBy(c => Distance(typed.ToLowerInvariant(), c))!;
+        ui.Metadata(Distance(typed.ToLowerInvariant(), near) <= 2 ? $"Unknown command {typed}. Did you mean {near}?" : $"Unknown command {typed}. Try /help.");
+    }
+
+    /// <summary>Edits (insert, delete, change) from one text to the other: /reveiw is 2 from /review.</summary>
+    static int Distance(string a, string b)
+    {
+        var row = Enumerable.Range(0, b.Length + 1).ToArray();
+        for (var i = 1; i <= a.Length; i++)
+        {
+            var diagonal = row[0];
+            row[0] = i;
+            for (var j = 1; j <= b.Length; j++)
+                (diagonal, row[j]) = (row[j], Math.Min(Math.Min(row[j], row[j - 1]) + 1, diagonal + (a[i - 1] == b[j - 1] ? 0 : 1)));
+        }
+        return row[b.Length];
+    }
     string Resolve(string path) => Path.GetFullPath(path, project);
 
     void Read(string? path)
@@ -467,7 +499,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
     async Task EditAsync(string? argument, CancellationToken ct)
     {
-        if (argument?.Split(' ', 2) is not [var file, var request]) { ui.Metadata("Usage: /edit <file> <what to change>"); return; }
+        if (PathAndRest(argument) is not (var file, { Length: > 0 } request)) { ui.Metadata("Usage: /edit <file> <what to change>, the file in \"quotes\" if its name has spaces"); return; }
         var path = Resolve(file);
         if (!InsideProject(path)) { ui.Metadata("Jazari only edits files inside this project."); return; }
         if (!File.Exists(path)) { ui.Metadata($"Can't find {path}."); return; }
@@ -496,6 +528,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             foreach (var line in edit.Replace.Split('\n')) ui.DiffLine("+", line.TrimEnd('\r'), ui.Live ? Tone.Added : Tone.Primary, Surface.Added);
             ui.Blank();
         }
+        if (FileEdit.NewSyntaxErrors(path, original, text) is { Count: > 0 } broken)
+            ui.Error("This change breaks the C# syntax.", string.Join("; ", broken.Take(3)), "Say no, then /edit again with a clearer request.");
         if (!Confirm($"Apply this change to {file}?")) { ui.Metadata("Nothing changed."); return; }
         var written = FileEdit.Encode(text, stored.Encoding);
         File.WriteAllBytes(path, written);
@@ -543,6 +577,37 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         return true;
     }
 
+    /// <summary>/docs: the passages of Microsoft's .NET docs the law book finds, shown as they are, with their pages.</summary>
+    async Task DocsAsync(string? question, CancellationToken ct)
+    {
+        if (question is null) { ui.Metadata("Usage: /docs <question>"); return; }
+        if (await WithThinking(() => gateway.DocsAsync(question, ct), ct) is not (true, var (available, passages))) return;
+        if (!available) { ui.Metadata(@"No law book is installed. lawbook/build.py makes one; copy it to %LOCALAPPDATA%\MyOwnLLM\law-book.db."); return; }
+        if (passages.Count == 0) { ui.Metadata("The .NET docs have no passage that clearly covers that. Ask the question without /docs."); return; }
+        foreach (var passage in passages)
+        {
+            var renderer = newRenderer();
+            renderer.Write(passage.Text + "\n");
+            renderer.Complete();
+            ui.Metadata($"{passage.Title} {ui.Theme.Glyph('·')} {passage.Url}");
+        }
+    }
+
+    /// <summary>/save: the conversation as Markdown, in the project unless a path says otherwise. Never overwrites a file.</summary>
+    void Save(string? name)
+    {
+        if (_history.Count == 0) { ui.Metadata("Nothing to save yet."); return; }
+        var path = Resolve(name ?? $"jazari-{DateTime.Now:yyyyMMdd-HHmm}.md");
+        if (File.Exists(path)) { ui.Metadata($"{path} already exists. /save <another name>"); return; }
+        var text = new StringBuilder($"# Jazari conversation, {DateTime.Now:yyyy-MM-dd HH:mm}\n");
+        for (var i = 0; i + 1 < _history.Count; i += 2)
+            text.Append($"\n### You\n\n{_history[i].Content}\n\n### Jazari\n\n{_history[i + 1].Content}\n");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text.ToString());
+        var turns = _history.Count / 2;
+        ui.Metadata($"Saved {turns} question{(turns == 1 ? "" : "s")} and answer{(turns == 1 ? "" : "s")} to {path}.");
+    }
+
     void Copy(string? number)
     {
         var blocks = _history.LastOrDefault(t => t.Role == "assistant") is { } last ? CodeBlocks.Extract(last.Content) : [];
@@ -559,9 +624,9 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
     static readonly (string Label, string[] Commands)[] HelpGroups =
     [
-        ("Ask", ["/retry", "/status"]),
+        ("Ask", ["/retry", "/status", "/docs"]),
         ("Files and code", ["/read", "/diff", "/context", "/edit", "/undo", "/copy", "/review", "/commit"]),
-        ("Session", ["/model", "/clear", "/details", "/help", "/exit"]),
+        ("Session", ["/model", "/save", "/clear", "/details", "/help", "/exit"]),
     ];
 
     static readonly (string Key, string Value)[] Keys =
@@ -617,7 +682,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var next = e.Status switch
         {
             null => "Is the gateway running? See docs/phase1-runbook.md, then /retry.",
-            401 => "Set JAZARI_KEY (run: dotnet run --project src/MyOwnLLM.Gateway -- add-key).",
+            401 => "Open jazari again: it replaces a key the gateway rejects. If that doesn't help, run jazari update.",
             _ => "/retry",
         };
         ui.Error(e.Message, e.Cause, next);

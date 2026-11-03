@@ -24,13 +24,18 @@ Inside a session:
 | `/copy [n]` | Copies a code block of the last answer. Blocks are numbered on screen. |
 | `/read <path>` | Reads a file or folder for the next questions, up to about 5,000 tokens. |
 | `/review [path]` | Reviews a whole project, riskiest files first, and writes a report. Also `jazari review [path]`. It can be stopped and carries on; later runs only re-read what changed. |
-| `/edit <file> <what>` | Asks for a change, shows it, and writes it only after you say yes. `/undo` puts it back. |
+| `/edit <file> <what>` | Asks for a change, shows it, and writes it only after you say yes. `/undo` puts it back. A `.cs` change that breaks the syntax is flagged first. Quote paths with spaces. |
+| `/docs <question>` | Shows the .NET docs passage for a question, with its page, without asking the model. |
+| `/save [file]` | Saves the conversation as Markdown in the project. |
 
 Reviews come from a small local model, so check each finding. It reads about 30 tokens/s: about 3 to 7 hours for a project with 350,000 tokens of real code.
 
 ```powershell
 jazari stop                    # shut the background servers down
+jazari doctor                  # what's wrong and what to do about it; changes nothing
 ```
+
+`jazari --plain` (or `JAZARI_PLAIN=1`) gives plain lines for screen readers. IDEs can use Jazari for chat as an OpenAI-compatible endpoint: see the runbook.
 
 The first `jazari` creates your API key (saved as `JAZARI_KEY`) and starts the model server and gateway in the background. `jazari stop` shuts them down.
 

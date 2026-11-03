@@ -16,8 +16,11 @@ public static class Completions
 
         var command = typed[..typed.IndexOf(' ')];
         var argument = typed[(command.Length + 1)..];
-        // Only the first word after the command is a path (for /edit, the rest is the request).
-        if (!Session.PathCommands.Contains(command, StringComparer.OrdinalIgnoreCase) || argument.Contains(' ')) return (caret, []);
+        if (!Session.PathCommands.Contains(command, StringComparer.OrdinalIgnoreCase)) return (caret, []);
+        // A path in quotes, still open, may hold spaces.
+        if (argument.StartsWith('"') && argument.IndexOf('"', 1) < 0) return (command.Length + 2, Paths(argument[1..], directory));
+        // Otherwise only the first word after the command is a path (for /edit, the rest is the request).
+        if (argument.Contains(' ')) return (caret, []);
         return (command.Length + 1, Paths(argument, directory));
     }
 

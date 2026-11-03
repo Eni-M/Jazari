@@ -9,6 +9,7 @@ public class TerminalThemeTests
 
     [Theory]
     [InlineData("NO_COLOR", "1", false, ColorMode.None)]
+    [InlineData("JAZARI_PLAIN", "1", false, ColorMode.None)]
     [InlineData("COLORTERM", "truecolor", false, ColorMode.TrueColor)]
     [InlineData("COLORTERM", "24bit", false, ColorMode.TrueColor)]
     [InlineData("WT_SESSION", "abc", false, ColorMode.TrueColor)]

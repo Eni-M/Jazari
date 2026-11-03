@@ -97,6 +97,28 @@ public static class FileEdit
         return (string.Join('\n', lines[..at].Concat(replaced).Concat(lines[(at + wanted.Length)..])), null, change);
     }
 
+    /// <summary>
+    /// Syntax errors the edit adds to a .cs file, as "line 12: ; expected"; none for other files, and none the file
+    /// already had. Only parsed, never compiled: it catches a lost brace or semicolon, not a wrong method name.
+    /// </summary>
+    public static List<string> NewSyntaxErrors(string path, string before, string after)
+    {
+        if (!path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) return [];
+        static List<(int Line, string Message)> Errors(string code) =>
+            [.. Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(code).GetDiagnostics()
+                .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                .Select(d => (d.Location.GetLineSpan().StartLinePosition.Line + 1, d.GetMessage()))];
+        var had = Errors(before);
+        var added = new List<string>();
+        foreach (var (line, message) in Errors(after))
+        {
+            var same = had.FindIndex(e => e.Message == message);
+            if (same >= 0) had.RemoveAt(same);
+            else added.Add($"line {line}: {message}");
+        }
+        return added;
+    }
+
     static string Indent(string line) => line[..(line.Length - line.TrimStart().Length)];
 
     /// <summary>A file's text and the encoding it's stored in, so an edit writes it back the same way.</summary>

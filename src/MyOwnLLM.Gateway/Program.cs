@@ -45,6 +45,7 @@ builder.Services.AddHttpClient<ILlamaClient, LlamaClient>(http =>
 });
 
 var app = builder.Build();
+app.Use((http, next) => LocalOnly.Allows(http.Request) ? next(http) : Results.StatusCode(StatusCodes.Status403Forbidden).ExecuteAsync(http));
 app.MapGroup("/v1").AddEndpointFilter<ApiKeyFilter>().MapChatEndpoints();
 app.Run();
 

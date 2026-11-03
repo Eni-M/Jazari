@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <PackageReference Include="TextCopy" Version="6.2.1" />
+    <!-- Parses C# for /edit's syntax check; nothing is compiled or run. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
   </ItemGroup>
 
 </Project>

@@ -50,6 +50,29 @@ public class LlamaClientTests
     }
 
     [Fact]
+    public async Task Every_chat_request_pins_its_sampling()
+    {
+        var bodies = new List<string>();
+        foreach (var call in new Func<LlamaClient, Task>[]
+        {
+            c => c.ChatAsync(Hello, 5, default),
+            c => c.ChatAsync(Hello, 5, default, """{"type":"object"}"""),
+            async c => { await foreach (var _ in c.ChatStreamAsync(Hello, 5, default)) { } },
+        })
+        {
+            var (client, handler) = Create((_, _) => Json("""{"choices":[{"message":{"content":"hi"}}]}"""));
+            await call(client);
+            bodies.Add(handler.Body!);
+        }
+        foreach (var body in bodies)
+        {
+            var root = JsonDocument.Parse(body).RootElement;
+            Assert.Equal((0.2, 40, 0.95, 0.05), (root.GetProperty("temperature").GetDouble(), root.GetProperty("top_k").GetInt32(),
+                root.GetProperty("top_p").GetDouble(), root.GetProperty("min_p").GetDouble()));
+        }
+    }
+
+    [Fact]
     public async Task InfillAsync_posts_infill_body()
     {
         var (client, handler) = Create((_, _) => Json("""{"content":"x = 1"}"""));

@@ -43,6 +43,9 @@ sealed class FakeGateway : IGatewayClient
         Warmed.Add(context);
         return Task.CompletedTask;
     }
+
+    public (bool Available, IReadOnlyList<DocPassage> Passages) Docs { get; set; } = (true, []);
+    public Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct) => Task.FromResult(Docs);
 }
 
 public class SessionTests
@@ -257,6 +260,17 @@ public class SessionTests
         await _session.HandleAsync("/dance", CancellationToken.None);
 
         Assert.Contains("Unknown command /dance. Try /help.", Text);
+    }
+
+    [Theory]
+    [InlineData("/reveiw", "/review")]
+    [InlineData("/STAUTS", "/status")]
+    [InlineData("/cler", "/clear")]
+    public async Task A_misspelled_command_suggests_the_right_one(string typed, string meant)
+    {
+        await _session.HandleAsync(typed, CancellationToken.None);
+
+        Assert.Contains($"Unknown command {typed}. Did you mean {meant}?", Text);
     }
 
     [Fact]
