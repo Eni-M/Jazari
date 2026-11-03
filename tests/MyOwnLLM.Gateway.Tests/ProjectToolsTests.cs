@@ -141,6 +141,23 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public void Only_folders_inside_the_project_can_mark_files_as_secret()
+    {
+        // The project itself may live under such a folder; azd puts projects' environments in .azure, for one.
+        Add(".azure/app/Program.cs", "class Program;");
+        Add(".azure/app/.azure/dev/config.json", "{}");
+        var (files, _) = ProjectFiles.Load(Path.Combine(_dir, ".azure", "app"));
+        Assert.Equal(["Program.cs"], files.Select(f => f.Path));
+    }
+
+    [Fact]
+    public async Task A_review_of_a_path_that_isnt_there_says_so()
+    {
+        Assert.Null(await Review().RunAsync(Path.Combine(_dir, "missing"), default));
+        Assert.Contains("Can't find", _output.ToString());
+    }
+
+    [Fact]
     public async Task An_ambiguous_finding_gets_its_own_section_and_no_empty_fix()
     {
         Add("Auth.cs", "log.Info(\"done\");\nlog.Info(\"done\");");

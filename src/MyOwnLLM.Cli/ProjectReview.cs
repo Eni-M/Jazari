@@ -45,6 +45,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     /// <summary>Returns the report's path, or null when there was nothing to review or the review stopped early.</summary>
     public async Task<string?> RunAsync(string root, CancellationToken ct)
     {
+        if (!File.Exists(root) && !Directory.Exists(root)) { ui.Metadata($"Can't find {root}."); return null; }
         var (files, skipped) = ProjectFiles.Load(root);
         if (files.Count == 0) { ui.Metadata($"Nothing to review in {root}."); return null; }
 

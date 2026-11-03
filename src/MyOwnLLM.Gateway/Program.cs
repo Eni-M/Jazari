@@ -14,7 +14,7 @@ Directory.CreateDirectory(options.DataDir);
 if (args is ["add-key", ..])
 {
     Console.WriteLine(new ApiKeyStore(options.KeyFile).AddKey());
-    Console.WriteLine("Store this key now; only its hash is kept. Set it as MYOWNLLM_KEY.");
+    Console.WriteLine("Store this key now; only its hash is kept. Set it as JAZARI_KEY.");
     return;
 }
 

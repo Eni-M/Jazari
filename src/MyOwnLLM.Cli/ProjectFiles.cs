@@ -34,8 +34,10 @@ public static partial class ProjectFiles
         var skipped = 0;
         foreach (var path in Walk(target))
         {
-            if (!Wanted(path) || TryRead(path) is not { } text) { skipped++; continue; }
-            files.Add(new(Path.GetRelativePath(target, path).Replace('\\', '/'), text));
+            // Relative: the folders above the project (it may sit in a .azure) say nothing about its files.
+            var relative = Path.GetRelativePath(target, path).Replace('\\', '/');
+            if (!Wanted(relative) || TryRead(path) is not { } text) { skipped++; continue; }
+            files.Add(new(relative, text));
         }
         return ([.. files.OrderByDescending(f => Risk(f.Path)).ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)], skipped);
     }
