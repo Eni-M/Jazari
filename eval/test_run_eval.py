@@ -104,7 +104,7 @@ class ScenarioTests(unittest.TestCase):
         header, row = table([result]).splitlines()
         self.assertIn("found", header)
         self.assertIn("false", header)
-        self.assertRegex(row, r"2\s+7")
+        self.assertRegex(row, r"\b2\s+7\b")
 
     def test_an_older_result_without_those_numbers_still_prints(self):
         older = {"label": "a", "score": 1, "total": 1, "plain_p50_s": 1, "plain_max_s": 1, "read_first_s": 1, "followup_s": 1, "edit_ok": True, "review_ok": True, "turn_times_s": []}

@@ -46,6 +46,13 @@ def csharp_string(cli_file, name):
     return _constant(os.path.join(REPO, "src", "MyOwnLLM.Cli", cli_file), name)
 
 
+def csharp_int(cli_file, name):
+    """A C# int constant, as `const int Name = 500;` or one of several on a line (`const int A = 1, Name = 500;`)."""
+    with open(os.path.join(REPO, "src", "MyOwnLLM.Cli", cli_file), encoding="utf-8-sig") as f:
+        source = f.read()
+    return int(re.search(rf"const int [^;]*\b{name}\s*=\s*(\d+)", source).group(1))
+
+
 def _files(paths):
     parts = []
     for path in paths:
@@ -85,16 +92,33 @@ def edit_scenario(ask, system, file_text, request='Change the user name it compa
         return False
 
 
-def review_scenario(ask, system):
-    """One /review part: the fixture with planted bugs. It must at least report the hardcoded password."""
-    fixture = [f"spike/review-test/{name}.cs" for name in ["AuthService", "EmailSender", "Order", "OrderRepository", "Program", "RefundController"]]
-    messages = [{"role": "system", "content": system}, {"role": "system", "content": relevant_code(_files(fixture))},
+# The fixture's three planted bugs (spike/review-test/README.md): the file each is in, and words that name it.
+PLANTED = {"AuthService.cs": ("password",), "OrderRepository.cs": ("sql", "injection"), "RefundController.cs": ("own", "authoriz")}
+
+
+def _review_part(ask, system, files):
+    """The findings for one /review part, sent as the CLI sends it; None when the reply isn't the expected JSON."""
+    messages = [{"role": "system", "content": system}, {"role": "system", "content": relevant_code(_files(files))},
                 {"role": "user", "content": csharp_string("ProjectReview.cs", "Instructions")}]
-    reply = ask(messages, 500, csharp_string("ProjectReview.cs", "Schema"))
+    reply = ask(messages, csharp_int("ProjectReview.cs", "AnswerTokens"), csharp_string("ProjectReview.cs", "Schema"))
     try:
-        return any("password" in f"{f['problem']} {f['quote']}".lower() for f in json.loads(reply)["findings"])
+        findings = json.loads(reply)["findings"]
+        return [(os.path.basename(str(f["file"])), f"{f['problem']} {f.get('quote', '')}".lower()) for f in findings]
     except (ValueError, KeyError, TypeError):
-        return False
+        return None
+
+
+def review_scenario(ask, system):
+    """Two /review parts. The fixture with three planted bugs: each counts as found once, and only on its own file; it must
+    at least report the hardcoded password. Then StoreDbContext.cs, which is clean but full of security words (encryption,
+    passwords, tokens), alone. Every finding that names no planted bug is a false alarm."""
+    mixed = _review_part(ask, system, [f"spike/review-test/{name}.cs" for name in ["AuthService", "EmailSender", "Order", "OrderRepository", "Program", "RefundController"]])
+    if mixed is None:
+        return {"review_ok": False, "review_found": None, "review_false_alarms": None}
+    hits = {file for file, text in mixed if any(word in text for word in PLANTED.get(file, ()))}
+    clean = _review_part(ask, system, ["spike/review-test/StoreDbContext.cs"])
+    false_alarms = None if clean is None else len(clean) + sum(not any(word in text for word in PLANTED.get(file, ())) for file, text in mixed)
+    return {"review_ok": "AuthService.cs" in hits, "review_found": len(hits), "review_false_alarms": false_alarms}
 
 
 def conversation(ask, system):
@@ -124,7 +148,8 @@ def run_scenarios(ask, system):
     with open(os.path.join(REPO, "spike", "review-test", "AuthService.cs"), encoding="utf-8-sig") as f:
         auth = f.read()
     return {"read_first_s": first_s, "followup_s": followup_s, "edit_ok": attempt("edit", lambda: edit_scenario(ask, system, auth), False),
-            "review_ok": attempt("review", lambda: review_scenario(ask, system), False), "turn_times_s": attempt("conversation", lambda: conversation(ask, system), [])}
+            **attempt("review", lambda: review_scenario(ask, system), {"review_ok": False, "review_found": None, "review_false_alarms": None}),
+            "turn_times_s": attempt("conversation", lambda: conversation(ask, system), [])}
 
 
 def run_questions(questions, ask):
@@ -248,7 +273,7 @@ def main():
         result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "device": a.device, "gpu_layers": a.gpu_layers,
                   "law_book": os.path.abspath(a.law_book) if a.law_book else None,
                   "score": sum(x["passed"] for x in answers), "total": len(answers), "plain_p50_s": statistics.median(times), "plain_max_s": max(times),
-                  "read_first_s": None, "followup_s": None, "edit_ok": None, "review_ok": None, "answers": answers}
+                  "read_first_s": None, "followup_s": None, "edit_ok": None, "review_ok": None, "review_found": None, "review_false_alarms": None, "answers": answers}
         if a.scenarios:
             result.update(run_scenarios(chat, system))
     finally:
