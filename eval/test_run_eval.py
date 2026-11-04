@@ -256,6 +256,13 @@ class PairedTests(unittest.TestCase):
         cand = _run("cand", {str(i): True for i in range(45)})
         self.assertIn("could be chance", pair_report(base, cand))
 
+    def test_runs_from_different_setups_say_so(self):
+        base = {**_run("base", {"a": True}), "llama_build": "11982", "git_commit": "aaa"}
+        cand = {**_run("cand", {"a": True}), "llama_build": "12069", "git_commit": "aaa"}
+        self.assertIn("the runs also differ in: llama_build 11982 vs 12069", pair_report(base, cand))
+        self.assertNotIn("differ in", pair_report(base, {**cand, "llama_build": "11982"}))
+        self.assertNotIn("differ in", pair_report(_run("old", {"a": True}), cand))  # an unstamped run can't be compared
+
 
 if __name__ == "__main__":
     unittest.main()

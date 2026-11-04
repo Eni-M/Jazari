@@ -4,7 +4,7 @@ import argparse, json, os, re, shutil, statistics, sys, tempfile, time, urllib.e
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from score import score
-from gateway import (GATEWAY_DLL, GATEWAY_PORT, PortInUse, ServerDidNotStart, add_key, build_gateway, gateway_chat, gateway_env, launch,
+from gateway import (stamp, GATEWAY_DLL, GATEWAY_PORT, PortInUse, ServerDidNotStart, add_key, build_gateway, gateway_chat, gateway_env, launch,
                      search_law, start_server, stop, wait_for_gateway)
 
 PORT = 8099
@@ -270,7 +270,7 @@ def main():
         if a.law_book:
             with_passages(answers, lambda question: search_law(env, folder, question))
         times = [x["seconds"] for x in answers]
-        result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "device": a.device, "gpu_layers": a.gpu_layers,
+        result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "device": a.device, "gpu_layers": a.gpu_layers, "temperature": TEMPERATURE, **stamp(a.llama, a.model),
                   "law_book": os.path.abspath(a.law_book) if a.law_book else None,
                   "score": sum(x["passed"] for x in answers), "total": len(answers), "plain_p50_s": statistics.median(times), "plain_max_s": max(times),
                   "read_first_s": None, "followup_s": None, "edit_ok": None, "review_ok": None, "review_found": None, "review_false_alarms": None, "answers": answers}

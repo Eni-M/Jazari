@@ -1,6 +1,6 @@
 """Temporary servers for the tests: a llama-server and the real gateway, each on its own port with its own data folder,
 so the installed Jazari is never touched. Used by run_eval.py and recall.py."""
-import json, os, socket, subprocess, time, urllib.error, urllib.request
+import hashlib, json, os, re, socket, subprocess, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.join(HERE, "..")
@@ -90,6 +90,37 @@ def gateway_chat(key, messages, max_tokens, port=GATEWAY_PORT):
                                      {"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
     with urllib.request.urlopen(request, timeout=1800) as response:
         return json.load(response)["choices"][0]["message"]["content"] or ""
+
+
+def stamp(llama, model):
+    """What a run measured, saved with its result, as Aider's harness stamps each run: the code (and whether it had
+    uncommitted changes), the llama.cpp build and the model file. Results from different setups can then never be
+    compared unawares. The model's fingerprint is its size and its first and last MiB, so a 4 GB file takes no time."""
+    def git(*args):
+        try:
+            out = subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True, timeout=30)
+            return out.stdout.strip() if out.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    try:
+        version = subprocess.run([os.path.abspath(llama), "--version"], capture_output=True, text=True, timeout=60)
+        build = re.search(r"build (\d+)", version.stdout + version.stderr)
+    except (OSError, subprocess.TimeoutExpired):
+        build = None
+    fingerprint = None
+    try:
+        size = os.path.getsize(model)
+        digest = hashlib.sha256(str(size).encode())
+        with open(model, "rb") as f:
+            digest.update(f.read(1 << 20))
+            f.seek(max(size - (1 << 20), 0))
+            digest.update(f.read(1 << 20))
+        fingerprint = f"{size}:{digest.hexdigest()[:16]}"
+    except OSError:
+        pass
+    status = git("status", "--porcelain")
+    return {"git_commit": git("rev-parse", "HEAD"), "git_dirty": None if status is None else status != "",
+            "llama_build": build.group(1) if build else None, "model_fingerprint": fingerprint}
 
 
 def stop(processes):

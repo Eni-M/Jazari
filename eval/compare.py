@@ -89,6 +89,11 @@ def pair_report(base, candidate):
         lines.append("lost (right before, wrong now): " + ", ".join(note(i) for i in p["lost"]))
     if p["missing"]:
         lines.append("in one run only, not counted: " + ", ".join(p["missing"]))
+    # Stamped runs (gateway.stamp): a difference the comparison didn't mean to test is named, so it isn't mistaken for the change's effect.
+    differ = [f"{key} {base[key]} vs {candidate[key]}" for key in ("git_commit", "git_dirty", "llama_build", "model_fingerprint", "temperature")
+              if key in base and key in candidate and base[key] != candidate[key]]
+    if differ:
+        lines.append("the runs also differ in: " + "; ".join(differ))
     return "\n".join(lines)
 
 

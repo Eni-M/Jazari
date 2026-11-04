@@ -1,7 +1,7 @@
 import os, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from gateway import start_server
+from gateway import stamp, start_server
 from recall import CHUNK, FACTS, ServerDidNotStart, conversation, estimated_tokens, exam, filler, gateway_env, is_right, launch, llama_args, memory_mib, parse_working_set
 
 
@@ -65,6 +65,26 @@ class HarnessTests(unittest.TestCase):
         self.assertGreaterEqual(mib["peak_working_set"], mib["working_set"])
         self.assertGreaterEqual(mib["peak_private"], mib["private"])
         self.assertEqual(memory_mib(2 ** 31 - 1), {})  # no such process
+
+    def test_a_run_is_stamped_with_the_code_build_and_model_it_measured(self):
+        folder = tempfile.mkdtemp()
+        model = os.path.join(folder, "m.gguf")
+        with open(model, "wb") as f:
+            f.write(b"GGUF" + bytes(3 << 20))
+        llama = os.path.join(folder, "llama-server.cmd")
+        with open(llama, "w") as f:
+            f.write("@echo version: 0.8.0-dev (build 11982, commit 8a199ad31)\n")
+        stamped = stamp(llama if os.name == "nt" else "no-such-llama", model)
+        self.assertRegex(stamped["git_commit"], r"^[0-9a-f]{40}$")
+        self.assertIn(stamped["git_dirty"], (True, False))
+        self.assertTrue(stamped["model_fingerprint"].startswith(f"{(3 << 20) + 4}:"))
+        if os.name == "nt":
+            self.assertEqual(stamped["llama_build"], "11982")
+
+    def test_a_missing_server_or_model_stamps_none_instead_of_failing(self):
+        stamped = stamp("no-such-llama-server.exe", "no-such-model.gguf")
+        self.assertIsNone(stamped["llama_build"])
+        self.assertIsNone(stamped["model_fingerprint"])
 
     def test_a_relative_server_path_is_made_absolute(self):
         server = llama_args("spike/bin/llama-server.exe", "m.gguf", 4, 16384)[0]

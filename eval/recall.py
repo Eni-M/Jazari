@@ -5,7 +5,7 @@ import argparse, collections, json, os, re, shutil, statistics, subprocess, sys,
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from gateway import (GATEWAY_DLL, GATEWAY_PORT, LLAMA_PORT, REPO, PortInUse, ServerDidNotStart, add_key, build_gateway, gateway_chat, gateway_env,
+from gateway import (stamp, GATEWAY_DLL, GATEWAY_PORT, LLAMA_PORT, REPO, PortInUse, ServerDidNotStart, add_key, build_gateway, gateway_chat, gateway_env,
                      launch, stop, wait_for_gateway)
 from run_eval import save_failure, wait_until_ready
 
@@ -202,7 +202,7 @@ def main():
         stop(running)
         shutil.rmtree(folder, ignore_errors=True)
 
-    result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "cache_ram": a.cache_ram, "ctxcp": a.ctxcp,
+    result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "cache_ram": a.cache_ram, "ctxcp": a.ctxcp, **stamp(a.llama, a.model),
               "short": short, "deep": deep, "cut": cut, "deep_tokens": estimated_tokens(deep_history), "working_set_mib": memory,
               "deep_server_mib": counters, "llama_log": log}
     with open(os.path.join(RESULTS, f"{a.label}.json"), "w", encoding="utf-8") as f:
