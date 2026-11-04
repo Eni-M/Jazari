@@ -54,12 +54,14 @@ int Columns() => Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth
 var width = Columns();
 var directory = Path.GetFullPath(cli.RepoPath ?? Directory.GetCurrentDirectory());
 
-using var health = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-async Task<bool> LlamaReady(CancellationToken ct)
+using var health = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:8080"), Timeout = TimeSpan.FromSeconds(2) };
+string? LlamaKey()
 {
-    try { return (await health.GetAsync("http://127.0.0.1:8080/health", ct)).IsSuccessStatusCode; }
-    catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { return false; }
+    try { return File.Exists(ServerLauncher.LlamaKeyFile) ? File.ReadAllText(ServerLauncher.LlamaKeyFile).Trim() : null; }
+    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
 }
+var router = new RouterHealth(health, LlamaKey);
+Task<bool> LlamaReady(CancellationToken ct) => router.ReadyAsync(ct);
 
 // Before the first-run key below: the doctor only looks. It makes no key and starts no server.
 if (cli.Command == "doctor")
@@ -96,8 +98,14 @@ var gateway = new GatewayClient(http);
 
 // Start llama-server and the gateway in the background if they aren't running yet.
 // Tuning only ever runs when asked: a start uses what was measured, or safe CPU settings.
-Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), c.Model).ServerArgs(c.Model, ServerLauncher.EnsureLlamaKey(ServerLauncher.LlamaKeyFile)));
-Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.FallBack(DeviceTuner.ReadMachine()).ServerArgs(c.Model, ServerLauncher.EnsureLlamaKey(ServerLauncher.LlamaKeyFile)));
+string[] RouterOn(Tuning t, JazariConfig c)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(ServerLauncher.LanesFile)!);
+    File.WriteAllText(ServerLauncher.LanesFile, t.PresetText(c.Model, c.DeepModel is { } deep && File.Exists(deep) ? deep : null));
+    return Tuning.RouterArgs(ServerLauncher.LanesFile, ServerLauncher.EnsureLlamaKey(ServerLauncher.LlamaKeyFile));
+}
+Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(RouterOn(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), c.Model), c));
+Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(RouterOn(DeviceTuner.FallBack(DeviceTuner.ReadMachine()), c));
 // A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run. It's kept only if the
 // gateway answering here accepts it: a 401 from some other server on the port mustn't replace a working key.
 async Task<bool> Accepted(string candidate, CancellationToken ct)
@@ -110,7 +118,8 @@ async Task<bool> Accepted(string candidate, CancellationToken ct)
 async Task StartServersAsync(Ui reportTo, bool quiet)
 {
     var serverState = await new ServerLauncher(runner, gateway, LlamaReady, reportTo, ServerLauncher.DefaultLogDir, Task.Delay,
-            llamaArgs: TunedArgs, fallbackArgs: SafeArgs, quiet: quiet)
+            llamaArgs: TunedArgs, fallbackArgs: SafeArgs, quiet: quiet, llamaListening: router.ListeningAsync,
+            llamaAlive: () => !router.FastFailed && config is not null && ServerLauncher.IsRunning(config.LlamaServer))
         .EnsureRunningAsync(config, CancellationToken.None);
     if (serverState == ConnectionState.KeyRejected && await provisioner.EnsureKeyAsync(key, config, CancellationToken.None, rejected: true, accepted: Accepted) is { } freshKey)
     {

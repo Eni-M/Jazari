@@ -43,8 +43,10 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
     public async Task<string?> EnsureAsync(Lane? lane, Func<string, Task>? stage, CancellationToken ct)
     {
         if (lane is Lane.Fast) CancelHold();
-        var loading = Volatile.Read(ref _loading);
-        if (loading is not null) await loading.WaitAsync(ct).ConfigureAwait(false); // a stopped question's load: wait, then look again
+        Task? loading;
+        lock (_gate) loading = _loading;
+        // A stopped question's load: wait, then look again. Whether it worked shows in the states below.
+        if (loading is not null) await loading.WaitAsync(ct).ContinueWith(t => { if (t.IsCanceled) ct.ThrowIfCancellationRequested(); }, TaskScheduler.Default);
 
         var states = await llama().ModelStatesAsync(ct);
         if (states is null || !states.ContainsKey(FastModel))
@@ -65,13 +67,8 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
         if (lane is Lane.Deep && stage is not null) await stage("loading smart model");
         var load = Task.Run(() => LoadAsync(name), CancellationToken.None);
         lock (_gate) _loading = load;
-        try { await load.WaitAsync(ct); }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            _ = load.ContinueWith(_ => { lock (_gate) if (_loading == load) _loading = null; }, TaskScheduler.Default);
-            throw;
-        }
-        lock (_gate) if (_loading == load) _loading = null;
+        _ = load.ContinueWith(_ => { lock (_gate) if (_loading == load) _loading = null; }, TaskScheduler.Default);
+        await load.WaitAsync(ct);
         return name;
     }
 

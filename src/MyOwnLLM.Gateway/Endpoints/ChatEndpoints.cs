@@ -51,13 +51,13 @@ public static class ChatEndpoints
         return group;
     }
 
-    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, ModelLimits Limits, ConversationNotes Notes, LawBook LawBook);
+    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, ModelLimits Limits, ConversationNotes Notes, LawBook LawBook, ILanes Lanes);
 
     static Services Resolve(HttpContext http) => new(
         http.RequestServices.GetRequiredService<ILlamaClient>(), http.RequestServices.GetRequiredService<RequestQueue>(),
         http.RequestServices.GetRequiredService<ProjectStateStore>(), http.RequestServices.GetRequiredService<InteractionLog>(),
         http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<ModelLimits>(),
-        http.RequestServices.GetRequiredService<ConversationNotes>(), http.RequestServices.GetRequiredService<LawBook>());
+        http.RequestServices.GetRequiredService<ConversationNotes>(), http.RequestServices.GetRequiredService<LawBook>(), http.RequestServices.GetRequiredService<ILanes>());
 
     static async Task<string?> NoteFor(Services s, string? project) =>
         project is not null && GitSummary.IsRepo(project) ? await s.State.GetAsync(project) : null;
@@ -94,7 +94,8 @@ public static class ChatEndpoints
                 answer = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
                 {
                     var text = new StringBuilder();
-                    await foreach (var part in s.Llama.ChatStreamAsync(prompt, maxTokens, ct))
+                    var model = await s.Lanes.EnsureAsync(Lane.Fast, null, ct);
+                    await foreach (var part in s.Llama.ChatStreamAsync(prompt, maxTokens, ct, model))
                     {
                         stats = part.Stats ?? stats;
                         cutOff |= part.CutOff;
@@ -132,7 +133,7 @@ public static class ChatEndpoints
             var cutOff = false;
             if (cached is null)
             {
-                (answer, cutOff) = await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatWithEndAsync(prompt, maxTokens, t, request.JsonSchema), http.RequestAborted);
+                (answer, cutOff) = await s.Queue.EnqueueAsync(WorkKind.Chat, async t => await s.Llama.ChatWithEndAsync(prompt, maxTokens, t, request.JsonSchema, await s.Lanes.EnsureAsync(Lane.Fast, null, t)), http.RequestAborted);
                 if (!cutOff && (request.JsonSchema is null || IsJson(answer))) await s.Cache.SetAsync(key, answer, CacheFor, cancellationToken: http.RequestAborted);
             }
             else answer = cached;
@@ -159,7 +160,7 @@ public static class ChatEndpoints
         var project = ProjectPath(http);
         var note = await ConversationNoteFor(s, project, request.Messages.Count == 0);
         var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, "", Conventions: request.Conventions), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
-        await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, 1, t), http.RequestAborted);
+        await s.Queue.EnqueueAsync(WorkKind.Chat, async t => await s.Llama.ChatAsync(prompt, 1, t, model: await s.Lanes.EnsureAsync(Lane.Fast, null, t)), http.RequestAborted);
         http.Response.StatusCode = StatusCodes.Status204NoContent;
     });
 
@@ -172,7 +173,7 @@ public static class ChatEndpoints
         if (estimated > context - maxTokens) throw new InputTooLargeException(estimated, context - maxTokens);
         var watch = Stopwatch.StartNew();
         var content = await s.Cache.GetOrCreateAsync(CacheKey("infill", null, null, request.Prefix, request.Suffix, maxTokens),
-            ct => new ValueTask<string>(s.Queue.EnqueueAsync(WorkKind.Completion, t => s.Llama.InfillAsync(request.Prefix, request.Suffix, maxTokens, t), ct)),
+            ct => new ValueTask<string>(s.Queue.EnqueueAsync(WorkKind.Completion, async t => await s.Llama.InfillAsync(request.Prefix, request.Suffix, maxTokens, t, await s.Lanes.EnsureAsync(Lane.Fast, null, t)), ct)),
             CacheFor, cancellationToken: http.RequestAborted);
         var id = await s.Log.AddAsync(new Interaction(null, "infill", request.Prefix + "<FILL>" + request.Suffix, content, watch.ElapsedMilliseconds));
         await http.Response.WriteAsJsonAsync(new { id = $"ix-{id}", content }, SnakeCase, http.RequestAborted);
@@ -185,7 +186,7 @@ public static class ChatEndpoints
         var git = await GitSummary.GetAsync(request.ProjectPath, http.RequestAborted);
         var prompt = PromptBuilder.Build(new PromptParts(note ?? "(no notes yet)", git, [], StatusQuestion), await s.Limits.ContextTokensAsync(http.RequestAborted), StatusTokens);
         var watch = Stopwatch.StartNew();
-        var summary = await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, StatusTokens, t), http.RequestAborted);
+        var summary = await s.Queue.EnqueueAsync(WorkKind.Chat, async t => await s.Llama.ChatAsync(prompt, StatusTokens, t, model: await s.Lanes.EnsureAsync(Lane.Fast, null, t)), http.RequestAborted);
         var id = await s.Log.AddAsync(new Interaction(request.ProjectPath, "status", StatusQuestion, summary, watch.ElapsedMilliseconds));
         await http.Response.WriteAsJsonAsync(new { id = $"ix-{id}", summary }, SnakeCase, http.RequestAborted);
     });
@@ -209,6 +210,7 @@ public static class ChatEndpoints
     static int? StatusFor(Exception e) => e switch
     {
         LlamaUnavailableException => StatusCodes.Status503ServiceUnavailable,
+        DeepModelUnavailableException => StatusCodes.Status503ServiceUnavailable,
         LlamaErrorException { Status: 400 } => StatusCodes.Status413PayloadTooLarge, // our requests are well-formed; 400 means context overflow
         LlamaErrorException { Status: 503 } => StatusCodes.Status503ServiceUnavailable, // still loading the model
         LlamaErrorException => StatusCodes.Status502BadGateway,
@@ -225,9 +227,10 @@ public static class ChatEndpoints
     {
         try
         {
+            var checker = http.RequestServices.GetRequiredService<SnippetChecker>();
+            await Task.Run(checker.Load, http.RequestAborted);
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(http.RequestAborted);
             budget.CancelAfter(CheckBudget);
-            var checker = http.RequestServices.GetRequiredService<SnippetChecker>();
             var checks = await Task.Run(() => checker.Check(answer, budget.Token), budget.Token);
             return checks.Any(c => c.State != CheckState.NotChecked) ? checks.Select(c => new { block = c.Block, state = c.State.ToString().ToLowerInvariant(), errors = c.Errors, why = c.Why }).ToList() : null;
         }

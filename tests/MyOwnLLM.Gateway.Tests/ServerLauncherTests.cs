@@ -23,6 +23,56 @@ public class ServerLauncherTests
     }
 
     [Fact]
+    public async Task A_router_with_no_model_ready_yet_is_not_started_again()
+    {
+        _gatewayUp = true;
+        var checks = 0;
+        var launcher = new ServerLauncher(_runner, _gateway, _ => Task.FromResult(++checks > 2), new Ui(_output, new Theme(ColorMode.None, true), 80), @"C:\logs",
+            (_, _) => Task.CompletedTask, maxWaits: 5, fileExists: _fileExists, llamaListening: _ => Task.FromResult(true));
+        _gateway.Info = _ => Task.FromResult(new GatewayInfo("Jazari", "m", "0"));
+
+        Assert.Equal(ConnectionState.Available, await launcher.EnsureRunningAsync(Config, CancellationToken.None));
+        Assert.Empty(_runner.Started);
+    }
+
+    [Fact]
+    public void A_preset_has_both_lanes_with_the_smart_one_on_the_cpu()
+    {
+        var text = new Tuning("f", "Vulkan0", 4, 99, true, 8192).PresetText(@"C:\m\fast.gguf", @"C:\m\deep.gguf");
+        var deep = text[text.IndexOf("[deep]")..];
+        Assert.Contains("model = C:/m/fast.gguf", text);
+        Assert.Contains("ctx-size = 8192", text);
+        Assert.Contains("device = Vulkan0", text[..text.IndexOf("[deep]")]);
+        Assert.Contains("device = none", deep);
+        Assert.Contains("n-gpu-layers = 0", deep);
+    }
+
+    [Fact]
+    public void No_deep_model_means_a_preset_with_fast_only() =>
+        Assert.DoesNotContain("[deep]", new Tuning("f", "none", 4, 0, false, 16384).PresetText(@"C:\m\fast.gguf", null));
+
+    [Fact]
+    public void The_router_keeps_the_key_and_port_and_loads_nothing_by_surprise()
+    {
+        var args = Tuning.RouterArgs("p.ini", "k.key");
+        Assert.Equal("8080", args[Array.IndexOf(args, "--port") + 1]);
+        Assert.Equal("k.key", args[Array.IndexOf(args, "--api-key-file") + 1]);
+        Assert.Equal("1", args[Array.IndexOf(args, "--models-max") + 1]);
+        Assert.Contains("--no-models-autoload", args);
+    }
+
+    [Theory]
+    [InlineData("""{"data":[{"id":"fast","status":{"value":"loaded"}}]}""", true, false, false)]
+    [InlineData("""{"data":[{"id":"fast","status":{"value":"sleeping"}}]}""", true, false, false)]
+    [InlineData("""{"data":[{"id":"fast","status":{"value":"unloaded"}},{"id":"deep","status":{"value":"loading"}}]}""", false, true, false)]
+    [InlineData("""{"data":[{"id":"fast","status":{"value":"unloaded","failed":true}}]}""", false, false, true)]
+    public void Router_states_are_read(string json, bool loaded, bool loading, bool failed) =>
+        Assert.Equal(new RouterHealth.RouterState(loaded, loading, failed), RouterHealth.Read(json));
+
+    [Fact]
+    public void A_plain_server_has_no_router_state() => Assert.Null(RouterHealth.Read("""{"data":[{"id":"m.gguf"}]}"""));
+
+    [Fact]
     public async Task Everything_running_starts_nothing()
     {
         _gatewayUp = _llamaUp = true;

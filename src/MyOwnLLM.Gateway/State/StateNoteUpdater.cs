@@ -10,7 +10,7 @@ namespace MyOwnLLM.Gateway.State;
 /// At most one update per project waits in the queue; it reads the note when it runs. An update that is stopped (by a
 /// chat, a warm-up, a status) or fails keeps its exchanges and waits for the next quiet time.
 /// </summary>
-public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, ProjectStateStore state, ILogger<StateNoteUpdater> logger, TimeSpan? quietFor = null)
+public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, ProjectStateStore state, ILogger<StateNoteUpdater> logger, TimeSpan? quietFor = null, ILanes? lanes = null)
 {
     public static readonly TimeSpan DefaultQuietTime = TimeSpan.FromMinutes(3);
     const int NoteTokens = 220;
@@ -102,7 +102,7 @@ public sealed class StateNoteUpdater(RequestQueue queue, ILlamaClient llama, Pro
                             "Use only what the note, the exchanges and the git output above actually say. Leave out any part they don't " +
                             "support; small talk adds nothing. Never invent tasks, changes or decisions. At most 150 words."),
             ];
-            await state.SetAsync(project, await llama.ChatAsync(prompt, NoteTokens, ct));
+            await state.SetAsync(project, await llama.ChatAsync(prompt, NoteTokens, ct, model: lanes is null ? null : await lanes.EnsureAsync(null, null, ct)));
             return 0;
         }
         catch (Exception e)

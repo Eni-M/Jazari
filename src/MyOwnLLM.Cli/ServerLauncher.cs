@@ -11,13 +11,16 @@ public sealed class ServerLauncher(
     IProcessRunner runner, IGatewayClient gateway, Func<CancellationToken, Task<bool>> llamaReady, Ui ui, string logDir,
     Func<TimeSpan, CancellationToken, Task> delay, int maxWaits = 180, Func<string, bool>? fileExists = null,
     Func<JazariConfig, CancellationToken, Task<string[]>>? llamaArgs = null,
-    Func<JazariConfig, CancellationToken, Task<string[]>>? fallbackArgs = null, Func<bool>? llamaAlive = null, bool quiet = false)
+    Func<JazariConfig, CancellationToken, Task<string[]>>? fallbackArgs = null, Func<bool>? llamaAlive = null, bool quiet = false, Func<CancellationToken, Task<bool>>? llamaListening = null)
 {
     static readonly TimeSpan PollEvery = TimeSpan.FromMilliseconds(500);
 
     public static string DefaultLogDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "logs");
 
     /// <summary>llama-server's key, in the gateway's data folder, where the gateway reads it (GatewayOptions.LlamaKeyFile).</summary>
+    /// <summary>The models llama-server's router runs, written at each start from this PC's tuning.</summary>
+    public static string LanesFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "llama-lanes.ini");
+
     public static string LlamaKeyFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "llama-server.key");
 
     /// <summary>Makes the key once, at random; later starts reuse it, so a running gateway and a restarted server still agree.</summary>
@@ -35,6 +38,8 @@ public sealed class ServerLauncher(
     {
         var (gatewayState, llamaUp) = (await GatewayStateAsync(ct), await llamaReady(ct));
         if (gatewayState is not ConnectionState.GatewayNotRunning && llamaUp) return gatewayState;
+        // Up and listening but with no model ready (a swap, or the first load): starting another server could only fail.
+        var listening = llamaUp || (llamaListening is not null && await llamaListening(ct));
         if (config is null) return gatewayState;
 
         // Say what's missing straight away instead of waiting for servers that can never start.
@@ -46,7 +51,7 @@ public sealed class ServerLauncher(
         }
 
         if (!quiet) ui.Label("starting"); // the interactive session says so on its panel
-        if (!llamaUp)
+        if (!listening)
             // The settings measured best on this PC (see DeviceTuner), or the T480's measured CPU setup.
             runner.StartDetached(config.LlamaServer, llamaArgs is null
                 ?
@@ -83,6 +88,7 @@ public sealed class ServerLauncher(
                 try { if (why.Length > 0) File.Copy(log, Path.Combine(logDir, "llama-server.failed.log"), overwrite: true); } // the restart overwrites it
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 ui.Metadata("The model server stopped with this PC's tuned settings, so it's starting on safe CPU settings for now. Run jazari tune to measure again.");
+                StopOurs(config.LlamaServer); // a router outlives a model that fails to load, and would hold the port
                 runner.StartDetached(config.LlamaServer, await fallbackArgs(config, ct), log);
             }
         }
@@ -119,6 +125,20 @@ public sealed class ServerLauncher(
         return mine;
     }
 
+    static void StopOurs(string exe)
+    {
+        foreach (var p in Ours(exe))
+        {
+            using (p)
+            {
+                try { p.Kill(entireProcessTree: true); }
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) { }
+            }
+        }
+    }
+
+    public static bool IsRunning(string exe) => Running(exe) > 0;
+
     static int Running(string exe)
     {
         var running = Ours(exe);
@@ -150,5 +170,75 @@ public sealed class ServerLauncher(
             }
         }
         return stopped;
+    }
+}
+
+/// <summary>
+/// What llama-server's router says about the fast model. /health only says the router is up, so a model that failed to load
+/// would look fine; and asking for a load here means a router started by any window ends up with a model.
+/// </summary>
+public sealed class RouterHealth(HttpClient http, Func<string?> key)
+{
+    /// <summary>The router gave up on the fast model: its settings don't work on this PC.</summary>
+    public bool FastFailed { get; private set; }
+    bool _asked;
+    int _unloadedAfterAsking;
+    const int UnloadedChecksBeforeFailing = 10; // the state can take a moment to change after asking
+
+    public async Task<bool> ListeningAsync(CancellationToken ct)
+    {
+        try { using var response = await http.GetAsync("/health", ct); return true; }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { return false; }
+    }
+
+    public async Task<bool> ReadyAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var models = await http.SendAsync(WithKey(new(HttpMethod.Get, "/models")), ct);
+            if (!models.IsSuccessStatusCode) return await PlainReadyAsync(ct);
+            var read = Read(await models.Content.ReadAsStringAsync(ct));
+            if (read is null) return await PlainReadyAsync(ct);
+            if (read.AnyLoaded) return true;
+            if (read.AnyLoading) return false;
+            if (read.FastFailed || (_asked && ++_unloadedAfterAsking > UnloadedChecksBeforeFailing)) { FastFailed = true; return false; }
+            if (!_asked)
+            {
+                _asked = true;
+                using var load = await http.SendAsync(WithKey(new(HttpMethod.Post, "/models/load") { Content = System.Net.Http.Json.JsonContent.Create(new { model = "fast" }) }), ct);
+            }
+            return false;
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException) { return false; }
+    }
+
+    async Task<bool> PlainReadyAsync(CancellationToken ct)
+    {
+        using var response = await http.GetAsync("/health", ct);
+        return response.IsSuccessStatusCode;
+    }
+
+    HttpRequestMessage WithKey(HttpRequestMessage request)
+    {
+        if (key() is { Length: > 0 } value) request.Headers.Authorization = new("Bearer", value);
+        return request;
+    }
+
+    public sealed record RouterState(bool AnyLoaded, bool AnyLoading, bool FastFailed);
+
+    /// <summary>Null from a plain llama-server, whose models have no status.</summary>
+    public static RouterState? Read(string json)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var (loaded, loading, failed) = (false, false, false);
+        foreach (var model in doc.RootElement.GetProperty("data").EnumerateArray())
+        {
+            if (!model.TryGetProperty("status", out var status) || status.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+            var value = status.GetProperty("value").GetString();
+            loaded |= value is "loaded" or "sleeping";
+            loading |= value == "loading";
+            failed |= model.GetProperty("id").GetString() == "fast" && status.TryGetProperty("failed", out var f) && f.ValueKind == System.Text.Json.JsonValueKind.True;
+        }
+        return new(loaded, loading, failed);
     }
 }

@@ -8,7 +8,7 @@ namespace MyOwnLLM.Cli;
 /// </summary>
 public sealed record JazariConfig(
     string Home, string GatewayExe, string LlamaServer, string Model,
-    string? RepoUrl = null, string? InstallDir = null, string? SourceDir = null, string? InstalledCommit = null)
+    string? RepoUrl = null, string? InstallDir = null, string? SourceDir = null, string? InstalledCommit = null, string? DeepModel = null)
 {
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "config.json");
 

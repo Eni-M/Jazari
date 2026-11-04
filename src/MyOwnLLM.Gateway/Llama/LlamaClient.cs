@@ -9,21 +9,22 @@ namespace MyOwnLLM.Gateway.Llama;
 /// file (eval/ runs its own server without one): no key is sent.</param>
 public sealed class LlamaClient(HttpClient http, string? keyFile = null) : ILlamaClient
 {
-    static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+    // Nulls stay out, so with a plain llama-server the request is what it always was.
+    static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
     const double CodeTemperature = 0.2; // llama-server's default of 0.8 is meant for prose; code wants the likeliest answer
     // llama-server's own defaults at b11982, written out so an upgrade that changes them can't change Jazari's answers
     // (reports/Jazari CLI and model enhancements.md, section 2). Changing them needs an eval/ run.
     const int TopK = 40;
     const double TopP = 0.95, MinP = 0.05;
 
-    public async Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null) =>
-        (await ChatWithEndAsync(messages, maxTokens, ct, jsonSchema)).Text;
+    public async Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null, string? model = null) =>
+        (await ChatWithEndAsync(messages, maxTokens, ct, jsonSchema, model)).Text;
 
-    public async Task<(string Text, bool CutOff)> ChatWithEndAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null)
+    public async Task<(string Text, bool CutOff)> ChatWithEndAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null, string? model = null)
     {
         var body = jsonSchema is null
-            ? ChatBody(messages, maxTokens, stream: false)
-            : new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = false, Temperature = CodeTemperature, TopK, TopP, MinP, JsonSchema = JsonDocument.Parse(jsonSchema).RootElement };
+            ? ChatBody(messages, maxTokens, stream: false, model)
+            : new { Model = model, Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = false, Temperature = CodeTemperature, TopK, TopP, MinP, JsonSchema = JsonDocument.Parse(jsonSchema).RootElement };
         using var response = await SendAsync("/v1/chat/completions", body, stream: false, ct);
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var choice = doc.RootElement.GetProperty("choices")[0];
@@ -31,10 +32,10 @@ public sealed class LlamaClient(HttpClient http, string? keyFile = null) : ILlam
         return (choice.GetProperty("message").GetProperty("content").GetString() ?? "", cutOff);
     }
 
-    public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct, string? model = null)
     {
         // return_progress: llama-server reports how far it has read the prompt, which takes minutes on a CPU.
-        var body = new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = true, Temperature = CodeTemperature, TopK, TopP, MinP, ReturnProgress = true };
+        var body = new { Model = model, Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = true, Temperature = CodeTemperature, TopK, TopP, MinP, ReturnProgress = true };
         using var response = await SendAsync("/v1/chat/completions", body, stream: true, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
         while (await reader.ReadLineAsync(ct) is { } line)
@@ -87,9 +88,9 @@ public sealed class LlamaClient(HttpClient http, string? keyFile = null) : ILlam
     static int Int(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.TryGetInt32(out var i) ? i : 0;
     static double Number(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.TryGetDouble(out var d) ? d : 0;
 
-    public async Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct)
+    public async Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct, string? model = null)
     {
-        var body = new { InputPrefix = prefix, InputSuffix = suffix, NPredict = maxTokens, CachePrompt = true };
+        var body = new { Model = model, InputPrefix = prefix, InputSuffix = suffix, NPredict = maxTokens, CachePrompt = true };
         using var response = await SendAsync("/infill", body, stream: false, ct);
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         return doc.RootElement.GetProperty("content").GetString() ?? "";
@@ -99,19 +100,63 @@ public sealed class LlamaClient(HttpClient http, string? keyFile = null) : ILlam
     {
         try
         {
-            using var request = WithKey(new HttpRequestMessage(HttpMethod.Get, "/props"));
-            using var response = await http.SendAsync(request, ct);
-            if (!response.IsSuccessStatusCode) return null;
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            var root = doc.RootElement;
-            var settings = root.TryGetProperty("default_generation_settings", out var s) ? s : root;
-            return settings.TryGetProperty("n_ctx", out var n) && n.TryGetInt32(out var tokens) && tokens > 0 ? tokens : null;
+            var size = await ContextOfAsync("/props", ct);
+            if (size is not null) return size;
+            // A router has no size of its own: ask the model it has loaded.
+            var loaded = (await ModelStatesAsync(ct))?.FirstOrDefault(s => s.Value is ModelState.Loaded).Key;
+            return loaded is null ? null : await ContextOfAsync($"/props?model={Uri.EscapeDataString(loaded)}", ct);
         }
         catch (Exception e) when (e is HttpRequestException or JsonException or InvalidOperationException) { return null; }
     }
 
-    static object ChatBody(IReadOnlyList<ChatMessage> messages, int maxTokens, bool stream) =>
-        new { Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = stream, Temperature = CodeTemperature, TopK, TopP, MinP };
+    async Task<int?> ContextOfAsync(string path, CancellationToken ct)
+    {
+        using var request = WithKey(new HttpRequestMessage(HttpMethod.Get, path));
+        using var response = await http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode) return null;
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var root = doc.RootElement;
+        var settings = root.TryGetProperty("default_generation_settings", out var s) ? s : root;
+        return settings.TryGetProperty("n_ctx", out var n) && n.TryGetInt32(out var tokens) && tokens > 0 ? tokens : null;
+    }
+
+    public async Task<IReadOnlyDictionary<string, ModelState>?> ModelStatesAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var request = WithKey(new HttpRequestMessage(HttpMethod.Get, "/models"));
+            using var response = await http.SendAsync(request, ct);
+            return response.IsSuccessStatusCode ? ReadModelStates(await response.Content.ReadAsStringAsync(ct)) : null;
+        }
+        catch (Exception e) when (e is HttpRequestException or JsonException or InvalidOperationException or KeyNotFoundException) { return null; }
+    }
+
+    /// <summary>Null when the models have no status, as on a plain llama-server. Sleeping counts as loaded: the next request wakes it.</summary>
+    public static IReadOnlyDictionary<string, ModelState>? ReadModelStates(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var states = new Dictionary<string, ModelState>();
+        foreach (var model in doc.RootElement.GetProperty("data").EnumerateArray())
+        {
+            if (!model.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.Object) return null;
+            var failed = status.TryGetProperty("failed", out var f) && f.ValueKind == JsonValueKind.True;
+            states[model.GetProperty("id").GetString() ?? ""] = status.GetProperty("value").GetString() switch
+            {
+                "loaded" or "sleeping" => ModelState.Loaded,
+                "loading" => ModelState.Loading,
+                _ => failed ? ModelState.Failed : ModelState.Unloaded,
+            };
+        }
+        return states;
+    }
+
+    public async Task LoadModelAsync(string name, CancellationToken ct)
+    {
+        using var _ = await SendAsync("/models/load", new { Model = name }, stream: false, ct);
+    }
+
+    static object ChatBody(IReadOnlyList<ChatMessage> messages, int maxTokens, bool stream, string? model) =>
+        new { Model = model, Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = stream, Temperature = CodeTemperature, TopK, TopP, MinP };
 
     async Task<HttpResponseMessage> SendAsync(string path, object body, bool stream, CancellationToken ct)
     {

@@ -24,7 +24,7 @@ public sealed class FakeLlama : ILlamaClient
     public string[] StreamParts { get; set; } = ["a", "b"];
     public string? LastSchema { get; private set; }
 
-    public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null)
+    public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null, string? model = null)
     {
         Calls.Enqueue(new("chat", messages, maxTokens));
         LastSchema = jsonSchema;
@@ -32,10 +32,10 @@ public sealed class FakeLlama : ILlamaClient
     }
 
     public bool CutOff { get; set; }
-    public async Task<(string Text, bool CutOff)> ChatWithEndAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null) =>
+    public async Task<(string Text, bool CutOff)> ChatWithEndAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null, string? model = null) =>
         (await ChatAsync(messages, maxTokens, ct, jsonSchema), CutOff);
 
-    public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct, string? model = null)
     {
         Calls.Enqueue(new("stream", messages, maxTokens));
         yield return new(null, Progress: new(100, 40, 100));
@@ -51,7 +51,7 @@ public sealed class FakeLlama : ILlamaClient
     public int? ContextTokens { get; set; }
     public Task<int?> ContextTokensAsync(CancellationToken ct) => Task.FromResult(ContextTokens);
 
-    public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct)
+    public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct, string? model = null)
     {
         Calls.Enqueue(new("infill", [new("user", prefix + "|" + suffix)], maxTokens));
         return Task.FromResult("filled");

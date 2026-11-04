@@ -10,7 +10,7 @@ namespace MyOwnLLM.Cli;
 /// </summary>
 public sealed partial record Tuning(
     string Fingerprint, string Device, int Threads, int GpuLayers, bool FlashAttention, int ContextTokens,
-    double PromptPerSecond = 0, double AnswerPerSecond = 0, string? DeviceName = null, string? ModelFile = null)
+    double PromptPerSecond = 0, double AnswerPerSecond = 0, string? DeviceName = null, string? ModelFile = null, int? DeepThreads = null)
 {
     /// <summary>
     /// Prompts kept in RAM for reuse, with at most 8 checkpoints per conversation (-ctxcp 8). On Granite 4.0-H Tiny a
@@ -65,6 +65,48 @@ public sealed partial record Tuning(
         "-cms", CheckpointMinStep.ToString(), "--sleep-idle-seconds", SleepIdleSeconds.ToString(),
         "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", "8080",
         "--api-key-file", keyFile, "--cors-origins", "localhost", "--no-cors-credentials",
+    ];
+
+    /// <summary>
+    /// The router's models, one section per lane, with today's settings for the fast one. The smart one runs on the CPU at
+    /// this PC's thread count: the MX150 wouldn't start Qwen3 at 16k context, and this tuning was measured on another model.
+    /// No smart model means a fast lane alone.
+    /// </summary>
+    public string PresetText(string fastModel, string? deepModel)
+    {
+        string Section(string name, string model, string device, int layers, int threads, bool flash) => $"""
+            [{name}]
+            model = {model.Replace('\\', '/')}
+            device = {device}
+            n-gpu-layers = {layers}
+            threads = {threads}
+            flash-attn = {(flash ? "on" : "off")}
+
+
+            """;
+        var shared = $"""
+            version = 1
+
+            [*]
+            ctx-size = {ContextTokens}
+            poll = 0
+            cache-ram = {CacheRamMiB}
+            ctx-checkpoints = 8
+            checkpoint-min-step = {CheckpointMinStep}
+            parallel = 1
+            cache-reuse = 256
+
+
+            """;
+        return shared + Section("fast", fastModel, Device, GpuLayers, Threads, FlashAttention)
+            + (deepModel is null ? "" : Section("deep", deepModel, "none", 0, DeepThreads ?? Threads, true));
+    }
+
+    /// <summary>llama-server as a router: the port stays up while the gateway swaps models, and nothing loads unless asked.</summary>
+    public static string[] RouterArgs(string presetFile, string keyFile) =>
+    [
+        "--models-preset", presetFile, "--models-max", "1", "--no-models-autoload", "--sleep-idle-seconds", SleepIdleSeconds.ToString(),
+        "--no-webui", "--host", "127.0.0.1", "--port", "8080", "--api-key-file", keyFile, "--cors-origins", "localhost", "--no-cors-credentials",
     ];
 
     public static Tuning? Load(string path)

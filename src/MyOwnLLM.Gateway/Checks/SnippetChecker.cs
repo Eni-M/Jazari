@@ -41,6 +41,7 @@ public sealed class SnippetChecker(string? dotnetRoot = null)
     static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
     readonly Lazy<IReadOnlyList<MetadataReference>> _references = new(() => LoadReferences(dotnetRoot ?? DotnetRoot()));
     SyntaxTree? _usings;
+    readonly object _loadGate = new();
 
     /// <summary>A global using for every namespace in the packs. Answers leave usings out, and StringBuilder or IOptionsSnapshot
     /// without one isn't a made-up API. An extension method still has to exist on its type, wherever it's from.</summary>
@@ -51,7 +52,13 @@ public sealed class SnippetChecker(string? dotnetRoot = null)
         n.GetTypeMembers().Any(t => t.DeclaredAccessibility == Accessibility.Public) ? Namespaces(n).Prepend(n.ToDisplayString()) : Namespaces(n));
 
     /// <summary>Loads the references in the background, so the first answer doesn't wait for them. Safe to call twice.</summary>
-    public void Warm() => _ = Task.Run(() => { try { _ = Compile("int warm = 0;", CancellationToken.None); } catch (Exception) { } }); // only a head start
+    public void Warm() => _ = Task.Run(() => { try { Load(); } catch (Exception) { } }); // only a head start
+
+    /// <summary>Reads the reference packs, a second or two the first time. Time limits are for checks, not for this.</summary>
+    public void Load()
+    {
+        lock (_loadGate) if (_references.Value.Count > 0) Compile("int warm = 0;", CancellationToken.None);
+    }
 
     public IReadOnlyList<BlockCheck> Check(string answer, CancellationToken ct)
     {

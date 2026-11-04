@@ -50,6 +50,7 @@ builder.Services.AddSingleton<StateNoteUpdater>();
 builder.Services.AddSingleton<RequestQueue>();
 builder.Services.AddSingleton<ModelLimits>();
 builder.Services.AddSingleton<LawBook>();
+builder.Services.AddSingleton<ILanes>(sp => new Lanes(sp.GetRequiredService<ILlamaClient>, sp.GetRequiredService<RequestQueue>()));
 builder.Services.AddSingleton(_ => new SnippetChecker());
 builder.Services.AddHostedService<QueueWorker>();
 builder.Services.AddHybridCache();
