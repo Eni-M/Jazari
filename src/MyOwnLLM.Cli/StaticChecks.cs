@@ -32,15 +32,12 @@ public static partial class StaticChecks
             var lines = file.Text.Split('\n');
             for (var i = 0; i < lines.Length; i++)
             {
-                // A private key's header isn't secret (the key is on the lines below it); everything else is masked.
-                foreach (var rule in Secrets)
-                    if (rule.Pattern.Match(lines[i]) is { Success: true } m)
-                        found.Add(Rule(file, i, rule.Id == "private-key" ? lines[i] : Mask(lines[i], m), rule.Id, "high",
-                            $"{rule.What} is written in the file: anyone who can read the repository can use it.",
-                            "Revoke it now, then load it from configuration or a secret store."));
+                foreach (var rule in Secrets.Where(r => r.Pattern.IsMatch(lines[i])))
+                    found.Add(Rule(file, i, lines[i], rule.Id, "high", $"{rule.What} is written in the file: anyone who can read the repository can use it.",
+                        "Revoke it now, then load it from configuration or a secret store."));
                 // Examples in documentation are expected; a password in code or config isn't.
-                if (!file.Path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && ConnectionPassword().Match(lines[i]) is { Success: true } p)
-                    found.Add(Rule(file, i, Mask(lines[i], p.Groups[1]), "connection-password", "high",
+                if (!file.Path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && ConnectionPassword().IsMatch(lines[i]))
+                    found.Add(Rule(file, i, lines[i], "connection-password", "high",
                         "A password is written in a connection string.", "Keep it out of the code: user secrets in development, a secret store in production."));
             }
             if (file.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) found.AddRange(CSharp(file));
@@ -78,11 +75,20 @@ public static partial class StaticChecks
     }
 
     static Finding Rule(ProjectFile file, int index, string quote, string id, string severity, string problem, string fix) =>
-        new(file.Path, file.FirstLine + index, quote.Trim(), problem, severity, fix, Verified: true) { Rule = id };
+        new(file.Path, file.FirstLine + index, Masked(quote).Trim(), problem, severity, fix, Verified: true) { Rule = id };
 
-    /// <summary>The line with the secret cut to its first four characters: the report must not copy it.</summary>
-    static string Mask(string line, Capture secret) =>
-        line[..secret.Index] + secret.Value[..Math.Min(4, secret.Value.Length)] + "********" + line[(secret.Index + secret.Length)..];
+    /// <summary>
+    /// The text with every secret the rules know cut to its first four characters, and a line with a private key header
+    /// cut after the header (a one-line PEM carries the key on it): what a report quotes must never copy a secret.
+    /// </summary>
+    public static string Masked(string text) => string.Join('\n', text.Split('\n').Select(line =>
+    {
+        if (PrivateKey().Match(line) is { Success: true } key) return line[..(key.Index + key.Length)];
+        foreach (var rule in Secrets) line = rule.Pattern.Replace(line, m => Cut(m.Value));
+        return ConnectionPassword().Replace(line, m => m.Value[..(m.Groups[1].Index - m.Index)] + Cut(m.Groups[1].Value));
+    }));
+
+    static string Cut(string secret) => secret[..Math.Min(4, secret.Length)] + "********";
 
     static bool IsEventHandler(MethodDeclarationSyntax m) =>
         m.ParameterList.Parameters is [_, var args] && args.Type?.ToString().EndsWith("EventArgs") == true;
@@ -97,13 +103,21 @@ public static partial class StaticChecks
     /// <summary>The text of a + chain that mixes a string literal with something that isn't one; null when it's all literals.</summary>
     static string? Joins(BinaryExpressionSyntax b)
     {
-        var parts = Flatten(b).ToList();
+        var parts = Flatten(b);
         if (parts.All(p => p is LiteralExpressionSyntax) || !parts.Any(p => p.IsKind(SyntaxKind.StringLiteralExpression))) return null;
         return string.Concat(parts.OfType<LiteralExpressionSyntax>().Select(l => l.Token.ValueText));
     }
 
-    static IEnumerable<ExpressionSyntax> Flatten(ExpressionSyntax e) =>
-        e is BinaryExpressionSyntax b && b.IsKind(SyntaxKind.AddExpression) ? Flatten(b.Left).Concat(Flatten(b.Right)) : [e];
+    /// <summary>The terms of a + chain, left to right. A stack, not recursion: a generated file can join thousands of strings.</summary>
+    static List<ExpressionSyntax> Flatten(BinaryExpressionSyntax chain)
+    {
+        List<ExpressionSyntax> parts = [];
+        var stack = new Stack<ExpressionSyntax>([chain]);
+        while (stack.TryPop(out var e))
+            if (e is BinaryExpressionSyntax b && b.IsKind(SyntaxKind.AddExpression)) { stack.Push(b.Right); stack.Push(b.Left); }
+            else parts.Add(e);
+        return parts;
+    }
 
     static bool AlwaysTrue(ExpressionSyntax e) => e switch
     {

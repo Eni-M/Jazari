@@ -98,7 +98,8 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
 
         var report = Path.Combine(storeDir, $"{Path.GetFileName(Path.GetFullPath(root).TrimEnd('\\', '/'))}{(changed is null ? "" : "-changes")}-{DateTime.Now:yyyyMMdd-HHmm}.md");
         // The same finding twice (a part read again after a change elsewhere in it, a model repeating itself) is one finding.
-        findings = [.. findings.DistinctBy(f => (f.File, f.Line, Squeeze(f.Quote), f.Problem))];
+        // A model quoting a line with a key on it would copy the key into the report: every quote is masked the same way.
+        findings = [.. findings.Select(f => f with { Quote = StaticChecks.Masked(f.Quote) }).DistinctBy(f => (f.File, f.Line, Squeeze(f.Quote), f.Problem))];
         var history = Track(root, Path.Combine(storeDir, Hash(Path.GetFullPath(root).ToLowerInvariant())[..16] + ".findings.json"), findings);
         findings = history.Current;
         File.WriteAllText(report, Report(changed is null ? $"Review of {root}" : $"Review of the changes in {root}", files.Count, skipped, failed, findings, ignored, history));
@@ -132,7 +133,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         var now = current.Select(Id).ToHashSet();
         var then = before.Select(Id).ToHashSet();
         var folder = File.Exists(root) ? Path.GetDirectoryName(Path.GetFullPath(root))! : root;
-        var gone = before.Where(f => !now.Contains(Id(f))).ToLookup(f => ProjectFiles.TryRead(Path.Combine(folder, f.File)) is not { } text || !Squeeze(text).Contains(Quoted(f.Quote), StringComparison.Ordinal));
+        var gone = before.Where(f => !now.Contains(Id(f))).ToLookup(f => ProjectFiles.TryRead(Path.Combine(folder, f.File)) is not { } text || !Squeeze(StaticChecks.Masked(text)).Contains(Quoted(f.Quote), StringComparison.Ordinal));
         var marked = current.Select(f => f with { New = !then.Contains(Id(f)) }).ToList();
 
         try { File.WriteAllText(stateFile, JsonSerializer.Serialize(marked.Concat(gone[false]).Select(f => f with { New = false }).ToList())); }

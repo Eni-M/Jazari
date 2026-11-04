@@ -77,6 +77,49 @@ public class StaticChecksTests
     }
 
     [Fact]
+    public void Every_secret_on_a_line_is_masked_in_every_quote()
+    {
+        var found = Scan("Config.cs", $"class C {{ string Q(string id) => $\"SELECT * FROM T WHERE k = '{AwsKey}' AND t = '{GitHubToken}' AND id = {{id}}\"; }}");
+
+        Assert.Equal(["aws-key", "github-token", "sql-text"], found.Select(f => f.Rule));
+        Assert.All(found, f => Assert.Equal("class C { string Q(string id) => $\"SELECT * FROM T WHERE k = 'AKIA********' AND t = 'ghp_********' AND id = {id}\"; }", f.Quote));
+        Assert.Equal("\"key\": \"-----BEGIN PRIVATE KEY", StaticChecks.Masked("\"key\": \"-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0B\\n-----END PRIVATE KEY-----\""));
+    }
+
+    [Fact]
+    public void A_generated_chain_of_thousands_of_joined_strings_is_read_without_recursing()
+    {
+        var chain = string.Join(" + ", Enumerable.Range(0, 20_000).Select(i => i == 0 ? "\"SELECT * FROM T WHERE a = \"" : "x"));
+
+        Assert.Equal("sql-text", Assert.Single(Scan("Big.cs", $"class B {{ string Q(string x) => {chain}; }}")).Rule);
+    }
+
+    [Fact]
+    public async Task A_model_quote_with_a_key_is_masked_and_a_removed_key_counts_as_resolved()
+    {
+        var dir = Directory.CreateTempSubdirectory("jazari rules").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Program.cs");
+            File.WriteAllText(path, $"class P {{ const string Key = \"{AwsKey}\"; }}\n");
+            var gateway = new FakeGateway { Complete = (_, _) => Task.FromResult($$"""{"findings":[{"file":"Program.cs","quote":"class P { const string Key = \"{{AwsKey}}\"; }","problem":"A key.","severity":"high"}]}""") };
+            var ui = new Ui(new StringWriter(), new Theme(ColorMode.None, unicode: true), 100);
+            var review = new ProjectReview(gateway, ui, Path.Combine(dir, "store"));
+
+            var first = File.ReadAllText((await review.RunAsync(dir, CancellationToken.None))!);
+            Assert.DoesNotContain(AwsKey, first);
+            Assert.DoesNotContain("Resolved since", first);
+
+            File.WriteAllText(path, "class P { }\n");
+            gateway.Complete = (_, _) => Task.FromResult("""{"findings":[]}""");
+            var second = File.ReadAllText((await review.RunAsync(dir, CancellationToken.None))!);
+            Assert.Contains("## Resolved since the last review (2)", second);
+            Assert.DoesNotContain(AwsKey, second);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public async Task Rule_findings_come_first_in_the_report_without_the_model_finding_them()
     {
         var dir = Directory.CreateTempSubdirectory("jazari rules").FullName;
