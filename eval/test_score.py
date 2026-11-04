@@ -1,6 +1,6 @@
 import os, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from score import rescore, score, pick
+from score import held_out, rescore, score, pick
 
 QUESTION = {"must_have": [["AddScoped", "Scoped"]], "must_not": ["AddSingleton"]}
 GOOD = {"label": "a", "score": 30, "plain_p50_s": 20, "read_first_s": 100, "followup_s": 25, "edit_ok": True, "review_ok": True, "turn_times_s": [10, 10, 10, 10, 10, 10]}
@@ -70,6 +70,21 @@ class PickTests(unittest.TestCase):
 
     def test_pick_treats_unmeasured_scenarios_as_failing(self):
         self.assertIsNone(pick([{**GOOD, "followup_s": None}]))
+
+
+class HeldOutTests(unittest.TestCase):
+    def test_about_a_third_of_the_real_questions_are_held_out_by_id(self):
+        import json, os
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "questions.json"), encoding="utf-8") as f:
+            ids = [q["id"] for q in json.load(f)]
+        held = [i for i in ids if held_out(i)]
+        self.assertTrue(len(ids) // 5 <= len(held) <= len(ids) // 2)
+        self.assertEqual(held, [i for i in ids if held_out(i)])  # the same every time
+
+    def test_a_rescored_run_says_how_it_did_on_the_held_out_questions(self):
+        held, dev = next(i for i in map(str, range(99)) if held_out(i)), next(i for i in map(str, range(99)) if not held_out(i))
+        result = {"answers": [{"id": held, "answer": "x", "passed": True}, {"id": dev, "answer": "x", "passed": True}]}
+        self.assertEqual(rescore(result, [])["held_out"], "1/1")
 
 
 if __name__ == "__main__":

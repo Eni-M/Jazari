@@ -1,4 +1,5 @@
 """Scores an answer against a test question, and picks the best model from a comparison."""
+import hashlib
 
 PLAIN_LIMIT_S = 30
 READ_FIRST_LIMIT_S = 120
@@ -28,6 +29,12 @@ def pick(results):
     return min(fit, key=lambda r: (-r["score"], r["plain_p50_s"])) if fit else None
 
 
+def held_out(question_id):
+    """About a third of the questions, kept for confirming a change rather than tuning one: a prompt tweaked until the dev
+    questions pass has to win on these too. Chosen by a hash of the id, so a question added later never moves another."""
+    return hashlib.sha256(question_id.encode()).digest()[0] % 3 == 0
+
+
 def rescore(result, questions):
     """Scores saved answers again after a check was corrected, without running the model."""
     if "failed" in result:
@@ -37,4 +44,6 @@ def rescore(result, questions):
         if answer["id"] in by_id:
             answer.update(score(answer["answer"], by_id[answer["id"]]))
     result["score"] = sum(a["passed"] for a in result["answers"])
+    held = [a for a in result["answers"] if held_out(a["id"])]
+    result["held_out"] = f'{sum(a["passed"] for a in held)}/{len(held)}'
     return result
