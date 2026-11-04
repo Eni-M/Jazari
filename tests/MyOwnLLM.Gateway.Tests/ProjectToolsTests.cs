@@ -413,6 +413,48 @@ public class ProjectToolsTests : IDisposable
         Assert.Contains("1 didn't fit", _output.ToString());
     }
 
+    [Fact]
+    public async Task Read_gives_the_files_that_didnt_fit_as_an_outline()
+    {
+        foreach (var i in Enumerable.Range(0, 3))
+            Add($"f{i}.cs", $"class Orders{i} {{ public Task RefundAsync(int orderId) {{ /* {new string('x', 9000)} */ }} }}");
+        var session = Session();
+
+        await session.HandleAsync("/read .", CancellationToken.None);
+        await session.HandleAsync("where are refunds?", CancellationToken.None);
+
+        Assert.Contains("--- outline of 1 more file, signatures only ---\nf2.cs\n  class Orders2\n    Task RefundAsync(int orderId)\n", _gateway.LastContext);
+        Assert.Equal(2, _gateway.LastContext!.Split(new string('x', 9000)).Length - 1);
+        Assert.Contains("1 of those go as an outline", _output.ToString());
+    }
+
+    [Fact]
+    public void Outline_shows_types_and_signatures_nested_without_bodies()
+    {
+        var members = RepoMap.Members("""
+            namespace Shop;
+            public record Money(decimal Amount) : IComparable<Money> { public int CompareTo(Money? o) => 0; }
+            public class Cart
+            {
+                public Cart(int id) { }
+                public decimal Total { get; }
+                enum State { Open }
+                public List<T> Items<T>(Func<T,
+                    bool> keep) { return []; }
+            }
+            """);
+
+        Assert.Equal([
+            "  record Money(decimal Amount) : IComparable<Money>",
+            "    int CompareTo(Money? o)",
+            "  class Cart",
+            "    Cart(int id)",
+            "    decimal Total",
+            "    enum State",
+            "    List<T> Items<T>(Func<T, bool> keep)",
+        ], members);
+    }
+
     const string OneEdit = """{"edits":[{"search":"int a;","replace":"int b;"}]}""";
 
     [Fact]

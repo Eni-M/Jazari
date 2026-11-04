@@ -425,13 +425,16 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             read++;
         }
         if (read == 0) { ui.Metadata(files.Count == 0 ? "Nothing readable there." : $"{files[0].Path} is too big to read at once. Use /review for large files."); return; }
+        // What didn't fit still shows its shape: types and member signatures, so the model knows what exists and where.
+        var (outline, outlined) = RepoMap.Outline(files.Skip(read), MaxReadTokens * 4 - context.Length - 60);
+        if (outline is not null) context.Append($"--- outline of {outlined} more file{(outlined == 1 ? "" : "s")}, signatures only ---\n{outline}");
         _context = context.ToString();
         _contextLabel = $"{read} file{(read == 1 ? "" : "s")} from {path}";
         _chip = File.Exists(target) ? Path.GetFileName(target) : $"{Path.GetFileName(target.TrimEnd('/', '\\'))}/ {ui.Theme.Glyph('·')} {read} file{(read == 1 ? "" : "s")}";
         // Reading takes minutes on a CPU: start now, while the question is typed, and the answer comes from the prompt cache.
         _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None, Conventions()).ContinueWith(t => _ = t.Exception, TaskScheduler.Default); // only a head start: failures don't matter
         var left = files.Count - read;
-        var extras = $"{(left > 0 ? $". {left} didn't fit, riskiest went first; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}";
+        var extras = $"{(left > 0 ? $". {left} didn't fit, riskiest went first{(outlined > 0 ? $"; {outlined} of those go as an outline" : "")}; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}";
         if (ui.Live) ui.Metadata($"{read} file{(read == 1 ? "" : "s")}, {PromptPanel.Tokens(_context.Length / 4)} tokens{extras}. They go with every question until /clear.", "read");
         else ui.Metadata($"Read {read} file{(read == 1 ? "" : "s")}, about {_context.Length / 4} tokens{extras}.");
     }
