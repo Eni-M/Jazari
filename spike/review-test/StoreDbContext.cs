@@ -15,7 +15,6 @@ public class StoreDbContext(DbContextOptions<StoreDbContext> options, ICurrentSh
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<Refund> Refunds => Set<Refund>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
-    public DbSet<TicketNote> TicketNotes => Set<TicketNote>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -51,8 +50,6 @@ public class StoreDbContext(DbContextOptions<StoreDbContext> options, ICurrentSh
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Address>().Property(a => a.Line1).HasMaxLength(300);
         modelBuilder.Entity<Address>().Property(a => a.City).HasMaxLength(150);
-        modelBuilder.Entity<Address>().Property(a => a.PostCode).HasMaxLength(20);
-        modelBuilder.Entity<Address>().HasIndex(a => a.CustomerId);
         ScopeToShop<Address>(modelBuilder);
 
         modelBuilder.Entity<PasswordResetToken>()
@@ -111,7 +108,6 @@ public class StoreDbContext(DbContextOptions<StoreDbContext> options, ICurrentSh
             .OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<OrderLine>().Property(l => l.UnitPrice).HasPrecision(12, 2);
         modelBuilder.Entity<OrderLine>().HasIndex(l => new { l.OrderId, l.ProductId }).IsUnique();
-        modelBuilder.Entity<OrderLine>().ToTable(t => t.HasCheckConstraint("CK_OrderLines_Quantity", "\"Quantity\" > 0"));
         ScopeToShop<OrderLine>(modelBuilder);
     }
 
@@ -149,13 +145,5 @@ public class StoreDbContext(DbContextOptions<StoreDbContext> options, ICurrentSh
         modelBuilder.Entity<SupportTicket>().HasIndex(t => new { t.ShopId, t.OpenedAt });
         modelBuilder.Entity<SupportTicket>().Property<uint>("Version").IsRowVersion();
         ScopeToShop<SupportTicket>(modelBuilder);
-
-        modelBuilder.Entity<TicketNote>()
-            .HasOne<SupportTicket>().WithMany()
-            .HasForeignKey(n => n.TicketId)
-            .OnDelete(DeleteBehavior.Cascade);
-        modelBuilder.Entity<TicketNote>().Property(n => n.Body).HasMaxLength(8000);
-        modelBuilder.Entity<TicketNote>().HasIndex(n => new { n.TicketId, n.WrittenAt });
-        ScopeToShop<TicketNote>(modelBuilder);
     }
 }

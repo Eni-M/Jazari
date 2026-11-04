@@ -1,4 +1,4 @@
-import os, socket, sys, unittest
+import os, re, socket, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import argparse, json, tempfile
@@ -178,6 +178,12 @@ class ScenarioTests(unittest.TestCase):
         code = " ".join(m["content"] for m in calls[1]["messages"])
         self.assertIn("StoreDbContext", code)
         self.assertNotIn("AuthService", code)
+
+    def test_the_longest_review_reply_the_schema_allows_fits_the_answer_limit(self):
+        schema = csharp_string("ProjectReview.cs", "Schema")
+        items = int(re.search(r'"maxItems":(\d+)', schema).group(1))
+        longest = items * (sum(int(n) for n in re.findall(r'"maxLength":(\d+)', schema)) + 80)  # 80: the keys and quotes of one finding
+        self.assertLessEqual(longest / 4, csharp_int("ProjectReview.cs", "AnswerTokens"))  # the replay ran at about 4 characters a token
 
     def test_a_review_is_allowed_the_answer_length_the_cli_asks_for(self):
         _, calls = self.reviewing([])

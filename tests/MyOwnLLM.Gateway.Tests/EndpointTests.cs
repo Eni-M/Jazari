@@ -477,6 +477,36 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task A_short_follow_up_isnt_searched_on_its_own_words()
+    {
+        WriteLawBook();
+        await _client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[]
+        {
+            new { role = "user", content = "what is dependency injection?" }, new { role = "assistant", content = "A class gets what it needs." }, new { role = "user", content = "minimal API" },
+        } });
+        Assert.Equal("minimal API", Assert.Single(_llama.Calls).Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task The_same_short_question_opening_a_conversation_is_searched()
+    {
+        WriteLawBook();
+        await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("minimal API"));
+        Assert.StartsWith(MyOwnLLM.Gateway.Prompt.PromptBuilder.DocsStart, Assert.Single(_llama.Calls).Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task A_full_question_later_in_a_conversation_still_carries_the_passage()
+    {
+        WriteLawBook();
+        await _client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[]
+        {
+            new { role = "user", content = "hello" }, new { role = "assistant", content = "Hi." }, new { role = "user", content = CoveredQuestion },
+        } });
+        Assert.StartsWith(MyOwnLLM.Gateway.Prompt.PromptBuilder.DocsStart, Assert.Single(_llama.Calls).Messages[^1].Content);
+    }
+
+    [Fact]
     public async Task Docs_returns_the_passages_without_asking_the_model()
     {
         WriteLawBook();

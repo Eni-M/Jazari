@@ -24,15 +24,15 @@ public sealed record Finding(string File, int? Line, string Quote, string Proble
 public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string storeDir, int unitTokens = ProjectReview.DefaultUnitTokens)
 {
     public const int DefaultUnitTokens = 2000;
-    const int AnswerTokens = 500;
-    const string PromptVersion = "4"; // change it when the prompt changes, so old answers aren't reused
+    const int AnswerTokens = 1024; // the gateway's cap, and room for the longest reply Schema allows: 500 left a real reply 6 tokens short
+    const string PromptVersion = "5"; // change it when the prompt changes, so old answers aren't reused
 
     /// <summary>
     /// The quote comes first, so the problem is written about a real line. The fix is optional: asking for fixes makes
     /// reviewers misjudge correct code more often (see reports/Jazari CLI and model enhancements.md, section 2).
     /// </summary>
     const string Schema = """
-        {"type":"object","required":["findings"],"properties":{"findings":{"type":"array","maxItems":5,"items":{"type":"object","additionalProperties":false,
+        {"type":"object","required":["findings"],"properties":{"findings":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,
         "required":["file","quote","problem","severity"],"properties":{"file":{"type":"string","maxLength":200},"quote":{"type":"string","minLength":12,"maxLength":300},
         "problem":{"type":"string","maxLength":300},"severity":{"enum":["high","medium","low"]},"fix":{"type":"string","maxLength":400}}}}}}
         """;
@@ -41,13 +41,14 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     const int MinQuoteChars = 12;
 
     const string Instructions =
-        "Review the code above as a senior security-minded engineer. Check every method for: passwords or keys written in " +
-        "the code, text joined into SQL or commands, endpoints that change data without an authorization check, one user " +
-        "reaching another user's data, amounts or ids taken from the client unchecked, path traversal, unsafe file upload, " +
-        "weak crypto, business rules that can be bypassed, swallowed errors and real bugs. Report only what this code itself " +
-        "shows. Never write \"if\" or \"could be compromised\" guesses about code you can't see, and no style remarks. If the " +
-        "code is fine, return an empty list. For each problem give the file, one whole line copied exactly from the code as " +
-        "quote, what can go wrong, and severity (high means an attacker gains something). Add a short fix only when it's clear.";
+        "Review the code above as a senior security-minded engineer. Most code has nothing worth reporting, so an empty list is the " +
+        "usual answer. Report a problem only when a line of this code itself shows it: a password or key written in the code, text " +
+        "joined into SQL or commands, an endpoint that changes data with no authorization check, one user reaching another user's " +
+        "data, an amount or id taken from the client unchecked, path traversal, unsafe file upload, weak crypto, a swallowed error or " +
+        "a real bug. Declarations such as column lengths, indexes, keys and relationships are not problems. Never write \"if\", " +
+        "\"potential\" or \"could\" guesses about code you can't see, and no style remarks. For each problem give the file, one whole " +
+        "line copied exactly from the code as quote, what can go wrong, and severity (high means an attacker gains something). Add a " +
+        "short fix only when it's clear.";
 
     /// <summary>Returns the report's path, or null when there was nothing to review or the review stopped early.</summary>
     /// <param name="changed">For /review --changed: the changed parts to read instead of the whole project (see ChangedCode),
@@ -70,7 +71,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         var store = Path.Combine(storeDir, Hash(Path.GetFullPath(root).ToLowerInvariant())[..16] + ".jsonl");
         var done = Saved(store);
         ui.Metadata(changed is null
-            ? $"Reviewing {files.Count} files in {units.Count} parts, riskiest first. {skipped} skipped. Ctrl+C stops; running it again carries on."
+            ? $"Reviewing {Plural(files.Count, "file")} in {Plural(units.Count, "part")}, riskiest first. {skipped} skipped. Ctrl+C stops; running it again carries on."
             : $"Reviewing what changed since the last commit: {files.Select(f => f.Path).Distinct().Count()} files, {units.Count} parts. Ctrl+C stops; running it again carries on.");
         if (ignored.Count > 0) ui.Metadata($"The project's .jazariignore left out {ignored.Count} file{(ignored.Count == 1 ? "" : "s")}; the report names them.");
 
@@ -91,7 +92,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             catch (GatewayException e) { ui.Error("The review stopped.", e.Message, "Run it again to carry on."); return null; }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { ui.Metadata("Stopped. Run it again to carry on."); return null; }
 
-            if (found is null) { failed.Add(Describe(units[i])); continue; } // not saved, so the next run tries this part again
+            if (found is null) { failed.Add(string.Join(", ", units[i].Select(Lines))); continue; } // not saved, so the next run tries this part again
             File.AppendAllText(store, JsonSerializer.Serialize(new SavedPart(key, found)) + "\n");
             findings.AddRange(found);
         }
@@ -204,6 +205,13 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     static string Key(List<ProjectFile> unit) => Hash(PromptVersion + string.Concat(unit.Select(f => f.Path + "\0" + f.Text + "\0")));
     static string Describe(List<ProjectFile> unit) => unit.Count == 1 ? unit[0].Path : $"{unit[0].Path} and {unit.Count - 1} more";
+    static string Plural(int count, string word) => $"{count} {word}{(count == 1 ? "" : "s")}";
+
+    static string Lines(ProjectFile part)
+    {
+        var last = part.FirstLine + part.Text.TrimEnd('\r', '\n').Count(c => c == '\n');
+        return last == part.FirstLine ? $"{part.Path} line {last}" : $"{part.Path} lines {part.FirstLine}-{last}";
+    }
 
     /// <summary>The model's findings, each checked against the code. Null when the reply wasn't the expected JSON.</summary>
     public static List<Finding>? Parse(string reply, List<ProjectFile> unit)
@@ -250,8 +258,8 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
 
     static string Report(string heading, int files, int skipped, List<string> failed, List<Finding> findings, List<string> ignored, History history)
     {
-        var text = new StringBuilder($"# {heading}\n\n{DateTime.Now:yyyy-MM-dd HH:mm}. {files} files read, {skipped} skipped");
-        text.Append(failed.Count > 0 ? $", {failed.Count} parts failed and will be retried on the next run.\n" : ".\n");
+        var text = new StringBuilder($"# {heading}\n\n{DateTime.Now:yyyy-MM-dd HH:mm}. {Plural(files, "file")} read, {skipped} skipped");
+        text.Append(failed.Count > 0 ? $", {Plural(failed.Count, "part")} not reviewed (listed at the end).\n" : ".\n");
         var fresh = findings.Count(f => f.New);
         if (history.Resolved.Count + history.Earlier.Count > 0 || fresh < findings.Count)
             text.Append($"\nSince the last review: {fresh} new, {findings.Count - fresh} still there, {history.Resolved.Count} resolved.\n");
@@ -261,7 +269,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             ("Found by rules, without the model", f => f.Rule is not null),
             ("Verified", f => f.Verified && f.Rule is null),
             ("Ambiguous: the quoted line appears more than once", f => f.Ambiguous),
-            ("Unverified: the quoted line wasn't found", f => !f.Verified && !f.Ambiguous),
+            ("Unverified: the quote isn't one exact line of the code", f => !f.Verified && !f.Ambiguous),
         ];
         foreach (var (title, inGroup) in groups)
         {

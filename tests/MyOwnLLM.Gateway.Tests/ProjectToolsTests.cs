@@ -307,6 +307,70 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task A_question_after_docs_can_refer_to_what_docs_showed()
+    {
+        _gateway.Docs = (true, [new DocPassage("Minimal APIs", "https://learn.microsoft.com/aspnet/core/minimal", "Use Results.NotFound().")]);
+        var session = Session();
+
+        await session.HandleAsync("/docs not found result", CancellationToken.None);
+        await session.HandleAsync("elaborate", CancellationToken.None);
+
+        var (history, question) = _gateway.Asked.Last();
+        Assert.Equal("elaborate", question);
+        Assert.Equal("not found result", history[0].Content);
+        Assert.Contains("Use Results.NotFound().", history[1].Content);
+    }
+
+    [Fact]
+    public async Task A_docs_search_that_found_nothing_stays_out_of_the_conversation()
+    {
+        _gateway.Docs = (true, []);
+        var session = Session();
+
+        await session.HandleAsync("/docs anything", CancellationToken.None);
+
+        Assert.Empty(session.History);
+    }
+
+    [Fact]
+    public async Task A_part_that_wasnt_reviewed_is_named_with_its_lines()
+    {
+        var text = string.Concat(Enumerable.Range(1, 300).Select(i => $"line {i} {new string('y', 40)}\n"));
+        Add("big.cs", text);
+        var piece = ProjectReview.Units([new ProjectFile("big.cs", text)], 1000).SelectMany(u => u).First(p => p.Text.Contains("line 150 "));
+        var last = piece.FirstLine + piece.Text.TrimEnd('\n').Count(c => c == '\n');
+        _gateway.Complete = (_, context) => Task.FromResult(context.Contains("line 150 ") ? "{\"findings\":[" : """{"findings":[]}""");
+
+        var report = File.ReadAllText((await Review(unitTokens: 1000).RunAsync(_dir, CancellationToken.None))!);
+
+        Assert.Contains($"- big.cs lines {piece.FirstLine}-{last}", report);
+    }
+
+    [Fact]
+    public async Task One_file_and_one_part_are_counted_in_the_singular()
+    {
+        Add("a.cs", "aaaa");
+        _gateway.Complete = (_, _) => Task.FromResult("{\"findings\":[");
+
+        var report = File.ReadAllText((await Review().RunAsync(_dir, CancellationToken.None))!);
+
+        Assert.Contains("1 file read, 0 skipped, 1 part not reviewed", report);
+        Assert.Contains("Reviewing 1 file in 1 part,", _output.ToString());
+    }
+
+    [Fact]
+    public async Task A_quote_that_is_only_part_of_a_line_isnt_called_missing()
+    {
+        Add("a.cs", "var total = price * count + shipping - discount;\n");
+        _gateway.Complete = (_, _) => Task.FromResult("""{"findings":[{"file":"a.cs","quote":"var total = price","problem":"bad","severity":"low"}]}""");
+
+        var report = File.ReadAllText((await Review().RunAsync(_dir, CancellationToken.None))!);
+
+        Assert.Contains("Unverified: the quote isn't one exact line of the code (1)", report);
+        Assert.DoesNotContain("wasn't found", report);
+    }
+
+    [Fact]
     public async Task An_ambiguous_finding_gets_its_own_section_and_no_empty_fix()
     {
         Add("Auth.cs", "log.Info(\"done\");\nlog.Info(\"done\");");
@@ -359,7 +423,7 @@ public class ProjectToolsTests : IDisposable
         _gateway.Complete = (_, _) => Task.FromResult("{\"findings\":[");
 
         var report = await Review().RunAsync(_dir, CancellationToken.None);
-        Assert.Contains("1 parts failed", File.ReadAllText(report!));
+        Assert.Contains("1 part not reviewed", File.ReadAllText(report!));
 
         await Review().RunAsync(_dir, CancellationToken.None);
         Assert.Equal(2, _gateway.Completions);

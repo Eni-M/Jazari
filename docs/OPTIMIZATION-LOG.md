@@ -290,3 +290,19 @@ Eni-M asked for the interface "fixed for good": identical to the Jazari CLI Inte
 - **A taller window no longer repeats rows (2026-11-03).** Eni-M's paste showed 8 rows of an answer twice, though the stored answer holds them once. The screen redrew rows from the scrollback when the window grew, assuming the terminal had brought them back. Windows Terminal (`Terminal::UserResize`) keeps its top row and adds blank rows at the bottom, and xterm.js does the same on Windows; only xterm.js elsewhere brings rows back. Now a taller window shows blank rows between the conversation and the panel until new text fills them, and the scrollback keeps the rest. Also fixed: shrinking a window with little text moved the first visible row past the end, so the next rows of a streaming answer never showed. That the paste came from a resize is inferred: the test reproduces the same pattern and a streaming test without a resize shows no repeats, but nobody saw the window change. Checked in the emulator only, so it's on the Windows list below.
 - **Resizing redraws at every step** (Eni-M: "redraws for each resize movement, so it's always good"). The size is checked every 8 ms while the window is being resized and every 33 ms otherwise, and each change is drawn at once, without waiting. Windows Terminal reflows its screen the instant it narrows, before any program can redraw, and a row whose text reaches past the new edge wraps and pushes rows into the scrollback. So no row ever has text in the right margin (2–4 columns, the header and panel lines included), and while a resize is in progress everything is laid out 8 columns narrower still; 0.4 s after the last change it's laid out at full width once more. Checked here by dragging the real jazari from 124 to 70 columns one column at a time in a pseudo-terminal, replayed through an emulator that reflows like Windows Terminal: no row reflowed, none wrapped. A jump of more than about 10 columns at once (snapping the window to half the screen) can still make the terminal wrap a few rows into the scrollback; the screen itself is redrawn correctly right after. Ctrl+L redraws the window.
 
+
+## Review false alarms and follow-ups (2026-11-04)
+
+A review of one EF Core configuration file returned 27 findings, none of them real, and every full part filled the limit of 5. Measured on Granite 4.0-H Tiny on the CPU, 2 seeds each, findings on clean code per run:
+
+| Prompt | Planted bugs found (of 3) | Clean files in the planted part | Clean schema part | 3 parts of a real schema file |
+|---|---|---|---|---|
+| Old prompt, up to 5 findings | 3, 2 | 1, 1 | 5, 5 | 15, 15 |
+| Old prompt, up to 3 | 3, 2 | 0, 1 | 3, 3 | 9, 9 |
+| "Empty list is the usual answer", up to 5 | 3, 3 | 0, 0 | 1, 1 | 9, 8 |
+| **"Empty list is the usual answer", up to 3 (shipped)** | **3, 3** | **0, 0** | **1, 1** | **8, 6** |
+| Asking for a verdict first | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+
+The verdict field stops everything, real bugs included, so it stayed out. The shipped prompt still reports false alarms on schema code, and only 3 planted bugs measure what it finds: try it on real code with logic before trusting it further. The answer limit went from 500 to 1024 tokens: replies reached 494 and 535.
+
+Follow-ups: history reached the model and it stayed on topic in every replay. The failures came from `/exit` ending the conversation, `/docs` answers not joining it, and the law book searching a follow-up's own words ("more" found a page titled Learn more). `/docs` answers now join the conversation, and a follow-up under three search words with no API name isn't searched. Conversations still don't survive `/exit`.

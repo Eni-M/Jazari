@@ -76,7 +76,7 @@ public static class ChatEndpoints
         // ponytail: questions on /read files, and /edit and /commit (JSON answers), don't search yet: passages beside the
         // user's own code are untested, and earlier work showed a small model describes the wrong thing when given extra
         // material. Add them when a test set covers them.
-        var passages = request.Context is null && request.JsonSchema is null ? s.LawBook.Search(question) : [];
+        var passages = request.Context is null && request.JsonSchema is null && !(history.Count > 0 && LawBook.IsFollowUp(question)) ? s.LawBook.Search(question) : [];
         var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question, passages, request.Conventions), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages, out var usedPassages);
         var watch = Stopwatch.StartNew();
 

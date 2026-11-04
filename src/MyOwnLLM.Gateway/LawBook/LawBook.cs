@@ -57,6 +57,14 @@ public sealed partial class LawBook(GatewayOptions options)
         }
     }
 
+    /// <summary>
+    /// Too few words to search on, in a conversation: "more" found a page titled Learn more, and "continue" one on
+    /// continuation tasks, and the model answered those instead of following up.
+    /// ponytail: a short new topic with no API name ("what is middleware?") loses its passage too. Search with the
+    /// previous question's words if a follow-up test set shows that costs answers.
+    /// </summary>
+    public static bool IsFollowUp(string question) => Terms(question).Count < 3 && Named(question).Count == 0;
+
     static IReadOnlyList<Passage> Search(SqliteConnection db, string question)
     {
         // 1. Terms.

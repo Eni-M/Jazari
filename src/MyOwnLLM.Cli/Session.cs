@@ -691,6 +691,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             renderer.Complete();
             ui.Metadata($"{passage.Title} {ui.Theme.Glyph('·')} {passage.Url}");
         }
+        Remember(question, string.Join("\n\n", passages.Select(p => p.Text))); // so "elaborate" means what was just shown
     }
 
     /// <summary>/save: the conversation as Markdown, in the project unless a path says otherwise. Never overwrites a file.</summary>
