@@ -29,11 +29,24 @@ function Invoke-Git {
     $lines
 }
 
-function Download($url, $target) {
+function Download($url, $target, [switch]$Resume) {
     $ErrorActionPreference = "Continue" # the progress bar is on stderr; failure is curl's exit code
-    Write-Host "Downloading $url"
-    curl.exe -L --fail --progress-bar -o $target $url
+    $from = if ($Resume -and (Test-Path $target)) { @("-C", "-") } else { @() }
+    Write-Host "$(if ($from) { 'Resuming' } else { 'Downloading' }) $url"
+    curl.exe -L --fail --progress-bar @from -o $target $url
+    # 22 (an HTTP error, as for a range past the end) and 33 (a server without ranges) won't pass by resuming again.
+    if ($from -and $LASTEXITCODE -in 22, 33) { Remove-Item -Force $target; Download $url $target; return }
     if ($LASTEXITCODE -ne 0) { throw "download failed: $url" }
+}
+
+# Downloads into $download until & $verified passes. What an earlier update didn't finish carries on where it stopped:
+# the model is 4 GB, and over Wi-Fi it rarely arrives in one go. A resumed file that doesn't verify is fetched once more
+# from the start, since the part kept from before may be what's wrong.
+function Get-Verified($url, $download, $verified) {
+    $resumed = Test-Path $download
+    if (-not (& $verified $download)) { Download $url $download -Resume }
+    if (-not (& $verified $download) -and $resumed) { Remove-Item -Force $download; Download $url $download }
+    if (-not (& $verified $download)) { Remove-Item -Force $download; throw "the download doesn't match the pinned checksum" }
 }
 
 # Puts a prepared folder in place. If the swap fails half-way the old folder goes back.
@@ -66,11 +79,13 @@ function Repair-LawBook {
     if (-not $manifest.lawBookUrl) { return }
     $book = Join-Path $env:LOCALAPPDATA "MyOwnLLM\law-book.db"
     $download = "$book.download"
-    if (Test-Path $download) { Remove-Item -Force $download } # left by an interrupted update
-    if ((Test-Path $book) -and (Get-FileHash -Algorithm SHA256 $book).Hash -eq $manifest.lawBookSha256) { Say-Ok "law book"; return }
+    $verified = { param($file) (Test-Path $file) -and (Get-FileHash -Algorithm SHA256 $file).Hash -eq $manifest.lawBookSha256 }
+    if (& $verified $book) {
+        if (Test-Path $download) { Remove-Item -Force $download }
+        Say-Ok "law book"; return
+    }
     New-Item -ItemType Directory -Force (Split-Path $book) | Out-Null
-    Download $manifest.lawBookUrl $download
-    if ((Get-FileHash -Algorithm SHA256 $download).Hash -ne $manifest.lawBookSha256) { Remove-Item -Force $download; throw "the download doesn't match the pinned checksum" }
+    Get-Verified $manifest.lawBookUrl $download $verified
     Move-Item -Force $download $book # the gateway opens it only per search, so it's never held open
     Say-Repaired "law book"
 }
@@ -78,11 +93,12 @@ function Repair-LawBook {
 function Repair-Model {
     $model = Join-Path $installDir "models\$($manifest.modelFile)"
     $download = "$model.download"
-    if (Test-Path $download) { Remove-Item -Force $download } # left by an interrupted update
-    if (Test-Model $model) { Say-Ok "model"; return }
+    if (Test-Model $model) {
+        if (Test-Path $download) { Remove-Item -Force $download }
+        Say-Ok "model"; return
+    }
     New-Item -ItemType Directory -Force (Split-Path $model) | Out-Null
-    Download $manifest.modelUrl $download
-    if (-not (Test-Model $download)) { Remove-Item -Force $download; throw "the download doesn't match the pinned checksum" }
+    Get-Verified $manifest.modelUrl $download ${function:Test-Model}
     Move-Item -Force $download $model
     Say-Repaired "model"
 }

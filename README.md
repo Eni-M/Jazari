@@ -15,7 +15,7 @@ jazari update                  # later: match GitHub main, check everything, rep
 jazari tune                    # measure the fastest settings for this PC (a few minutes); it never runs on its own
 ```
 
-Install somewhere else with `.\scripts\install-jazari.ps1 -InstallDir D:\Tools\Jazari`. Jazari tells you when an update is available.
+Install somewhere else with `.\scripts\install-jazari.ps1 -InstallDir D:\Tools\Jazari`. Jazari tells you when an update is available. A model download that stops half-way carries on from where it stopped at the next `jazari update`. To take Jazari off the PC, close every jazari window and run `.\scripts\uninstall-jazari.ps1` from the clone: it asks before deleting the model and your data.
 
 Inside a session:
 
