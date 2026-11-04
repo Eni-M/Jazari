@@ -2,10 +2,10 @@
 
     py -I eval/repo_bench.py select --repo C:/path --name educore --tests EduCore.Tests --limit 20   # adds tasks to tasks.local.json
     py -I eval/repo_bench.py select --repo C:/path --name wareflow --limit 10                         # no tests: scored on the build
-    py -I eval/repo_bench.py validate                                                                 # drops tasks whose tests can't tell
+    py -I eval/repo_bench.py validate --keep 20                                                              # drops tasks whose tests can't tell
     py -I eval/repo_bench.py run --label tiny-regress --model spike/models/x.gguf --llama spike/bin/llama-server.exe [--deep]
 
-Everything happens in a detached worktree, so the repo's own folder and its uncommitted work are never touched. The repos are
+Everything happens in a throwaway clone, so the repo's own folder, its .git and its uncommitted work are never touched. The repos are
 private: eval/repo/tasks.local.json and eval/results/repo/ are git-ignored, and this script prints only counts and timings.
 """
 import argparse, difflib, json, os, re, shutil, statistics, subprocess, sys, tempfile, time
@@ -73,35 +73,37 @@ def run(args, cwd=None, timeout=COMMAND_TIMEOUT_S):
         return -1, ""
 
 
-def git(repo, *args):
-    return run(["git", "-C", repo, "-c", "core.fsmonitor=false", *args])
+def git(folder, *args):
+    return run(["git", "-C", folder, "-c", "core.fsmonitor=false", *args])
 
 
 class Worktree:
-    """A detached checkout of a repo at a commit, restored once. Tasks in the same repo share it and put their file back after."""
+    """A throwaway clone of a repo at a commit. Tasks in the same repo share it and put their file back after."""
 
     def __init__(self, repo, commit):
-        self.repo = repo
         self.path = tempfile.mkdtemp(prefix="jazari-bench-")
-        code, _ = git(repo, "worktree", "add", "--detach", self.path, commit)
+        self.restored = set()
+        code, _ = run(["git", "clone", "--quiet", "--no-hardlinks", "--no-checkout", repo, self.path])
+        if code == 0:
+            code, _ = git(self.path, "checkout", "--quiet", "--detach", commit)
         if code != 0:
             shutil.rmtree(self.path, ignore_errors=True)
-            raise RuntimeError(f"couldn't add a worktree (git exit {code})")
-        run(["dotnet", "restore", "--disable-build-servers"], cwd=self.path)
+            raise RuntimeError(f"couldn't clone the repo (git exit {code})")
 
-    def build(self):
-        return run(["dotnet", "build", "--no-restore", "--disable-build-servers", "-v", "q", "-nologo"], cwd=self.path)[0] == 0
+    def build(self, project):
+        if project not in self.restored:
+            run(["dotnet", "restore", project, "--disable-build-servers"], cwd=self.path)
+            self.restored.add(project)
+        return run(["dotnet", "build", project, "--no-restore", "--disable-build-servers", "-v", "q", "-nologo"], cwd=self.path)[0] == 0
 
-    def test(self, test_filter):
-        return run(["dotnet", "test", "--no-build", "--nologo", "--filter", test_filter], cwd=self.path)[0] == 0
+    def test(self, project, test_filter):
+        return run(["dotnet", "test", project, "--no-build", "--nologo", "--filter", test_filter], cwd=self.path)[0] == 0
 
     def reset(self, file):
         git(self.path, "checkout", "--", file)
 
     def close(self):
-        git(self.repo, "worktree", "remove", "--force", self.path)
         shutil.rmtree(self.path, ignore_errors=True)
-        git(self.repo, "worktree", "prune")
 
 
 def worktrees(tasks):
@@ -131,6 +133,18 @@ def blank(worktree, task):
     return original if code == 0 else None
 
 
+def nearest_project(repo, file):
+    """The project file nearest above a file, relative to the repo; a folder with several projects can't be built by name alone."""
+    folder = os.path.dirname(file)
+    while True:
+        projects = [n for n in os.listdir(os.path.join(repo, folder) if folder else repo) if n.endswith(".csproj")]
+        if projects:
+            return os.path.join(folder, projects[0])
+        if not folder:
+            return None
+        folder = os.path.dirname(folder)
+
+
 def select(a):
     build_blank()
     code, commit = git(a.repo, "rev-parse", "HEAD")
@@ -153,35 +167,40 @@ def select(a):
                 if name.endswith("Tests.cs"):
                     with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as f:
                         test_files[name[:-3]] = f.read()
-    tasks = candidates_to_tasks(a.name, a.repo, commit, [c for c in found if not in_tests(c)], test_files, a.limit)
+    test_project = None
+    if test_root:
+        projects = [n for n in os.listdir(test_root) if n.endswith(".csproj")]
+        if not projects:
+            sys.exit("no project file in that test folder")
+        test_project = os.path.relpath(os.path.join(test_root, projects[0]), a.repo)
+    tasks = candidates_to_tasks(a.name, a.repo, commit, [c for c in found if not in_tests(c)], test_files, a.limit * 4 if test_root else a.limit)
+    for task in tasks:
+        task["project"] = test_project or nearest_project(a.repo, task["file"])
     kept = [t for t in (load_tasks() if os.path.exists(TASKS) else []) if not t["id"].startswith(a.name + "-")]
     save_tasks(kept + tasks)
     print(f"{a.name}: {len(found)} methods, {len(tasks)} tasks chosen, {len(kept) + len(tasks)} in the file")
 
 
 def validate(a):
+    """Keeps tasks whose tests pass on the real code and fail without it, up to --keep for each repo. Build-only tasks need a build."""
     build_blank()
     tasks = load_tasks()
     trees = worktrees(tasks)
-    valid = []
+    valid, kept = [], {}
     try:
-        for key, tree in trees.items():
-            mine = [t for t in tasks if (t["repo"], t["commit"]) == key]
-            if not tree.build():
-                print(f"a repo didn't build at its commit: its {len(mine)} tasks are dropped")
+        for task in tasks:
+            tree = trees[(task["repo"], task["commit"])]
+            if kept.get(task["repo"], 0) >= a.keep or not task.get("project") or not tree.build(task["project"]):
                 continue
-            for task in mine:
-                if not task["test_filter"]:
-                    if blank(tree, task) is not None and tree.build():
-                        valid.append(task)
-                    tree.reset(task["file"])
-                    continue
-                original_ok = tree.test(task["test_filter"])
-                ok = original_ok and blank(tree, task) is not None and tree.build()
-                if ok and task_is_valid(tree.test(task["test_filter"]), original_ok):
-                    valid.append(task)
+            ok = True
+            if task["test_filter"]:
+                original_ok = tree.test(task["project"], task["test_filter"])
+                ok = original_ok and blank(tree, task) is not None and tree.build(task["project"]) and task_is_valid(tree.test(task["project"], task["test_filter"]), original_ok)
                 tree.reset(task["file"])
-                tree.build()
+            if ok:
+                valid.append(task)
+                kept[task["repo"]] = kept.get(task["repo"], 0) + 1
+            print(f"{len(valid)} valid so far", flush=True)
     finally:
         for tree in trees.values():
             tree.close()
@@ -212,9 +231,9 @@ def attempt(task, tree, ask):
             put = run(["dotnet", BLANK, "put", path, task["method"], f.name])[0]
         finally:
             os.unlink(f.name)
-        compiled = put == 0 and tree.build()
+        compiled = put == 0 and tree.build(task["project"])
         if compiled and task["test_filter"]:
-            tests_passed = tree.test(task["test_filter"])
+            tests_passed = tree.test(task["project"], task["test_filter"])
     tree.reset(task["file"])
     return {"id": task["id"], "category": task["category"], "passed": passed(task, compiled, tests_passed), "compiled": compiled, "tests_passed": tests_passed,
             "closeness": closeness(code or "", original), "seconds": seconds, "answer": answer}
@@ -242,9 +261,6 @@ def run_bench(a):
         wait_for_gateway(gateway, key, seconds=300)
         ask = lambda question, context: gateway_chat(key, [{"role": "user", "content": question}], MAX_TOKENS, context=context, deep=a.deep)
         trees = worktrees(tasks)
-        for key_, tree in trees.items():
-            if not tree.build():
-                sys.exit("a repo didn't build at its commit: run validate")
         for i, task in enumerate(tasks, 1):
             result = attempt(task, trees[(task["repo"], task["commit"])], ask)
             if result:
@@ -273,7 +289,8 @@ def main():
     s.add_argument("--name", required=True)
     s.add_argument("--tests", help="the test project's folder inside the repo; none means build only")
     s.add_argument("--limit", type=int, default=20)
-    commands.add_parser("validate")
+    v = commands.add_parser("validate")
+    v.add_argument("--keep", type=int, default=20, help="valid tasks to keep for each repo")
     r = commands.add_parser("run")
     r.add_argument("--label", required=True)
     r.add_argument("--model")
