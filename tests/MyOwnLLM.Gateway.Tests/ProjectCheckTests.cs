@@ -135,6 +135,16 @@ public class ProjectTrustChangeTests : IDisposable
         Assert.False(_trust.IsTrusted(_project, _root));
     }
 
+    [Theory]
+    [InlineData("<Import Project=\"\\\\jazari-test.invalid\\share\\S.targets\" />")]
+    [InlineData("<ProjectReference Include=\"//jazari-test.invalid/share/L.csproj\" />")]
+    public void A_project_that_names_a_network_path_is_never_trusted(string line)
+    {
+        File.WriteAllText(_project, $"<Project><ItemGroup>{line}</ItemGroup></Project>");
+        _trust.Trust(_project, _root);
+        Assert.False(_trust.IsTrusted(_project, _root));
+    }
+
     [Fact]
     public void Projects_that_reference_each_other_and_files_that_are_not_xml_are_fine()
     {

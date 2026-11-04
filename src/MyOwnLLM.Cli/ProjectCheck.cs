@@ -63,8 +63,11 @@ public sealed class ProjectTrust(string path)
 
     static string Key(string projectFile) => Path.GetFullPath(projectFile).ToLowerInvariant();
 
-    static IEnumerable<string> BuildFiles(string projectFile, string root)
+    /// <param name="remote">Set when a file names a UNC or device path (\\server\share). It's never opened, since opening one
+    /// before the user's yes would send their Windows credentials to that server, and the project is never trusted.</param>
+    static IEnumerable<string> BuildFiles(string projectFile, string root, out bool remote)
     {
+        remote = false;
         var top = Path.GetFullPath(root).TrimEnd('\\', '/');
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -73,7 +76,9 @@ public sealed class ProjectTrust(string path)
         {
             if (!seen.Add(file) || !File.Exists(file)) continue;
             files.Add(file);
-            foreach (var linked in LiteralPaths(file)) waiting.Push(linked);
+            foreach (var linked in LiteralPaths(file))
+                if (linked.StartsWith(@"\\", StringComparison.Ordinal) || linked.StartsWith("//", StringComparison.Ordinal)) remote = true;
+                else waiting.Push(linked);
             if (Path.GetExtension(file).ToLowerInvariant() is ".props" or ".targets") continue;
 
             var folder = Path.GetDirectoryName(file)!;
@@ -107,7 +112,8 @@ public sealed class ProjectTrust(string path)
     }
 
     /// <summary>Each file as its path and contents, both with their lengths, so bytes moved from one file to another change the hash.</summary>
-    static string BuildInputsHash(string projectFile, string root)
+    /// <returns>Null for a project that names a remote file: it asks every time.</returns>
+    static string? BuildInputsHash(string projectFile, string root)
     {
         using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
         void Framed(byte[] bytes)
@@ -115,7 +121,9 @@ public sealed class ProjectTrust(string path)
             hash.AppendData(BitConverter.GetBytes((long)bytes.Length));
             hash.AppendData(bytes);
         }
-        foreach (var file in BuildFiles(projectFile, root).Order(StringComparer.OrdinalIgnoreCase))
+        var files = BuildFiles(projectFile, root, out var remote).Order(StringComparer.OrdinalIgnoreCase).ToList();
+        if (remote) return null;
+        foreach (var file in files)
         {
             Framed(System.Text.Encoding.UTF8.GetBytes(Path.GetRelativePath(root, file).ToLowerInvariant()));
             Framed(File.ReadAllBytes(file));
@@ -131,7 +139,7 @@ public sealed class ProjectTrust(string path)
 
     public bool IsTrusted(string projectFile, string root)
     {
-        try { return Read().TryGetValue(Key(projectFile), out var trusted) && trusted == BuildInputsHash(projectFile, root); }
+        try { return Read().TryGetValue(Key(projectFile), out var trusted) && BuildInputsHash(projectFile, root) is { } now && trusted == now; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
     }
 
@@ -139,8 +147,9 @@ public sealed class ProjectTrust(string path)
     {
         try
         {
+            if (BuildInputsHash(projectFile, root) is not { } now) return;
             var trusted = Read();
-            trusted[Key(projectFile)] = BuildInputsHash(projectFile, root);
+            trusted[Key(projectFile)] = now;
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             File.WriteAllText(path, JsonSerializer.Serialize(trusted));
         }
