@@ -33,6 +33,7 @@ Reviews come from a small local model, so check each finding. It reads about 30 
 ```powershell
 jazari stop                    # shut the background servers down
 jazari doctor                  # what's wrong and what to do about it; changes nothing
+jazari ask "..." --json        # one JSON object (answer, id, sources, cut_off, seconds, error), for scripts
 ```
 
 Answers can draw on the law book, excerpts of Microsoft's .NET docs searched offline: the answer then names the page in a `source` row, and `/docs` shows the passage itself. `jazari update` installs it once the manifest names it (`lawBookUrl`, `lawBookSha256`); until then Jazari answers without it. Sources and licences (text CC BY 4.0, code MIT): [lawbook/NOTICE.md](lawbook/NOTICE.md).

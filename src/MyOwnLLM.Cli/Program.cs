@@ -118,7 +118,8 @@ async Task StartServersAsync(Ui reportTo, bool quiet)
     }
 }
 
-var startupUi = new Ui(Console.Out, theme, Columns);
+// With --json, stdout holds only the JSON: what starting the servers has to say goes to stderr.
+var startupUi = new Ui(cli.Json ? Console.Error : Console.Out, theme, Columns);
 if (cli.Command == "session")
 {
     var tuning = DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), config?.Model);
@@ -157,11 +158,11 @@ if (cli.Command == "session")
         hasKey: key is not null, updateAvailable: updateAvailable, runningOn: measured ? tuning.Summary(theme.Glyph('·')) : null);
     return 0;
 }
-await StartServersAsync(startupUi, quiet: false);
+await StartServersAsync(startupUi, quiet: cli.Json);
 
 // One-off commands. --no-stream renders into a buffer and prints it when the answer is complete.
 var buffer = cli.Stream ? null : new StringWriter();
-var output = (TextWriter?)buffer ?? Console.Out;
+var output = cli.Json ? Console.Error : (TextWriter?)buffer ?? Console.Out; // --json: notes about piped input go to stderr too
 var oneOffUi = new Ui(output, theme, width);
 var session = new Session(gateway, oneOffUi, () => new MarkdownStream(output, theme, width), directory);
 
@@ -170,6 +171,10 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
 switch (cli.Command)
 {
+    case "ask" when cli.Json:
+        if (Console.IsInputRedirected && await PipedInput.ReadAsync(Console.In, TimeSpan.FromSeconds(3)) is { } pipedJson) session.UsePipedInput(pipedJson);
+        Console.WriteLine(await session.AnswerAsJsonAsync(cli.Text!, cts.Token));
+        return session.LastFailed ? 1 : 0;
     case "ask":
         if (Console.IsInputRedirected && await PipedInput.ReadAsync(Console.In, TimeSpan.FromSeconds(3)) is { } piped) session.UsePipedInput(piped);
         await session.AskAsync(cli.Text!, cts.Token);

@@ -390,6 +390,40 @@ public class SessionTests
     }
 
     [Fact]
+    public async Task Json_mode_returns_the_whole_answer_as_one_object()
+    {
+        _gateway.Chat = (_, _, _) => Citing(Responses);
+
+        using var json = System.Text.Json.JsonDocument.Parse(await _session.AnswerAsJsonAsync("not found?", CancellationToken.None));
+
+        var root = json.RootElement;
+        Assert.Equal("Use Results.NotFound().", root.GetProperty("answer").GetString());
+        Assert.Equal("ix-3", root.GetProperty("id").GetString());
+        Assert.Equal(Responses.Url, root.GetProperty("sources")[0].GetProperty("url").GetString());
+        Assert.False(root.GetProperty("cut_off").GetBoolean());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, root.GetProperty("error").ValueKind);
+        Assert.False(_session.LastFailed);
+        Assert.Equal("", Text); // nothing drawn: stdout holds only the JSON
+    }
+
+    [Fact]
+    public async Task Json_mode_reports_a_failure_as_an_error_field()
+    {
+        _gateway.Chat = (_, _, _) => Throwing(new GatewayException("gateway not reachable", null, null));
+
+        using var json = System.Text.Json.JsonDocument.Parse(await _session.AnswerAsJsonAsync("q", CancellationToken.None));
+
+        Assert.Equal("gateway not reachable", json.RootElement.GetProperty("error").GetString());
+        Assert.True(_session.LastFailed);
+    }
+
+    [Theory]
+    [InlineData(new[] { "ask", "q", "--json" }, true)]
+    [InlineData(new[] { "ask", "q", "--repo", "C:\\R", "--json" }, true)]
+    [InlineData(new[] { "ask", "q" }, false)]
+    public void Json_is_an_ask_option(string[] args, bool json) => Assert.Equal(json, CliArgs.Parse(args).Json);
+
+    [Fact]
     public async Task Exit_sets_flag()
     {
         await _session.HandleAsync("/exit", CancellationToken.None);

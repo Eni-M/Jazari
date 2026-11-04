@@ -1,6 +1,7 @@
 namespace MyOwnLLM.Cli;
 
-public sealed record CliArgs(string Command, string? Text, string? RepoPath, bool Stream, string? Id, bool? Accepted)
+/// <param name="Json">`ask --json`: the answer as one JSON object on stdout, for scripts.</param>
+public sealed record CliArgs(string Command, string? Text, string? RepoPath, bool Stream, string? Id, bool? Accepted, bool Json = false)
 {
     public const string Usage =
         """
@@ -18,7 +19,7 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
           jazari update                   update Jazari
           jazari doctor                   check the install, servers, key and logs, and say what to fix
           jazari --version
-        options for ask, diff and status: --repo <path>   ask and diff: --no-stream
+        options for ask, diff and status: --repo <path>   ask and diff: --no-stream   ask: --json (one JSON object, for scripts)
         before any command: --plain       plain lines without colors or symbols, for screen readers (or JAZARI_PLAIN=1)
         """;
 
@@ -50,8 +51,8 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
             case ["review", var path] when !path.StartsWith("--"):
                 return new("review", path, null, true, null, null);
             case ["ask", var text, .. var rest] when !text.StartsWith("--"):
-                var (repo, stream) = Options(rest, allowStream: true);
-                return new("ask", text, repo, stream, null, null);
+                var (repo, stream) = Options([.. rest.Where(r => r != "--json")], allowStream: true);
+                return new("ask", text, repo, stream, null, null, Json: rest.Contains("--json"));
             case ["status", .. var rest]:
                 return new("status", null, Options(rest, allowStream: false).Repo, true, null, null);
             case ["feedback", var id, "up"]:

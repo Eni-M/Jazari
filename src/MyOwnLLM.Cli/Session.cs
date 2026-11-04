@@ -249,6 +249,38 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         finally { if (!ui.Live) ui.Blank(); }
     }
 
+    /// <summary>
+    /// `jazari ask --json`: the answer as one JSON object, for scripts and CI, as Gemini CLI, Qwen Code and Codex offer:
+    /// answer, id (for jazari feedback), cut_off, sources, seconds, and error (null when it worked).
+    /// </summary>
+    public async Task<string> AnswerAsJsonAsync(string question, CancellationToken ct)
+    {
+        var answer = new StringBuilder();
+        string? id = null, error = null;
+        var cutOff = false;
+        IReadOnlyList<DocSource>? sources = null;
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            await foreach (var chunk in gateway.ChatAsync([], question, project, ct, _context, Conventions()).WithCancellation(ct))
+            {
+                if (chunk.Error is not null) { error = chunk.Error; break; }
+                answer.Append(chunk.Content);
+                id = chunk.Id ?? id;
+                cutOff |= chunk.CutOff;
+                sources = chunk.Sources ?? sources;
+            }
+        }
+        catch (GatewayException e) { error = e.Message; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { error = "stopped"; }
+        LastFailed = error is not null;
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            answer = answer.ToString(), id, cut_off = cutOff, sources = sources?.Select(s => new { title = s.Title, url = s.Url }),
+            seconds = Math.Round(watch.Elapsed.TotalSeconds, 1), error,
+        });
+    }
+
     static void Stamp(MarkdownStream renderer, Stopwatch watch)
     {
         var seconds = watch.Elapsed.TotalSeconds;
