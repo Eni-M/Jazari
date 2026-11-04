@@ -35,6 +35,8 @@ jazari stop                    # shut the background servers down
 jazari doctor                  # what's wrong and what to do about it; changes nothing
 ```
 
+Answers can draw on the law book, excerpts of Microsoft's .NET docs searched offline: the answer then names the page in a `source` row, and `/docs` shows the passage itself. `jazari update` installs it once the manifest names it (`lawBookUrl`, `lawBookSha256`); until then Jazari answers without it. Sources and licences (text CC BY 4.0, code MIT): [lawbook/NOTICE.md](lawbook/NOTICE.md).
+
 `jazari --plain` (or `JAZARI_PLAIN=1`) gives plain lines for screen readers. IDEs can use Jazari for chat as an OpenAI-compatible endpoint: see the runbook.
 
 The first `jazari` creates your API key (saved as `JAZARI_KEY`) and starts the model server and gateway in the background. `jazari stop` shuts them down.

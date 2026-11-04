@@ -47,15 +47,20 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     {
         if (!File.Exists(root) && !Directory.Exists(root)) { ui.Metadata($"Can't find {root}."); return null; }
         var (files, skipped) = ProjectFiles.Load(root);
-        if (files.Count == 0) { ui.Metadata($"Nothing to review in {root}."); return null; }
+        // A cloned repository's .jazariignore could hide its worst file from a security review: never silently.
+        var ignored = ProjectFiles.IgnoredFiles(root);
+        if (files.Count == 0)
+        {
+            ui.Metadata(ignored.Count == 0 ? $"Nothing to review in {root}."
+                : $"Nothing to review in {root}: the project's .jazariignore left out every file. It hid {string.Join(", ", ignored.Take(10))}{(ignored.Count > 10 ? $" and {ignored.Count - 10} more" : "")}.");
+            return null;
+        }
 
         var units = Units(files, unitTokens);
         Directory.CreateDirectory(storeDir);
         var store = Path.Combine(storeDir, Hash(Path.GetFullPath(root).ToLowerInvariant())[..16] + ".jsonl");
         var done = Saved(store);
         ui.Metadata($"Reviewing {files.Count} files in {units.Count} parts, riskiest first. {skipped} skipped. Ctrl+C stops; running it again carries on.");
-        // A cloned repository's .jazariignore could hide its worst file from a security review: never silently.
-        var ignored = ProjectFiles.IgnoredFiles(root);
         if (ignored.Count > 0) ui.Metadata($"The project's .jazariignore left out {ignored.Count} file{(ignored.Count == 1 ? "" : "s")}; the report names them.");
 
         List<Finding> findings = [];

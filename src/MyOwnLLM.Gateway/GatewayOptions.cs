@@ -14,7 +14,8 @@ public sealed class GatewayOptions
     /// <summary>The key jazari starts llama-server with (ServerLauncher.LlamaKeyFile, the same file by default).</summary>
     public string LlamaKeyFile => Path.Combine(DataDir, "llama-server.key");
 
-    /// <summary>The law book, made by lawbook/build.py and installed by jazari update. Missing means Jazari answers without it.</summary>
+    /// <summary>The law book, made by lawbook/build.py and installed by jazari update once scripts/jazari-manifest.json names it.
+    /// Missing means Jazari answers without it.</summary>
     public string LawBookFile { get => _lawBookFile ?? Path.Combine(DataDir, "law-book.db"); set => _lawBookFile = value; }
     string? _lawBookFile;
 }

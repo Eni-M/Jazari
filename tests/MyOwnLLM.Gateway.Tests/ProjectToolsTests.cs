@@ -178,6 +178,17 @@ public class ProjectToolsTests : IDisposable
         Assert.Contains(".jazariignore left out 1 file", _output.ToString());
     }
 
+    [Fact]
+    public async Task A_jazariignore_that_hides_everything_is_named_too()
+    {
+        Add(".jazariignore", "*.cs\n");
+        Add("Backdoor.cs", "class Backdoor;");
+
+        Assert.Null(await Review().RunAsync(_dir, CancellationToken.None));
+
+        Assert.Contains(".jazariignore left out every file. It hid Backdoor.cs", _output.ToString());
+    }
+
     [Theory]
     [InlineData("a/fixtures/x.cs", "fixtures/", true)]
     [InlineData("fixtures.cs", "fixtures/", false)] // a file, not the folder

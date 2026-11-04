@@ -60,6 +60,21 @@ function Test-Llama($folder) {
     $version -match "\bbuild $($manifest.llamaRelease.TrimStart('b'))\b"
 }
 
+# The law book (lawbook/build.py): Microsoft's .NET docs the gateway searches. Optional, so it's installed only once the
+# manifest names it (lawBookUrl and lawBookSha256), and where the gateway looks for it by default.
+function Repair-LawBook {
+    if (-not $manifest.lawBookUrl) { return }
+    $book = Join-Path $env:LOCALAPPDATA "MyOwnLLM\law-book.db"
+    $download = "$book.download"
+    if (Test-Path $download) { Remove-Item -Force $download } # left by an interrupted update
+    if ((Test-Path $book) -and (Get-FileHash -Algorithm SHA256 $book).Hash -eq $manifest.lawBookSha256) { Say-Ok "law book"; return }
+    New-Item -ItemType Directory -Force (Split-Path $book) | Out-Null
+    Download $manifest.lawBookUrl $download
+    if ((Get-FileHash -Algorithm SHA256 $download).Hash -ne $manifest.lawBookSha256) { Remove-Item -Force $download; throw "the download doesn't match the pinned checksum" }
+    Move-Item -Force $download $book # the gateway opens it only per search, so it's never held open
+    Say-Repaired "law book"
+}
+
 function Repair-Model {
     $model = Join-Path $installDir "models\$($manifest.modelFile)"
     $download = "$model.download"
@@ -199,6 +214,8 @@ $commit = (Invoke-Git rev-parse HEAD | Select-Object -First 1).Trim()
 # 4-6. each component on its own: one that fails keeps its previous version and the others still run
 try { Repair-Model } catch { Say-Error "model" $_ }
 try { Repair-Llama } catch { Say-Error "llama.cpp" $_ }
+# Jazari answers without the law book, so a failed download only warns: it's no reason to call the whole update failed.
+try { Repair-LawBook } catch { Write-Host "! law book not installed ($_); Jazari answers without it, and the next update tries again" }
 try { Repair-Builds } catch { Say-Error "gateway and app" $_ }
 
 # 7. config: current paths, and installedCommit only when everything above worked
