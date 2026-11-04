@@ -42,14 +42,15 @@ public sealed partial class LawBook(GatewayOptions options)
         Pooling = false, // jazari update replaces the file while the gateway runs; on Windows an open handle would block it
     }.ToString();
 
-    public IReadOnlyList<Passage> Search(string question)
+    /// <param name="maxTokens">How much passage text may come back. /deep allows more.</param>
+    public IReadOnlyList<Passage> Search(string question, int maxTokens = MaxTokens)
     {
         if (!File.Exists(options.LawBookFile)) return [];
         try
         {
             using var db = new SqliteConnection(_connection);
             db.Open();
-            return Search(db, question.Length > MaxQuestionChars ? question[..MaxQuestionChars] : question);
+            return Search(db, question.Length > MaxQuestionChars ? question[..MaxQuestionChars] : question, maxTokens);
         }
         catch (SqliteException)
         {
@@ -65,7 +66,7 @@ public sealed partial class LawBook(GatewayOptions options)
     /// </summary>
     public static bool IsFollowUp(string question) => Terms(question).Count < 3 && Named(question).Count == 0;
 
-    static IReadOnlyList<Passage> Search(SqliteConnection db, string question)
+    static IReadOnlyList<Passage> Search(SqliteConnection db, string question, int maxTokens)
     {
         // 1. Terms.
         var terms = Terms(question);
@@ -98,7 +99,7 @@ public sealed partial class LawBook(GatewayOptions options)
         var taken = new List<Passage>();
         foreach (var (_, passage) in found)
         {
-            if (taken.Count == MaxPassages || taken.Sum(p => PromptBuilder.EstimateTokens(p.Text)) + PromptBuilder.EstimateTokens(passage.Text) > MaxTokens) break;
+            if (taken.Count == MaxPassages || taken.Sum(p => PromptBuilder.EstimateTokens(p.Text)) + PromptBuilder.EstimateTokens(passage.Text) > maxTokens) break;
             taken.Add(passage);
         }
         return taken;

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Hybrid;
 using MyOwnLLM.Gateway.Checks;
+using MyOwnLLM.Gateway.Deep;
 using MyOwnLLM.Gateway.Llama;
 using MyOwnLLM.Gateway.Prompt;
 using MyOwnLLM.Gateway.Queue;
@@ -15,7 +16,8 @@ namespace MyOwnLLM.Gateway.Endpoints;
 /// <param name="Context">Code the client read for this question; goes before the conversation so it stays in the prompt cache.</param>
 /// <param name="JsonSchema">Forces the answer into this JSON shape.</param>
 /// <param name="Conventions">The project's AGENTS.md. Apart from Context, so a project that has one still gets the law book.</param>
-public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream, string? Context = null, string? JsonSchema = null, string? Conventions = null);
+/// <param name="Deep">Ask the smart model, with a plan, the compiler's check and one repair. /deep in the CLI.</param>
+public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream, string? Context = null, string? JsonSchema = null, string? Conventions = null, bool? Deep = null);
 public sealed record InfillRequest(string Prefix, string Suffix, int? MaxTokens);
 public sealed record StatusRequest(string ProjectPath);
 public sealed record FeedbackRequest(string Id, bool Accepted);
@@ -47,7 +49,7 @@ public static class ChatEndpoints
             ? Results.BadRequest(new { error = "question is required" })
             : Results.Json(new { available = File.Exists(o.LawBookFile), passages = book.Search(request.Question).Select(p => new { title = p.Title, url = p.Url, text = p.Text }) }));
         group.MapGet("/models", () => Results.Json(new { @object = "list", data = new[] { new { id = ModelId, @object = "model", created = 0, owned_by = "jazari" } } }));
-        group.MapGet("/info", (GatewayOptions o) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version }));
+        group.MapGet("/info", async (GatewayOptions o, ILanes lanes, CancellationToken ct) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version, deep_available = await lanes.DeepAvailableAsync(ct) }));
         return group;
     }
 
@@ -70,6 +72,8 @@ public static class ChatEndpoints
     {
         if (request.Messages is not { Count: > 0 } || request.Messages.Any(m => m?.Content is null)) throw new BadRequestException("messages must hold the question, each with its content");
         if (request.JsonSchema is { } schema && !IsJson(schema)) throw new BadRequestException("json_schema isn't valid JSON");
+        if (request.Deep == true && request.JsonSchema is null) { await DeepChat(http, s, request); return; }
+        var lane = request.Deep == true ? Lane.Deep : Lane.Fast; // a /deep /edit: the smart model, and its JSON answer as usual
         var project = ProjectPath(http);
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultChatTokens, 1, MaxChatTokens);
         var question = request.Messages.LastOrDefault()?.Content ?? "";
@@ -128,12 +132,17 @@ public static class ChatEndpoints
         {
             // Only whole answers are cached: one cut off at max_tokens (or JSON that doesn't parse) would otherwise come
             // back unchanged on every retry for an hour.
-            var key = CacheKey("chat", project, note, prompt, maxTokens, request.JsonSchema);
+            var key = CacheKey("chat", project, note, prompt, maxTokens, request.JsonSchema, lane);
             var cached = await s.Cache.GetOrCreateAsync(key, _ => ValueTask.FromResult<string?>(null), ProbeOnly, cancellationToken: http.RequestAborted);
             var cutOff = false;
             if (cached is null)
             {
-                (answer, cutOff) = await s.Queue.EnqueueAsync(WorkKind.Chat, async t => await s.Llama.ChatWithEndAsync(prompt, maxTokens, t, request.JsonSchema, await s.Lanes.EnsureAsync(Lane.Fast, null, t)), http.RequestAborted);
+                (answer, cutOff) = await s.Queue.EnqueueAsync(WorkKind.Chat, async t =>
+                {
+                    var result = await s.Llama.ChatWithEndAsync(prompt, maxTokens, t, request.JsonSchema, await s.Lanes.EnsureAsync(lane, null, t));
+                    if (lane is Lane.Deep) s.Lanes.HoldDeep();
+                    return result;
+                }, http.RequestAborted);
                 if (!cutOff && (request.JsonSchema is null || IsJson(answer))) await s.Cache.SetAsync(key, answer, CacheFor, cancellationToken: http.RequestAborted);
             }
             else answer = cached;
@@ -148,6 +157,53 @@ public static class ChatEndpoints
 
         if (project is not null) http.RequestServices.GetRequiredService<StateNoteUpdater>().Record(project, question, answer);
     });
+
+    /// <summary>/deep: one queue item from loading the smart model to the checked answer, so nothing else asks the model in between.</summary>
+    static async Task DeepChat(HttpContext http, Services s, ChatRequest request)
+    {
+        var project = ProjectPath(http);
+        var question = request.Messages[^1].Content;
+        var history = request.Messages.SkipLast(1).ToList();
+        var note = await ConversationNoteFor(s, project, history.Count == 0);
+        var passages = history.Count > 0 && LawBook.IsFollowUp(question) ? [] : s.LawBook.Search(question, DeepAnswer.PassageTokens);
+        var parts = new PromptParts(note, request.Context, history, question, passages, request.Conventions);
+        var checker = http.RequestServices.GetRequiredService<SnippetChecker>();
+        var streaming = request.Stream == true;
+        Task Stage(string stage, int? tokens) => streaming ? WriteEventAsync(http, new { stage, tokens }, http.RequestAborted) : Task.CompletedTask;
+        if (streaming) http.Response.ContentType = "text/event-stream";
+        var watch = Stopwatch.StartNew();
+        DeepResult result;
+        try
+        {
+            result = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
+            {
+                var model = await s.Lanes.EnsureAsync(Lane.Deep, stage => Stage(stage, null), ct);
+                try { return await DeepAnswer.RunAsync(s.Llama, checker, model, parts, await s.Limits.ContextTokensAsync(ct), Stage, ct); }
+                finally { s.Lanes.HoldDeep(); }
+            }, http.RequestAborted);
+        }
+        catch (Exception e) when (http.Response.HasStarted && e is not OperationCanceledException)
+        {
+            await WriteEventAsync(http, new { error = e is IOException ? "lost connection to the model server" : e.Message }, http.RequestAborted);
+            await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
+            return;
+        }
+        var id = await s.Log.AddAsync(new Interaction(project, "deep", question, result.Text, watch.ElapsedMilliseconds));
+        if (project is not null) http.RequestServices.GetRequiredService<StateNoteUpdater>().Record(project, question, result.Text);
+        var finish = result.CutOff ? "length" : "stop";
+        if (!streaming)
+        {
+            await http.Response.WriteAsJsonAsync(new { id = $"ix-{id}", @object = "chat.completion", check = result.CheckRow,
+                choices = new[] { new { index = 0, message = new ChatMessage("assistant", result.Text), finish_reason = finish } } }, SnakeCase, http.RequestAborted);
+            return;
+        }
+        await WriteEventAsync(http, new { choices = new[] { new { index = 0, delta = new { content = result.Text } } } }, http.RequestAborted);
+        var final = new Dictionary<string, object?> { ["id"] = $"ix-{id}", ["choices"] = new[] { new { index = 0, delta = new { }, finish_reason = finish } }, ["timings"] = result.Stats,
+            ["dropped_turns"] = result.DroppedMessages / 2, ["check"] = result.CheckRow };
+        if (result.UsedPassages) final["sources"] = passages.Select(p => new { title = p.Title, url = p.Url });
+        await WriteEventAsync(http, final, http.RequestAborted);
+        await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
+    }
 
     /// <summary>
     /// Reads the conversation so far into the prompt cache, built exactly as <see cref="Chat"/> builds it, so the next

@@ -4,8 +4,9 @@ namespace MyOwnLLM.Gateway.Prompt;
 
 /// <param name="Passages">The law book's passages for the question, if any.</param>
 /// <param name="Conventions">The project's AGENTS.md, as the CLI read it.</param>
+/// <param name="KeepHistory">Only the latest messages go in, though the whole history is still searched. /deep sets it: after a model swap everything has to be read again.</param>
 public sealed record PromptParts(string? StateNote, string? RepoContext, IReadOnlyList<ChatMessage> History, string Question, IReadOnlyList<Passage>? Passages = null,
-    string? Conventions = null);
+    string? Conventions = null, int? KeepHistory = null);
 
 public sealed class InputTooLargeException(int estimated, int limit)
     : Exception($"input too large (~{estimated} tokens, limit {limit})")
@@ -91,7 +92,7 @@ public static partial class PromptBuilder
         // Long conversations: drop the oldest history until it fits. The cut moves in steps of DropStep messages counted from
         // the start, so it stays put for several turns: cutting one more pair every turn would change the prompt's start
         // each time, and the model would read the whole conversation again for every answer.
-        var history = parts.History.ToList();
+        var history = (parts.KeepHistory is { } keep ? parts.History.TakeLast(keep) : parts.History).ToList();
         var historyTokens = history.Sum(m => EstimateTokens(m.Content));
         var drop = 0;
         while (drop < history.Count && required + historyTokens > limit) historyTokens -= EstimateTokens(history[drop++].Content);

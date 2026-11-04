@@ -232,6 +232,7 @@ def main():
     parser.add_argument("--reasoning", default="auto", choices=["auto", "on", "off"], help="a model's own thinking; off leaves its answer alone within the token cap")
     parser.add_argument("--router-preset", help="run llama-server in router mode on this preset file (see measure_lanes.preset_text), asking for --model-name")
     parser.add_argument("--model-name", help="the preset section to ask, with --router-preset")
+    parser.add_argument("--deep", action="store_true", help="ask through a temporary gateway with deep on; needs --router-preset")
     parser.add_argument("--scenarios", action="store_true", help="also time /read, /edit, /review and a conversation")
     parser.add_argument("--limit", type=int, help="only the first N questions, for a quick check")
     parser.add_argument("--llama", default=os.path.join(os.environ.get("LOCALAPPDATA", ""), "Jazari", "llama", "llama-server.exe"))
@@ -240,9 +241,17 @@ def main():
     a = parser.parse_args()
     if bool(a.router_preset) != bool(a.model_name):
         sys.exit("--router-preset and --model-name go together")
+    if a.deep and not a.router_preset:
+        sys.exit("--deep needs --router-preset")
     if a.law_book:
         if not os.path.isfile(a.law_book):
             sys.exit(f"no law book at {a.law_book}: build it with py -I lawbook/build.py")
+        try:
+            build_gateway()
+        except ServerDidNotStart as e:
+            sys.exit(str(e))
+
+    if a.deep:
         try:
             build_gateway()
         except ServerDidNotStart as e:
@@ -260,12 +269,12 @@ def main():
     try:
         try:
             ask = lambda q: chat([{"role": "system", "content": system}, {"role": "user", "content": q["question"]}], model=a.model_name)
-            if a.law_book:
+            if a.law_book or a.deep:
                 folder = tempfile.mkdtemp(prefix="jazari-eval-")
                 env = gateway_env(folder, PORT, GATEWAY_PORT, a.law_book)
                 key = add_key(env, folder)
                 gateway.append(launch(["dotnet", GATEWAY_DLL], GATEWAY_PORT, env=env, cwd=folder))
-                ask = plain_through_gateway(lambda messages: gateway_chat(key, messages, MAX_TOKENS))
+                ask = plain_through_gateway(lambda messages: gateway_chat(key, messages, MAX_TOKENS, deep=a.deep))
             wait_until_ready(server)
             if gateway:
                 wait_for_gateway(gateway[0], key)

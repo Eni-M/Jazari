@@ -123,6 +123,109 @@ public class EndpointTests : IDisposable
         Assert.DoesNotContain(_logs.Lines, l => l.Contains("mollm_wrong") || l.Contains(_key));
     }
 
+    sealed class FakeLanes : ILanes
+    {
+        public List<Lane?> Asked { get; } = [];
+        public int Holds { get; private set; }
+        public Task<bool> DeepAvailableAsync(CancellationToken ct) => Task.FromResult(true);
+        public async Task<string?> EnsureAsync(Lane? lane, Func<string, Task>? stage, CancellationToken ct)
+        {
+            Asked.Add(lane);
+            if (lane is Lane.Deep && stage is not null) await stage("loading smart model");
+            return lane?.ToString().ToLowerInvariant();
+        }
+        public void HoldDeep() => Holds++;
+    }
+
+    (HttpClient Client, FakeLanes Lanes) WithLanes()
+    {
+        var lanes = new FakeLanes();
+        var client = _factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton<ILanes>(lanes))).CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _key);
+        return (client, lanes);
+    }
+
+    static object DeepBody(string question, bool stream = true, object[]? history = null, string? context = null) =>
+        new { messages = (history ?? []).Append(new { role = "user", content = question }), stream, deep = true, context };
+
+    [Fact]
+    public async Task Deep_sends_stages_and_no_text_until_checked()
+    {
+        var (client, lanes) = WithLanes();
+        var body = await (await client.PostAsJsonAsync("/v1/chat/completions", DeepBody("hi"))).Content.ReadAsStringAsync();
+
+        var checking = body.IndexOf("checking the code", StringComparison.Ordinal);
+        Assert.True(body.IndexOf("loading smart model", StringComparison.Ordinal) is >= 0 and var loading && loading < body.IndexOf("\"reading\"", StringComparison.Ordinal));
+        Assert.True(checking > 0);
+        Assert.True(body.IndexOf("\"content\"", StringComparison.Ordinal) > checking);
+        Assert.Contains("\"check\":\"not checked: no code\"", body);
+        Assert.Equal(1, lanes.Holds);
+        Assert.Equal([Lane.Deep], lanes.Asked);
+    }
+
+    [Fact]
+    public async Task Deep_keeps_only_the_last_eight_history_messages_and_still_searches_the_rest()
+    {
+        var (client, _) = WithLanes();
+        object[] history = [.. Enumerable.Range(0, 12).Select(i => (object)new { role = i % 2 == 0 ? "user" : "assistant", content = i == 0 ? "my cluster is named zebrawood" : $"turn {i} {new string('x', 3000)}" })];
+
+        await client.PostAsJsonAsync("/v1/chat/completions", DeepBody("what is my cluster zebrawood called", history: history));
+
+        var call = _llama.Calls.Last();
+        Assert.DoesNotContain(call.Messages, m => m.Content.StartsWith("turn 3 "));
+        Assert.Contains(call.Messages, m => m.Content.StartsWith("turn 4 "));
+        Assert.Contains("my cluster is named zebrawood", call.Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task Deep_without_a_deep_model_is_a_clear_error()
+    {
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", DeepBody("hi", stream: false));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Contains("jazari update", (await Json(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Deep_buffered_answers_with_its_check_row()
+    {
+        var (client, _) = WithLanes();
+        var json = await Json(await client.PostAsJsonAsync("/v1/chat/completions", DeepBody("hi", stream: false)));
+        Assert.Equal("not checked: no code", json.GetProperty("check").GetString());
+        Assert.Equal("ab", json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task Deep_edit_uses_the_smart_lane_and_its_json_answer()
+    {
+        var (client, lanes) = WithLanes();
+        _llama.Chat = _ => Task.FromResult("""{"a":1}""");
+        var response = await client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[] { new { role = "user", content = "change" } }, deep = true, json_schema = """{"type":"object"}""" });
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal([Lane.Deep], lanes.Asked);
+        Assert.Equal(1, lanes.Holds);
+    }
+
+    [Fact]
+    public async Task Clients_that_never_send_deep_stay_on_the_fast_lane()
+    {
+        var (client, lanes) = WithLanes();
+        var body = await (await client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi", stream: true))).Content.ReadAsStringAsync();
+
+        Assert.Equal([Lane.Fast], lanes.Asked);
+        Assert.Equal(0, lanes.Holds);
+        Assert.DoesNotContain("stage", body);
+        Assert.DoesNotContain("\"check\"", body);
+    }
+
+    [Fact]
+    public async Task Info_says_whether_deep_is_there()
+    {
+        var (client, _) = WithLanes();
+        Assert.True((await Json(await client.GetAsync("/v1/info"))).GetProperty("deep_available").GetBoolean());
+        Assert.False((await Json(await _client.GetAsync("/v1/info"))).GetProperty("deep_available").GetBoolean());
+    }
+
     static async Task<JsonElement> FinalEvent(HttpResponseMessage response) =>
         JsonDocument.Parse((await response.Content.ReadAsStringAsync()).Split("\n").Where(l => l.StartsWith("data: {") && l.Contains("\"finish_reason\"")).Last()["data: ".Length..]).RootElement;
 

@@ -79,6 +79,36 @@ public sealed class SnippetChecker(string? dotnetRoot = null)
         return checks;
     }
 
+    /// <summary>The code of block <paramref name="number"/> (from 1), or null when there's no such block.</summary>
+    public static string? BlockCode(string answer, int number) =>
+        Blocks(answer) is var blocks && number >= 1 && number <= blocks.Count ? blocks[number - 1].Code : null;
+
+    /// <summary>The answer with block <paramref name="number"/>'s code replaced, and everything around it as it was.</summary>
+    public static string ReplaceBlock(string answer, int number, string code)
+    {
+        var lines = answer.Replace("\r\n", "\n").Split('\n').ToList();
+        var (seen, open) = (0, -1);
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!lines[i].TrimStart().StartsWith("```", StringComparison.Ordinal)) continue;
+            if (open < 0) { open = i; seen++; continue; }
+            if (seen == number)
+            {
+                lines.RemoveRange(open + 1, i - open - 1);
+                lines.Insert(open + 1, code);
+                return string.Join('\n', lines);
+            }
+            open = -1;
+        }
+        if (open >= 0 && seen == number) // stopped mid-block
+        {
+            lines.RemoveRange(open + 1, lines.Count - open - 1);
+            lines.Insert(open + 1, code);
+            lines.Add("```");
+        }
+        return string.Join('\n', lines);
+    }
+
     /// <summary>Every fenced block with its language, as the screen finds them: an answer stopped mid-block still counts it.</summary>
     static List<(string Language, string Code)> Blocks(string answer)
     {
