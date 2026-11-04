@@ -191,6 +191,49 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task A_linked_agents_md_is_not_followed()
+    {
+        var outside = Directory.CreateTempSubdirectory("jazari outside").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(outside, "id_rsa"), "PRIVATE KEY");
+            try { File.CreateSymbolicLink(Path.Combine(_dir, "AGENTS.md"), Path.Combine(outside, "id_rsa")); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; } // Windows without the right to make links
+
+            await Session().HandleAsync("q", CancellationToken.None);
+
+            Assert.Null(_gateway.LastConventions);
+        }
+        finally { Directory.Delete(outside, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Outside_a_repository_only_the_projects_own_folder_is_searched()
+    {
+        // _dir is under the temp folder, with no repository: an AGENTS.md above it isn't this project's.
+        var project = Directory.CreateDirectory(Path.Combine(_dir, "proj")).FullName;
+        File.WriteAllText(Path.Combine(_dir, "AGENTS.md"), "from above");
+        var session = new MyOwnLLM.Cli.Session(_gateway, new Ui(_output, _theme, 100), () => new MarkdownStream(_output, _theme, 100), project);
+
+        await session.HandleAsync("q", CancellationToken.None);
+        Assert.Null(_gateway.LastConventions);
+
+        Directory.CreateDirectory(Path.Combine(_dir, ".git")); // now _dir is the repository's root
+        await session.HandleAsync("q", CancellationToken.None);
+        Assert.Equal("from above", _gateway.LastConventions);
+    }
+
+    [Fact]
+    public async Task Context_says_when_an_agents_md_goes_with_questions()
+    {
+        Add("AGENTS.md", "Use records.");
+
+        await Session().HandleAsync("/context", CancellationToken.None);
+
+        Assert.Contains("AGENTS.md:", _output.ToString());
+    }
+
+    [Fact]
     public async Task A_huge_agents_md_is_cut_and_none_means_none()
     {
         var session = Session();

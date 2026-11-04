@@ -501,7 +501,7 @@ public class EndpointTests : IDisposable
         await _client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[] { new { role = "user", content = CoveredQuestion } }, conventions = "Use records." });
 
         var sent = Assert.Single(_llama.Calls).Messages;
-        Assert.Equal(MyOwnLLM.Gateway.Prompt.PromptBuilder.ConventionsIntro + "Use records.", sent[1].Content);
+        Assert.Equal(MyOwnLLM.Gateway.Prompt.PromptBuilder.ConventionsStart + "Use records." + MyOwnLLM.Gateway.Prompt.PromptBuilder.ConventionsEnd, sent[1].Content);
         Assert.StartsWith(MyOwnLLM.Gateway.Prompt.PromptBuilder.DocsStart, sent[^1].Content);
     }
 

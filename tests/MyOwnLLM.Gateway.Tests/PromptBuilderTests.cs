@@ -33,7 +33,7 @@ public class PromptBuilderTests
     {
         var messages = PromptBuilder.Build(new PromptParts("NOTE", "CTX", [], "Q", Conventions: "Use records."), 16384, 512);
 
-        Assert.Equal(PromptBuilder.ConventionsIntro + "Use records.", messages[1].Content);
+        Assert.Equal(PromptBuilder.ConventionsStart + "Use records." + PromptBuilder.ConventionsEnd, messages[1].Content);
         Assert.Contains("NOTE", messages[2].Content);
     }
 

@@ -313,23 +313,32 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     const int MaxConventionChars = 2000; // about 500 tokens, read with every question
 
     /// <summary>
-    /// The project's AGENTS.md, the conventions file Codex, OpenCode and Crush read: in the folder Jazari runs in or one
-    /// above it, up to the repository's root. Read on every question, so an edit to it counts at once; only the start is
-    /// sent, since it goes with every question. Null when there is none.
+    /// The project's AGENTS.md, the conventions file Codex, OpenCode and Crush read: in the folder Jazari runs in, or a
+    /// folder above it up to the repository's root when there is one (never past it, and outside a repository only the
+    /// folder itself). Read on every question, so an edit to it counts at once; only the start is read and sent. Null
+    /// when there is none. Like /read, it never follows a link: AGENTS.md linked to ~/.ssh/id_rsa must not reach the model.
     /// </summary>
     string? Conventions()
     {
         try
         {
-            for (var dir = new DirectoryInfo(project); dir is not null; dir = dir.Parent)
+            var folder = new DirectoryInfo(project);
+            var root = folder;
+            for (var dir = folder; dir is not null; dir = dir.Parent)
+                if (Path.Exists(Path.Combine(dir.FullName, ".git"))) { root = dir; break; }
+            for (var dir = folder; dir is not null; dir = dir.Parent)
             {
-                var file = Path.Combine(dir.FullName, "AGENTS.md");
-                if (File.Exists(file))
+                if (dir.LinkTarget is not null) return null;
+                var file = new FileInfo(Path.Combine(dir.FullName, "AGENTS.md"));
+                if (file.Exists)
                 {
-                    var text = File.ReadAllText(file).Trim();
-                    return text.Length == 0 ? null : text.Length > MaxConventionChars ? text[..MaxConventionChars] : text;
+                    if (file.LinkTarget is not null) return null;
+                    using var reader = new StreamReader(file.FullName);
+                    var buffer = new char[MaxConventionChars];
+                    var text = new string(buffer, 0, reader.ReadBlock(buffer, 0, buffer.Length)).Trim();
+                    return text.Length == 0 ? null : text;
                 }
-                if (Path.Exists(Path.Combine(dir.FullName, ".git"))) break; // the repository's root: nothing above it is this project's
+                if (dir.FullName == root.FullName) break;
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
@@ -474,6 +483,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var turns = _history.Count / 2;
         ui.Metadata(_context is null ? "No files read. /read or /diff adds some." : $"Read: {_contextLabel}, about {_context.Length / 4} tokens.");
         ui.Metadata($"Conversation: {turns} question{(turns == 1 ? "" : "s")} and answer{(turns == 1 ? "" : "s")}, about {_history.Sum(t => t.Content.Length) / 4} tokens. /clear empties both.");
+        // A cloned repository's AGENTS.md goes with every question: say so, so it's never a hidden influence.
+        if (Conventions() is { } conventions) ui.Metadata($"AGENTS.md: about {conventions.Length / 4} tokens go with every question and /edit, as style the model is told it may follow, not orders.");
     }
 
     const string CommitSchema = """
