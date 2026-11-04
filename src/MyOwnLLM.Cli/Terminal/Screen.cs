@@ -165,14 +165,17 @@ public sealed class Screen : IBlockSink
         else lock (Gate) Render();
     }
 
-    /// <summary>Session mode: takes over the window (keeping what was above in the scrollback) and starts drawing.</summary>
+    /// <summary>
+    /// Session mode: takes over the window and starts drawing. The screen and its scrollback are cleared, so Jazari opens
+    /// on a window of its own rather than under the commands typed before it.
+    /// </summary>
     public void Start()
     {
         lock (Gate)
         {
             if (_started) return;
             _started = true;
-            _terminal.Write("\e]0;Jazari\a\e[0m\e[H\e[2J");
+            _terminal.Write("\e]0;Jazari\a\e[0m\e[H\e[2J\e[3J");
             (_width, _height) = _terminal.Size;
             _layoutColumns = _width - 1;
             _shown = Blank(_height);

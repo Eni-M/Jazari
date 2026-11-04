@@ -84,7 +84,7 @@ public class UiTests
     }
 
     [Fact]
-    public void The_session_screen_sets_the_title_and_clears_the_window_but_keeps_the_scrollback()
+    public void The_session_screen_sets_the_title_and_clears_the_window_and_its_scrollback()
     {
         var terminal = new FakeTerminal(80, 10);
         terminal.Vt.Write("earlier shell output\r\n");
@@ -92,8 +92,33 @@ public class UiTests
         new Screen(terminal, new Theme(ColorMode.TrueColor, true), bottom: true, paced: false).Start();
 
         Assert.Contains("0;Jazari", terminal.Vt.Signals);
-        Assert.DoesNotContain("\e[3J", string.Concat(terminal.Frames));
-        Assert.Contains("earlier shell output", terminal.Vt.Scrollback);
+        Assert.Contains("\e[2J\e[3J", string.Concat(terminal.Frames));
+        Assert.DoesNotContain(terminal.Vt.Lines, l => l.Contains("earlier shell output"));
+    }
+
+    [Fact]
+    public void The_session_opens_with_the_name_in_block_letters_and_one_row_when_narrow()
+    {
+        Ui Open(FakeTerminal terminal)
+        {
+            var theme = new Theme(ColorMode.TrueColor, true);
+            var screen = new Screen(terminal, theme, bottom: true, paced: false);
+            screen.Start();
+            return new Ui(screen, theme, () => terminal.Size.Width - 1);
+        }
+        var wide = new FakeTerminal(100, 20);
+        var ui = Open(wide);
+        ui.Wordmark("0.3.0");
+        ui.ReplaceWordmark("ready in 4 s");
+
+        Assert.Contains(wide.Vt.Lines, l => l.TrimEnd() == "          ╚█████╔╝██║  ██║███████╗██║  ██║██║  ██║██║");
+        Assert.Contains(wide.Vt.Lines, l => l == "          ready in 4 s");
+
+        var narrow = new FakeTerminal(40, 20);
+        var small = Open(narrow);
+        small.Wordmark("0.3.0");
+        Assert.Contains(narrow.Vt.Lines, l => l == "          jazari  0.3.0");
+        Assert.DoesNotContain(narrow.Vt.Lines, l => l.Contains('█'));
     }
 
     [Fact]

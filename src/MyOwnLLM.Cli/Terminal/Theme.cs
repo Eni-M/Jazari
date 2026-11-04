@@ -51,6 +51,8 @@ public sealed class Theme(ColorMode mode, bool unicode, bool? edges = null)
 
     public ColorMode Mode => mode;
 
+    public bool Unicode => unicode;
+
     /// <summary>Whether thin box edges are drawn (see the constructor).</summary>
     public bool Edges { get; } = (edges ?? true) && unicode;
 

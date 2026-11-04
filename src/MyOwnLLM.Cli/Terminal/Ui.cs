@@ -106,9 +106,26 @@ public sealed class Ui
             return;
         }
         _wordmarkText = ConsoleText.Sanitize(version);
-        _wordmark = new LiveBlock(_ => [Layout.Row().Add("jazari", new Style(Tone.Primary, Bold: true)).Add("  " + _wordmarkText, Tone.Muted).Build()]);
+        // The name in block letters with the version under it, like a full-screen app's title; one row when it can't fit.
+        _wordmark = new LiveBlock(columns => _theme.Unicode && columns - Layout.Margin(columns) >= Layout.Gutter + BannerWidth
+            ? [.. Banner.Select(row => Layout.Row().Add(row, new Style(Tone.Primary, Bold: true)).Build()), Layout.Row().Add(_wordmarkText, Tone.Muted).Build()]
+            : [Layout.Row().Add("jazari", new Style(Tone.Primary, Bold: true)).Add("  " + _wordmarkText, Tone.Muted).Build()]);
         Add(_wordmark);
     }
+
+    /// <summary>J, A, Z, A, R, I in block letters, six rows each.</summary>
+    static readonly string[][] Letters =
+    [
+        ["     ██╗", "     ██║", "     ██║", "██   ██║", "╚█████╔╝", " ╚════╝ "],
+        [" █████╗ ", "██╔══██╗", "███████║", "██╔══██║", "██║  ██║", "╚═╝  ╚═╝"],
+        ["███████╗", "╚══███╔╝", "  ███╔╝ ", " ███╔╝  ", "███████╗", "╚══════╝"],
+        [" █████╗ ", "██╔══██╗", "███████║", "██╔══██║", "██║  ██║", "╚═╝  ╚═╝"],
+        ["██████╗ ", "██╔══██╗", "██████╔╝", "██╔══██╗", "██║  ██║", "╚═╝  ╚═╝"],
+        ["██╗", "██║", "██║", "██║", "██║", "╚═╝"],
+    ];
+
+    static readonly string[] Banner = [.. Enumerable.Range(0, 6).Select(row => string.Concat(Letters.Select(letter => letter[row])))];
+    static readonly int BannerWidth = Banner.Max(row => row.Length);
 
     /// <summary>"0.3.0" becomes "ready in 4 s", wherever the wordmark is now.</summary>
     public void ReplaceWordmark(string text)

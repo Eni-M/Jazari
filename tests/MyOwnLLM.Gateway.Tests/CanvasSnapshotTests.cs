@@ -72,7 +72,8 @@ public class CanvasSnapshotTests
 
         Assert.Equal("  jazari — ~/MyOwnLLM", terminal.Vt.Text(0)[..21]);
         Assert.EndsWith("main", terminal.Vt.Text(0));
-        Assert.Contains(terminal.Vt.Lines, l => l == "          jazari  ready in 4 s");
+        Assert.Contains(terminal.Vt.Lines, l => l.StartsWith("          ╚█████╔╝"));
+        Assert.Contains(terminal.Vt.Lines, l => l == "          ready in 4 s");
         Assert.Contains(terminal.Vt.Lines, l => l.StartsWith("    3.2s  A class gets"));
         Assert.Contains(terminal.Vt.Lines, l => l.StartsWith("  copy 1    Program.cs"));
         Save("Main", terminal);
