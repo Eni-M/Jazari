@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Hybrid;
+using MyOwnLLM.Gateway.Checks;
 using MyOwnLLM.Gateway.Llama;
 using MyOwnLLM.Gateway.Prompt;
 using MyOwnLLM.Gateway.Queue;
@@ -29,6 +30,7 @@ public static class ChatEndpoints
     static readonly string Version = typeof(ChatEndpoints).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false) is [System.Reflection.AssemblyInformationalVersionAttribute v, ..] ? v.InformationalVersion.Split('+')[0] : "0.0.0";
     /// <summary>The name OpenAI-style clients (VS Code, Continue, Rider) list and send back; any name they send is accepted.</summary>
     const string ModelId = "jazari";
+    static readonly TimeSpan CheckBudget = TimeSpan.FromSeconds(2);
     const string StatusQuestion = "Where are we left at? Answer with a short summary.";
     static readonly HybridCacheEntryOptions CacheFor = new() { Expiration = TimeSpan.FromHours(1), LocalCacheExpiration = TimeSpan.FromHours(1) };
     static readonly JsonSerializerOptions SnakeCase = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
@@ -115,9 +117,9 @@ public static class ChatEndpoints
             id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
             var choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } };
             // sources only when the law book's passages went in, so the CLI names the page the answer drew on.
-            object final = usedPassages
-                ? new { id = $"ix-{id}", choices, timings = stats, dropped_turns = droppedMessages / 2, sources = passages.Select(p => new { title = p.Title, url = p.Url }) }
-                : new { id = $"ix-{id}", choices, timings = stats, dropped_turns = droppedMessages / 2 };
+            var final = new Dictionary<string, object?> { ["id"] = $"ix-{id}", ["choices"] = choices, ["timings"] = stats, ["dropped_turns"] = droppedMessages / 2 };
+            if (usedPassages) final["sources"] = passages.Select(p => new { title = p.Title, url = p.Url });
+            if (await ChecksFor(http, answer) is { } checks) final["checks"] = checks;
             await WriteEventAsync(http, final, http.RequestAborted);
             await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
         }
@@ -153,6 +155,7 @@ public static class ChatEndpoints
     static Task Warm(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
         if (request.Messages is null || request.Messages.Any(m => m?.Content is null)) throw new BadRequestException("messages is required, each with its content");
+        http.RequestServices.GetRequiredService<SnippetChecker>().Warm();
         var project = ProjectPath(http);
         var note = await ConversationNoteFor(s, project, request.Messages.Count == 0);
         var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, "", Conventions: request.Conventions), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
@@ -215,6 +218,21 @@ public static class ChatEndpoints
         BadRequestException => StatusCodes.Status400BadRequest,
         _ => null,
     };
+
+    /// <summary>What the compiler says about the answer's C#, for the final event; null when no block was checked. The answer is
+    /// already on screen, so a check that fails or runs long only means no note under it.</summary>
+    static async Task<object?> ChecksFor(HttpContext http, string answer)
+    {
+        try
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(http.RequestAborted);
+            budget.CancelAfter(CheckBudget);
+            var checker = http.RequestServices.GetRequiredService<SnippetChecker>();
+            var checks = await Task.Run(() => checker.Check(answer, budget.Token), budget.Token);
+            return checks.Any(c => c.State != CheckState.NotChecked) ? checks.Select(c => new { block = c.Block, state = c.State.ToString().ToLowerInvariant(), errors = c.Errors, why = c.Why }).ToList() : null;
+        }
+        catch (Exception e) when (!http.RequestAborted.IsCancellationRequested && e is not OutOfMemoryException) { return null; }
+    }
 
     static async Task WriteEventAsync(HttpContext http, object payload, CancellationToken ct)
     {

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MyOwnLLM.Gateway;
 using MyOwnLLM.Gateway.Auth;
+using MyOwnLLM.Gateway.Checks;
 using MyOwnLLM.Gateway.Endpoints;
 using MyOwnLLM.Gateway.Llama;
 using MyOwnLLM.Gateway.Queue;
@@ -24,6 +25,19 @@ if (args is ["search-law", var lawQuestion, ..]) // for lawbook/try_dev.py: what
     return;
 }
 
+if (args is ["check-answer", var answersFile, ..]) // for eval/check_saved.py: a JSON array of answers in, what the checker says and how long it took out
+{
+    var checker = new SnippetChecker();
+    var results = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(answersFile))!.Select(answer =>
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var checks = checker.Check(answer, CancellationToken.None);
+        return new { checks, ms = watch.ElapsedMilliseconds };
+    }).ToList();
+    Console.WriteLine(JsonSerializer.Serialize(results, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } }));
+    return;
+}
+
 builder.WebHost.UseUrls($"http://127.0.0.1:{options.Port}");
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
 builder.Services.AddSingleton(options);
@@ -36,6 +50,7 @@ builder.Services.AddSingleton<StateNoteUpdater>();
 builder.Services.AddSingleton<RequestQueue>();
 builder.Services.AddSingleton<ModelLimits>();
 builder.Services.AddSingleton<LawBook>();
+builder.Services.AddSingleton(_ => new SnippetChecker());
 builder.Services.AddHostedService<QueueWorker>();
 builder.Services.AddHybridCache();
 builder.Services.AddHttpClient("llama", http =>

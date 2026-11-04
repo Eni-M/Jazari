@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MyOwnLLM.Gateway.Auth;
+using MyOwnLLM.Gateway.Checks;
 using MyOwnLLM.Gateway.Llama;
 
 namespace MyOwnLLM.Gateway.Tests;
@@ -20,6 +21,7 @@ public sealed class FakeLlama : ILlamaClient
     public ConcurrentQueue<Call> Calls { get; } = new();
     public Func<CancellationToken, Task<string>> Chat { get; set; } = _ => Task.FromResult("answer");
     public bool StreamDiesAfterFirstPart { get; set; }
+    public string[] StreamParts { get; set; } = ["a", "b"];
     public string? LastSchema { get; private set; }
 
     public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null)
@@ -37,7 +39,7 @@ public sealed class FakeLlama : ILlamaClient
     {
         Calls.Enqueue(new("stream", messages, maxTokens));
         yield return new(null, Progress: new(100, 40, 100));
-        foreach (var part in new[] { "a", "b" })
+        foreach (var part in StreamParts)
         {
             await Task.Yield();
             yield return new(part);
@@ -119,6 +121,39 @@ public class EndpointTests : IDisposable
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.DoesNotContain(_logs.Lines, l => l.Contains("mollm_wrong") || l.Contains(_key));
+    }
+
+    static async Task<JsonElement> FinalEvent(HttpResponseMessage response) =>
+        JsonDocument.Parse((await response.Content.ReadAsStringAsync()).Split("\n").Where(l => l.StartsWith("data: {") && l.Contains("\"finish_reason\"")).Last()["data: ".Length..]).RootElement;
+
+    [Fact]
+    public async Task A_streamed_answer_with_bad_code_reports_it_in_the_final_event()
+    {
+        _llama.StreamParts = ["```csharp\nservices.AddFoo();\n```"];
+        var final = await FinalEvent(await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi", stream: true)));
+        var check = final.GetProperty("checks")[0];
+        Assert.Equal(1, check.GetProperty("block").GetInt32());
+        Assert.Equal("doesnotcompile", check.GetProperty("state").GetString());
+        Assert.Contains("AddFoo", check.GetProperty("errors")[0].GetString());
+    }
+
+    [Fact]
+    public async Task An_answer_with_no_code_sends_no_checks()
+    {
+        var final = await FinalEvent(await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi", stream: true)));
+        Assert.False(final.TryGetProperty("checks", out _));
+    }
+
+    [Fact]
+    public async Task A_check_that_cannot_run_still_finishes_the_answer()
+    {
+        var noPacks = _factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton(_ => new SnippetChecker(Path.Combine(_dir, "no-dotnet-here")))));
+        var client = noPacks.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _key);
+        _llama.StreamParts = ["```csharp\nvar x = 1;\n```"];
+        var final = await FinalEvent(await client.PostAsJsonAsync("/v1/chat/completions", ChatBody("hi", stream: true)));
+        Assert.StartsWith("ix-", final.GetProperty("id").GetString());
+        Assert.False(final.TryGetProperty("checks", out _));
     }
 
     [Fact]
