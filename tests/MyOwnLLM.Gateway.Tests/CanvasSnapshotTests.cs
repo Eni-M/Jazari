@@ -58,7 +58,7 @@ public class CanvasSnapshotTests
     {
         var (screen, terminal, ui) = Start(new StaticPanel(Typed("and how do lifetimes differ in tests"),
             new("Program.cs", "Enter sends · / commands", Status, (4100, 16384))));
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
         ui.Wordmark("0.3.0");
         ui.ReplaceWordmark("ready in 4 s");
         ui.Blank();
@@ -70,7 +70,7 @@ public class CanvasSnapshotTests
         ui.Blank();
         Answer(screen, "Use `AddScoped`: one instance per HTTP request.\n```Program.cs\nbuilder.Services.AddScoped<IOrderRepository, OrderRepository>();\n```\nTransient makes a new one every time it's asked for; singleton shares one for the whole app.\n", "4.1s");
 
-        Assert.Equal("  jazari — ~/MyOwnLLM", terminal.Vt.Text(0)[..21]);
+        Assert.Equal("  jazari 0.3.0 — ~/MyOwnLLM", terminal.Vt.Text(0)[..27]);
         Assert.EndsWith("main", terminal.Vt.Text(0));
         Assert.Contains(terminal.Vt.Lines, l => l.StartsWith("          ╚█████╔╝"));
         Assert.Contains(terminal.Vt.Lines, l => l == "          ready in 4 s");
@@ -83,7 +83,7 @@ public class CanvasSnapshotTests
     public void Commands()
     {
         var (screen, terminal, ui) = Start(new StaticPanel(Typed("/re"), new("Program.cs", "Enter sends · / commands", Status, (4100, 16384))));
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
         Answer(screen, "…so the queue keeps one request on the model at a time and the rest wait their turn.\n", "2.4s");
 
         Assert.Contains(terminal.Vt.Lines, l => l.Contains("/read <path>") && l.Contains("Read a file or folder"));
@@ -96,7 +96,7 @@ public class CanvasSnapshotTests
     {
         var (_, terminal, ui) = Start(new StaticPanel(Typed(""),
             new("Queue/ · 2 files", "", Status, (6300, 16384), Compact: "granite 3b · 14 tok/s · 6.3k of 16k"), "Apply this change to RequestQueue.cs?"));
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
         ui.UserMessage("/read src/MyOwnLLM.Gateway/Queue");
         ui.Blank();
         ui.Metadata("2 files, 2.1k tokens. They go with every question until /clear.", "read");
@@ -118,7 +118,7 @@ public class CanvasSnapshotTests
     public void Problems()
     {
         var (screen, terminal, ui) = Start(new StaticPanel(Typed("/retry"), new(null, "/details shows the full error", "", Offline: true)));
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
         ui.Wordmark("0.3.0");
         ui.Blank();
         ui.Error("Can't reach the gateway.", "Nothing answered on 127.0.0.1:5080. Jazari tried to start it and it didn't come up in 2 min.", "jazari update", nextIsCommand: true);
@@ -139,7 +139,7 @@ public class CanvasSnapshotTests
     {
         var (_, terminal, ui) = Start(new StaticPanel(Typed("explain the request queue in the gateway"),
             new(null, "Type now: it sends as soon as the model is ready", "starting granite 3b")));
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
         ui.Wordmark("0.3.0");
         ui.Blank();
         ui.TuneProgress(["cpu 6 threads", "flash attention", "iris xe", "pick fastest"], 2, "once, about 2 min left", redraw: false);

@@ -33,7 +33,7 @@ public class PlainGoldenTests
     {
         var output = new StringWriter();
         var ui = new Ui(output, Plain, 80);
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
         ui.Wordmark("0.3.0");
         ui.Blank();
         ui.Row("why", "A long explanation that has to wrap because it is wider than the eighty columns this test gives it to use.");

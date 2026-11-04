@@ -34,7 +34,7 @@ public static class Welcome
     /// <summary>The first rows of an interactive session, printed before the servers are up.</summary>
     public static void Opening(Ui ui, string version, string directory)
     {
-        ui.Header(ShortPath(directory), Branch(directory));
+        ui.Header(ShortPath(directory), Branch(directory), version);
         ui.Wordmark(version);
     }
 

@@ -195,15 +195,28 @@ public class UiTests
     }
 
     [Fact]
-    public void Header_names_the_place_and_the_branch()
+    public void Header_names_the_version_the_place_and_the_branch()
     {
         var (ui, output) = Live(width: 40);
 
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
 
         var rows = Shown(output, 40);
-        Assert.Equal("  jazari — ~/MyOwnLLM             main", rows[0]);
+        Assert.Equal("  jazari 0.3.0 — ~/MyOwnLLM       main", rows[0]);
         Assert.Equal(new string('▔', 38), rows[1]); // a thin line under it, stopping at the right margin
+    }
+
+    [Fact]
+    public void A_long_path_gives_way_before_the_version_or_the_branch()
+    {
+        var (ui, output) = Live(width: 40);
+
+        ui.Header("~/some/very/long/project/folder/that/goes/on", "main", "0.3.0");
+
+        var row = Shown(output, 40)[0];
+        Assert.StartsWith("  jazari 0.3.0 — ~/some", row);
+        Assert.EndsWith("main", row);
+        Assert.True(row.Length <= 38, row);
     }
 
     [Fact]
@@ -211,7 +224,7 @@ public class UiTests
     {
         var (ui, output) = Plain();
 
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
 
         Assert.Equal("", output.ToString());
     }

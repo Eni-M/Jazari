@@ -78,19 +78,20 @@ public sealed class Ui
 
     public void Line(string text, Tone tone = Tone.Primary) => Row(null, text, tone);
 
-    /// <summary>The top of the session: "jazari — ~/MyOwnLLM", the branch at the far right, and a thin line under them.</summary>
-    public void Header(string place, string? branch)
+    /// <summary>The top of the session: "jazari 0.3.0 — ~/MyOwnLLM", the branch at the far right, and a thin line under them.</summary>
+    public void Header(string place, string? branch, string version)
     {
         if (!Live) return;
         var right = ConsoleText.Sanitize(branch ?? "");
         var path = ConsoleText.Sanitize(place);
+        var name = $"  jazari {ConsoleText.Sanitize(version)} ";
         var dash = _theme.Glyph('—').ToString();
         Add(columns =>
         {
             // Like every row, it keeps clear of the right edge: text there would wrap when the window narrows.
             var edge = columns - Layout.Margin(columns);
             var room = edge - 2 - TextWidth.Of(right) - 2;
-            var left = new LineBuilder().Add("  jazari ", Tone.Muted).Add(dash, Tone.Inactive).Add(" " + TextWidth.Fit(path, Math.Max(room - 9, 4)), Tone.Muted);
+            var left = new LineBuilder().Add(name, Tone.Muted).Add(dash, Tone.Inactive).Add(" " + TextWidth.Fit(path, Math.Max(room - TextWidth.Of(name), 4)), Tone.Muted);
             var row = left.PadTo(edge - TextWidth.Of(right)).Add(right, Tone.Muted).Build();
             var rule = new string(_theme.Edges ? '▔' : _theme.Glyph('─'), edge);
             return [row, new Line([new(rule, Tone.Border)])];

@@ -54,10 +54,33 @@ public class ScreenTests
         for (var i = 1; i <= 30; i++) Say(screen, $"row {i}");
 
         Assert.Equal(Enumerable.Range(1, 30).Select(i => $"row {i}"), Conversation(terminal));
-        Assert.Equal("row 30", terminal.Vt.Text(7).Trim()); // the last row sits right above the panel
+        Assert.Equal("row 30", terminal.Vt.Text(6).Trim());
         Assert.Equal(0, terminal.Vt.SoftWraps);
         Assert.False(terminal.Vt.SyncError);
         Assert.Equal(0, terminal.Vt.SyncDepth);
+    }
+
+    [Fact]
+    public void A_blank_row_keeps_a_full_conversation_off_the_panel()
+    {
+        var (screen, terminal, _) = Start();
+
+        for (var i = 1; i <= 30; i++) Say(screen, $"row {i}");
+
+        Assert.Equal("row 30", terminal.Vt.Text(6).Trim());
+        Assert.Equal("", terminal.Vt.Text(7).Trim());
+        Assert.Equal("edge", terminal.Vt.Text(8));
+    }
+
+    [Fact]
+    public void A_window_too_small_for_the_margin_still_shows_the_last_row()
+    {
+        var (screen, terminal, _) = Start(height: 5);
+
+        for (var i = 1; i <= 5; i++) Say(screen, $"row {i}");
+
+        Assert.Equal("row 5", terminal.Vt.Text(0).Trim());
+        Assert.Equal("edge", terminal.Vt.Text(1));
     }
 
     [Fact]
@@ -88,7 +111,7 @@ public class ScreenTests
         screen.RenderNow();
 
         Assert.Equal(scrollback, terminal.Vt.Scrollback);
-        Assert.Equal("row 8", terminal.Vt.Text(7).Trim());
+        Assert.Equal("row 8", terminal.Vt.Text(6).Trim());
     }
 
     [Fact]
@@ -225,7 +248,7 @@ public class ScreenTests
         stream.Complete();
         stream.StampTime("3.2s");
 
-        Assert.Equal("    3.2s", terminal.Vt.Text(3));
+        Assert.Equal("    3.2s", terminal.Vt.Text(2));
         Assert.DoesNotContain(terminal.Vt.Scrollback, r => r.Contains("3.2s"));
     }
 
@@ -277,7 +300,7 @@ public class ScreenTests
         var screen = new Screen(terminal, Color, bottom: true, paced: true) { Panel = new TestPanel() };
         screen.Start();
         var ui = new Ui(screen, Color, () => 109);
-        ui.Header("~/MyOwnLLM", "main");
+        ui.Header("~/MyOwnLLM", "main", "0.3.0");
         for (var i = 0; i < 6; i++) ui.Row("why", string.Join(" ", Enumerable.Repeat($"words{i}", 30)));
         await Task.Delay(150);
 

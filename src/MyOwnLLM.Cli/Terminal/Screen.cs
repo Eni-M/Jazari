@@ -68,6 +68,7 @@ public sealed class Screen : IBlockSink
 
     // Session mode: what each window row shows, and the first conversation row on screen (block and row in it).
     string[] _shown = [];
+    const int PanelMargin = 1;
     int _width, _height, _area;
     int _anchorBlock, _anchorRow;
     (int Row, int Column)? _caret;
@@ -335,7 +336,9 @@ public sealed class Screen : IBlockSink
 
         var panel = Panel?.Render(layout, height) ?? new PanelFrame([], 0, null);
         var panelRows = panel.Rows.Count < height ? panel.Rows : panel.Rows.Skip(panel.Rows.Count - (height - 1)).ToList();
-        var area = height - Math.Min(panel.Base, panelRows.Count);
+        var baseRows = Math.Min(panel.Base, panelRows.Count);
+        // A blank row above the panel, so the end of an answer isn't pressed against the prompt. A tiny window gives it up first.
+        var area = baseRows == 0 ? height : Math.Max(height - baseRows - PanelMargin, 1);
         _area = area;
 
         var doc = Rows(_anchorBlock, _anchorRow, layout);
