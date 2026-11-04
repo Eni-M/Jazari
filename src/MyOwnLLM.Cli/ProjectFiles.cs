@@ -32,11 +32,12 @@ public static partial class ProjectFiles
 
         List<ProjectFile> files = [];
         var skipped = 0;
+        var ignored = IgnorePatterns(target);
         foreach (var path in Walk(target))
         {
             // Relative: the folders above the project (it may sit in a .azure) say nothing about its files.
             var relative = Path.GetRelativePath(target, path).Replace('\\', '/');
-            if (!Wanted(relative) || TryRead(path) is not { } text) { skipped++; continue; }
+            if (!Wanted(relative) || IsIgnored(relative, ignored) || TryRead(path) is not { } text) { skipped++; continue; }
             files.Add(new(relative, text));
         }
         return ([.. files.OrderByDescending(f => Risk(f.Path)).ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)], skipped);
@@ -54,6 +55,27 @@ public static partial class ProjectFiles
             foreach (var file in Walk(sub)) yield return file;
         }
     }
+
+    /// <summary>
+    /// The project's .jazariignore, like Crush's .crushignore: one pattern a line, # for comments. "secrets/" leaves out a
+    /// folder anywhere in the project, "*.generated.cs" a kind of file, "src/legacy/*" a path. * and ? are the wildcards.
+    /// </summary>
+    static string[] IgnorePatterns(string root)
+    {
+        try
+        {
+            var file = Path.Combine(root, ".jazariignore");
+            return File.Exists(file)
+                ? [.. File.ReadAllLines(file).Select(l => l.Trim().Replace('\\', '/')).Where(l => l.Length > 0 && !l.StartsWith('#'))]
+                : [];
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    public static bool IsIgnored(string relative, IReadOnlyList<string> patterns) => patterns.Any(pattern =>
+        pattern.EndsWith('/')
+            ? relative.Split('/').SkipLast(1).Any(folder => System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(pattern.TrimEnd('/'), folder))
+            : System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(pattern, pattern.Contains('/') ? relative : Path.GetFileName(relative)));
 
     static bool Wanted(string path)
     {

@@ -29,6 +29,15 @@ public class PromptBuilderTests
     }
 
     [Fact]
+    public void Conventions_follow_the_system_prompt_so_they_stay_cached()
+    {
+        var messages = PromptBuilder.Build(new PromptParts("NOTE", "CTX", [], "Q", Conventions: "Use records."), 16384, 512);
+
+        Assert.Equal(PromptBuilder.ConventionsIntro + "Use records.", messages[1].Content);
+        Assert.Contains("NOTE", messages[2].Content);
+    }
+
+    [Fact]
     public void Build_omits_missing_parts()
     {
         var messages = PromptBuilder.Build(new PromptParts(null, null, [], "Q"), 16384, 512);

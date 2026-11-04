@@ -72,15 +72,16 @@ public static class FileEdit
         var wanted = search.Trim('\n').Split('\n');
         if (wanted.All(string.IsNullOrWhiteSpace)) return (null, "this text isn't in the file", null);
         var lines = text.Split('\n');
-        if (wanted.Length > lines.Length) return (null, "this text isn't in the file", null);
-        var starts = Enumerable.Range(0, lines.Length - wanted.Length + 1)
-            .Where(i => wanted.Select((w, j) => lines[i + j].Trim() == w.Trim()).All(same => same)).Take(2).ToList();
-        if (starts.Count == 0) return (null, "this text isn't in the file", null);
-        if (starts.Count > 1) return (null, "this text appears more than once", null);
+        // Looser each time, as Aider's applier is (it measured 9x more failed edits without it): the lines as written but
+        // for spacing, then also without the blank lines the model added or left out. Still only a match found once applies.
+        var spans = Matches(lines, wanted, skipBlank: false);
+        if (spans.Count == 0) spans = Matches(lines, [.. wanted.Where(w => !string.IsNullOrWhiteSpace(w))], skipBlank: true);
+        if (spans.Count == 0) return (null, "this text isn't in the file", null);
+        if (spans.Count > 1) return (null, "this text appears more than once", null);
 
-        var at = starts[0];
+        var (at, end) = spans[0];
         var fileIndent = Indent(lines[at]);
-        var modelIndent = Indent(wanted[0]);
+        var modelIndent = Indent(wanted.First(w => !string.IsNullOrWhiteSpace(w)));
         var unit = (fileIndent + modelIndent).Distinct().ToList();
         if (unit.Count > 1) return (null, "the indentation mixes tabs and spaces, so it can't be matched safely", null);
         var pad = unit.Count == 1 ? unit[0] : ' ';
@@ -93,9 +94,32 @@ public static class FileEdit
             return new string(pad, Math.Max(0, own.Length + shift)) + l[own.Length..];
         }
         var replaced = replace.Trim('\n').Length == 0 ? [] : replace.Trim('\n').Split('\n').Select(Shifted).ToArray();
-        var change = new Replacement(string.Join('\n', lines[at..(at + wanted.Length)]), string.Join('\n', replaced));
-        return (string.Join('\n', lines[..at].Concat(replaced).Concat(lines[(at + wanted.Length)..])), null, change);
+        var change = new Replacement(string.Join('\n', lines[at..end]), string.Join('\n', replaced));
+        return (string.Join('\n', lines[..at].Concat(replaced).Concat(lines[end..])), null, change);
     }
+
+    /// <summary>Where <paramref name="wanted"/> appears as whole lines, compared without spacing differences (at most two
+    /// places: two already means it can't apply). Each is a start line and the line after the last one matched.</summary>
+    static List<(int Start, int End)> Matches(string[] lines, string[] wanted, bool skipBlank)
+    {
+        var found = new List<(int, int)>();
+        for (var i = 0; i < lines.Length && found.Count < 2; i++)
+        {
+            if (skipBlank && string.IsNullOrWhiteSpace(lines[i])) continue;
+            var (j, k) = (0, i);
+            while (j < wanted.Length && k < lines.Length)
+            {
+                if (skipBlank && string.IsNullOrWhiteSpace(lines[k])) { k++; continue; }
+                if (Spaced(lines[k]) != Spaced(wanted[j])) break;
+                (j, k) = (j + 1, k + 1);
+            }
+            if (j == wanted.Length) found.Add((i, k));
+        }
+        return found;
+    }
+
+    /// <summary>The line's words with single spaces between them: "x  =\t1 " and "x = 1" compare equal.</summary>
+    static string Spaced(string line) => string.Join(' ', line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>
     /// Syntax errors the edit adds to a .cs file, as "line 12: ; expected"; none for other files, and none the file

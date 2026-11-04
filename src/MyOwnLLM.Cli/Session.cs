@@ -172,7 +172,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var watch = Stopwatch.StartNew();
         try
         {
-            await foreach (var chunk in gateway.ChatAsync(_history, question, project, ct, _context).WithCancellation(ct))
+            await foreach (var chunk in gateway.ChatAsync(_history, question, project, ct, _context, Conventions()).WithCancellation(ct))
             {
                 if (chunk.Progress is { } progress) { thinking.Report(progress); continue; }
                 timings = chunk.Timings ?? timings;
@@ -310,6 +310,32 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
     static string? Argument(string input) => input.Split(' ', 2) is [_, var rest] && rest.Trim().Trim('"') is { Length: > 0 } text ? text : null;
 
+    const int MaxConventionChars = 2000; // about 500 tokens, read with every question
+
+    /// <summary>
+    /// The project's AGENTS.md, the conventions file Codex, OpenCode and Crush read: in the folder Jazari runs in or one
+    /// above it, up to the repository's root. Read on every question, so an edit to it counts at once; only the start is
+    /// sent, since it goes with every question. Null when there is none.
+    /// </summary>
+    string? Conventions()
+    {
+        try
+        {
+            for (var dir = new DirectoryInfo(project); dir is not null; dir = dir.Parent)
+            {
+                var file = Path.Combine(dir.FullName, "AGENTS.md");
+                if (File.Exists(file))
+                {
+                    var text = File.ReadAllText(file).Trim();
+                    return text.Length == 0 ? null : text.Length > MaxConventionChars ? text[..MaxConventionChars] : text;
+                }
+                if (Path.Exists(Path.Combine(dir.FullName, ".git"))) break; // the repository's root: nothing above it is this project's
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return null;
+    }
+
     /// <summary>"\"My File.cs\" make it async" or "File.cs make it async": the path, in quotes when it has spaces, and the rest.</summary>
     public static (string Path, string Request)? PathAndRest(string? text)
     {
@@ -361,7 +387,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         _contextLabel = $"{read} file{(read == 1 ? "" : "s")} from {path}";
         _chip = File.Exists(target) ? Path.GetFileName(target) : $"{Path.GetFileName(target.TrimEnd('/', '\\'))}/ {ui.Theme.Glyph('·')} {read} file{(read == 1 ? "" : "s")}";
         // Reading takes minutes on a CPU: start now, while the question is typed, and the answer comes from the prompt cache.
-        _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None).ContinueWith(t => _ = t.Exception, TaskScheduler.Default); // only a head start: failures don't matter
+        _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None, Conventions()).ContinueWith(t => _ = t.Exception, TaskScheduler.Default); // only a head start: failures don't matter
         var left = files.Count - read;
         var extras = $"{(left > 0 ? $". {left} didn't fit, riskiest went first; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}";
         if (ui.Live) ui.Metadata($"{read} file{(read == 1 ? "" : "s")}, {PromptPanel.Tokens(_context.Length / 4)} tokens{extras}. They go with every question until /clear.", "read");
@@ -438,7 +464,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var files = diff.Split('\n').Count(l => l.StartsWith("diff --git "));
         _contextLabel = $"git diff {since ?? "HEAD"}, {files} file{(files == 1 ? "" : "s")}";
         _chip = $"git diff {ui.Theme.Glyph('·')} {files} file{(files == 1 ? "" : "s")}";
-        _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None).ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
+        _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None, Conventions()).ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
         ui.Metadata($"{(ui.Live ? "The" : "Read the")} changes in {files} file{(files == 1 ? "" : "s")}, about {_context.Length / 4} tokens" +
                     $"{(diff.Length > limit ? $"; only the first {MaxReadTokens} or so fit" : "")}. Ask about them, for example: review these changes.", ui.Live ? "read" : null);
     }
@@ -510,12 +536,29 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
         var asked = FileEdit.Instructions + request;
         var watch = Stopwatch.StartNew();
-        if (await WithThinking(() => gateway.CompleteAsync(asked, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct), ct) is not (true, var reply)) return;
+        // Asks for the edits and applies them in memory. Null when stopped or the gateway failed (already reported).
+        async Task<(string? Text, List<Replacement> Applied, string? Problem)?> ProposeAsync(string question)
+        {
+            if (await WithThinking(() => gateway.CompleteAsync(question, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct, Conventions()), ct) is not (true, var reply)) return null;
+            if (FileEdit.Parse(reply) is not { } edits) return (null, [], "the model's answer couldn't be read");
+            var applied = new List<Replacement>();
+            var (newText, problem) = FileEdit.Apply(original, edits, applied);
+            return (newText, applied, problem);
+        }
 
-        if (FileEdit.Parse(reply) is not { } edits) { ui.Metadata("The model's answer couldn't be read. Nothing changed."); return; }
-        var applied = new List<Replacement>();
-        var (text, problem) = FileEdit.Apply(original, edits, applied);
+        if (await ProposeAsync(asked) is not var (text, applied, problem)) return;
         if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return; }
+        var broken = FileEdit.NewSyntaxErrors(path, original, text);
+        if (broken.Count > 0)
+        {
+            // One more try with the errors, as Aider does after its lint. Only one: a retry added nothing to a 0.5B model and
+            // a few points at 1.5-3B (reports/Lessons from similar local assistants.md), and each costs a whole answer.
+            ui.Metadata($"That change breaks the C# syntax ({broken[0]}). Asking once more, with the errors.");
+            if (await ProposeAsync($"{asked}\n\nYour previous edits broke the C# syntax: {string.Join("; ", broken.Take(3))}. Give the edits again so the file still parses.")
+                is not var (retried, retriedApplied, _)) return;
+            if (retried is not null && FileEdit.NewSyntaxErrors(path, original, retried) is var still && still.Count < broken.Count)
+                (text, applied, broken) = (retried, retriedApplied, still);
+        }
 
         if (ui.Live) ui.Row($"{watch.Elapsed.TotalSeconds:0.0}s", applied.Count == 1
             ? $"One change in {file}{(LineOf(original, applied[0].Search) is var at and > 0 ? $", line {at}" : "")}:"
@@ -528,7 +571,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             foreach (var line in edit.Replace.Split('\n')) ui.DiffLine("+", line.TrimEnd('\r'), ui.Live ? Tone.Added : Tone.Primary, Surface.Added);
             ui.Blank();
         }
-        if (FileEdit.NewSyntaxErrors(path, original, text) is { Count: > 0 } broken)
+        if (broken.Count > 0)
             ui.Error("This change breaks the C# syntax.", string.Join("; ", broken.Take(3)), "Say no, then /edit again with a clearer request.");
         if (!Confirm($"Apply this change to {file}?")) { ui.Metadata("Nothing changed."); return; }
         var written = FileEdit.Encode(text, stored.Encoding);

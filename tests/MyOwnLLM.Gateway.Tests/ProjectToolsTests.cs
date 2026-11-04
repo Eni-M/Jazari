@@ -151,6 +151,58 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public void Jazariignore_leaves_out_folders_kinds_of_file_and_paths()
+    {
+        Add(".jazariignore", "# not for the model\nfixtures/\n*.generated.cs\nsrc/legacy/*\n");
+        Add("src/App.cs", "class App;");
+        Add("src/Api.generated.cs", "generated");
+        Add("src/legacy/Old.cs", "old");
+        Add("tests/fixtures/Planted.cs", "planted");
+
+        var (files, _) = ProjectFiles.Load(_dir);
+
+        Assert.Equal(["src/App.cs"], files.Select(f => f.Path));
+    }
+
+    [Theory]
+    [InlineData("a/fixtures/x.cs", "fixtures/", true)]
+    [InlineData("fixtures.cs", "fixtures/", false)] // a file, not the folder
+    [InlineData("deep/Api.generated.cs", "*.generated.cs", true)]
+    [InlineData("src/legacy/Old.cs", "src/legacy/*", true)]
+    [InlineData("other/src/legacy/Old.cs", "src/legacy/*", false)]
+    public void Ignore_patterns_match_as_documented(string path, string pattern, bool ignored) =>
+        Assert.Equal(ignored, ProjectFiles.IsIgnored(path, [pattern]));
+
+    [Fact]
+    public async Task Agents_md_goes_with_questions_and_edits_but_not_as_read_files()
+    {
+        Add("AGENTS.md", "Use file-scoped namespaces.");
+        Add("a.cs", "int a;");
+        _gateway.Complete = (_, _) => Task.FromResult(OneEdit);
+        var session = Session();
+
+        await session.HandleAsync("how should I name things?", CancellationToken.None);
+        Assert.Equal("Use file-scoped namespaces.", _gateway.LastConventions);
+        Assert.Null(_gateway.LastContext); // so the gateway still searches the law book
+
+        _gateway.Complete = (_, _) => Task.FromResult("""{"edits":[{"search":"int a;","replace":"int b;"}]}""");
+        await session.HandleAsync("/edit a.cs rename it", CancellationToken.None);
+        Assert.Equal("Use file-scoped namespaces.", _gateway.LastConventions);
+    }
+
+    [Fact]
+    public async Task A_huge_agents_md_is_cut_and_none_means_none()
+    {
+        var session = Session();
+        await session.HandleAsync("q", CancellationToken.None);
+        Assert.Null(_gateway.LastConventions);
+
+        Add("AGENTS.md", new string('x', 10_000));
+        await session.HandleAsync("q", CancellationToken.None);
+        Assert.Equal(2000, _gateway.LastConventions!.Length);
+    }
+
+    [Fact]
     public async Task A_review_of_a_path_that_isnt_there_says_so()
     {
         Assert.Null(await Review().RunAsync(Path.Combine(_dir, "missing"), default));
@@ -179,7 +231,7 @@ public class ProjectToolsTests : IDisposable
         _gateway.Complete = (_, context) => Task.FromResult(context.Contains("b.cs") ? "{\"findings\":["
             : """{"findings":[{"file":"a.cs","quote":"var sql = 1;","problem":"bad","severity":"high"},{"file":"a.cs","quote":"var sql = 1;","problem":"bad","severity":"high"}]}""");
 
-        var text = File.ReadAllText((await Review(unitTokens: 1).RunAsync(_dir, CancellationToken.None))!);
+        var text = File.ReadAllText((await Review(unitTokens: 3).RunAsync(_dir, CancellationToken.None))!);
 
         Assert.Contains("## Not reviewed this run (1)", text);
         Assert.Contains("- b.cs", text);
@@ -387,6 +439,61 @@ public class ProjectToolsTests : IDisposable
 
         Assert.Contains("breaks the C# syntax", shownWhenAsked);
         Assert.Contains("; expected", shownWhenAsked);
+    }
+
+    [Fact]
+    public async Task A_change_that_breaks_the_syntax_is_asked_for_once_more_with_the_errors()
+    {
+        var path = Add("a.cs", "class A { int a; }");
+        var asked = new List<string>();
+        _gateway.Complete = (question, _) =>
+        {
+            asked.Add(question);
+            return Task.FromResult(asked.Count == 1 ? """{"edits":[{"search":"int a;","replace":"int b"}]}""" : """{"edits":[{"search":"int a;","replace":"int b;"}]}""");
+        };
+
+        await Session().HandleAsync("/edit a.cs rename it", CancellationToken.None);
+
+        Assert.Equal(2, asked.Count);
+        Assert.Contains("; expected", asked[1]); // the retry carries the errors
+        Assert.Equal("class A { int b; }", File.ReadAllText(path));
+        Assert.DoesNotContain("breaks the C# syntax.", _output.ToString()); // fixed, so no warning at the question
+    }
+
+    [Fact]
+    public async Task Only_one_retry_and_a_still_broken_change_is_flagged_before_asking()
+    {
+        Add("a.cs", "class A { int a; }");
+        _gateway.Complete = (_, _) => Task.FromResult("""{"edits":[{"search":"int a;","replace":"int b"}]}""");
+
+        await Session(_ => false).HandleAsync("/edit a.cs rename it", CancellationToken.None);
+
+        Assert.Equal(2, _gateway.Completions);
+        Assert.Contains("This change breaks the C# syntax.", _output.ToString());
+    }
+
+    [Theory]
+    [InlineData("    int  limit =\t16;", "    int limit = 32;")]                 // spacing inside the line
+    [InlineData("    int limit = 16;\n\n    int other = 1;", "    int limit = 32;\n    int other = 1;")] // a blank line the file doesn't have
+    [InlineData("    int limit = 16;\n    int other = 1;", "    int limit = 32;\n    int other = 1;")]   // the file's blank line left out
+    public void Small_differences_in_spacing_and_blank_lines_still_apply(string search, string replace)
+    {
+        const string file = "class C\n{\n    int limit = 16;\n\n    int other = 1;\n}\n";
+
+        var (text, why) = FileEdit.Apply(file, [new(search, replace)]);
+
+        Assert.Null(why);
+        Assert.Contains("int limit = 32;", text);
+        Assert.Equal(1, text!.Split("int other = 1;").Length - 1); // replaced, not duplicated
+    }
+
+    [Fact]
+    public void A_loose_match_found_twice_still_changes_nothing()
+    {
+        var (text, why) = FileEdit.Apply("a  =  1;\nx\na = 1;\n", [new("a =\t1;\n", "a = 2;")]); // exactly in neither, loosely in both
+
+        Assert.Null(text);
+        Assert.Contains("more than once", why);
     }
 
     [Theory]

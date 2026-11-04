@@ -18,19 +18,22 @@ sealed class FakeGateway : IGatewayClient
 
     public Task<GatewayInfo> InfoAsync(CancellationToken ct) => Info(ct);
 
-    public IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null)
+    public IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null)
     {
         Asked.Add((history.ToList(), question));
         LastContext = context;
+        LastConventions = conventions;
         return Chat(history, question, ct);
     }
 
     public string? LastContext { get; private set; }
+    public string? LastConventions { get; private set; }
     public Func<string, string, Task<string>> Complete { get; set; } = (_, _) => Task.FromResult("""{"findings":[]}""");
     public int Completions { get; private set; }
-    public Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct)
+    public Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null)
     {
         Completions++;
+        LastConventions = conventions;
         return Complete(question, context);
     }
 
@@ -38,7 +41,7 @@ sealed class FakeGateway : IGatewayClient
     public Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct) => Task.FromResult(true);
 
     public List<string?> Warmed { get; } = [];
-    public Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct)
+    public Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct, string? conventions = null)
     {
         Warmed.Add(context);
         return Task.CompletedTask;

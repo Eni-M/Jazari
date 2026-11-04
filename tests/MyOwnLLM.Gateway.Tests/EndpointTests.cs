@@ -495,6 +495,17 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task Conventions_reach_the_prompt_and_the_law_book_still_answers()
+    {
+        WriteLawBook();
+        await _client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[] { new { role = "user", content = CoveredQuestion } }, conventions = "Use records." });
+
+        var sent = Assert.Single(_llama.Calls).Messages;
+        Assert.Equal(MyOwnLLM.Gateway.Prompt.PromptBuilder.ConventionsIntro + "Use records.", sent[1].Content);
+        Assert.StartsWith(MyOwnLLM.Gateway.Prompt.PromptBuilder.DocsStart, sent[^1].Content);
+    }
+
+    [Fact]
     public async Task Without_a_law_book_the_question_goes_plain()
     {
         await _client.PostAsJsonAsync("/v1/chat/completions", ChatBody(CoveredQuestion));

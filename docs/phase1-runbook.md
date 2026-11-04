@@ -28,13 +28,17 @@ jazari doctor                # checks the install, servers, key and logs, and sa
 jazari --plain               # plain lines, no colors or symbols, for screen readers (or set JAZARI_PLAIN=1)
 ```
 
-In the session: `/help`, `/status`, `/model`, `/docs <question>` (the .NET docs passage, without the model), `/save [file]` (the conversation as Markdown, never overwriting a file), `/clear`, `/retry`, `/details`, `/exit`. A mistyped command gets a "did you mean". Paths with spaces go in quotes: `/edit "My File.cs" make it async`. `/edit` on a `.cs` file warns before asking if the change would break the C# syntax. Enter sends; Shift+Enter, Alt+Enter or Ctrl+J add a new line; ↑/↓ browse history; Tab completes `/` commands; Ctrl+C stops an answer (twice at the prompt exits).
+In the session: `/help`, `/status`, `/model`, `/docs <question>` (the .NET docs passage, without the model), `/save [file]` (the conversation as Markdown, never overwriting a file), `/clear`, `/retry`, `/details`, `/exit`. A mistyped command gets a "did you mean". Paths with spaces go in quotes: `/edit "My File.cs" make it async`. `/edit` on a `.cs` file asks the model once more, with the errors, when its change breaks the C# syntax, and warns before asking you if it still does. Edits whose spacing or blank lines differ a little from the file still apply, as long as they match one place only.
+
+**Per project.** An `AGENTS.md` in the project (or a folder above it, up to the repository root) goes with every question and edit, its first 2,000 characters. A `.jazariignore` leaves files out of `/read` and `/review`: one pattern a line, `fixtures/` for a folder anywhere, `*.generated.cs` for a kind of file, `src/legacy/*` for a path. `/review`'s report lists the parts it couldn't review, and accepts quotes the model wrapped in backticks or numbered. Enter sends; Shift+Enter, Alt+Enter or Ctrl+J add a new line; ↑/↓ browse history; Tab completes `/` commands; Ctrl+C stops an answer (twice at the prompt exits).
 
 Answers stream by default. `jazari ask "…" --no-stream` prints the answer when it's complete. Piped output (`jazari ask "…" > out.txt`) and `NO_COLOR=1` give plain text with no color codes.
 
 **In your IDE.** The gateway speaks the OpenAI chat API, so VS Code (BYOK custom endpoint), Continue, Rider and Visual Studio can use Jazari for chat: base URL `http://127.0.0.1:5080/v1`, API key your `JAZARI_KEY`, model `jazari`. Chat and edits work; agent modes need tool calling, which Jazari doesn't offer. Requests from web pages are refused (403), so a site can't reach it through your browser.
 
-Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with project notes and the feedback log) and `%APPDATA%\Jazari\history`. Nothing leaves the laptop.
+Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with project notes and the feedback log, and `llama-server.key`) and `%APPDATA%\Jazari\history`. Nothing leaves the laptop.
+
+**The model server.** llama-server answers only the gateway: jazari starts it with the key in `llama-server.key`, which the gateway sends, and it refuses other web pages. After 15 minutes without a question it unloads the model and gives back its memory (about 8.7 GB); the next question loads it again, which takes a few seconds. `jazari stop` ends both servers at once.
 
 ## Terminal setup (recommended)
 

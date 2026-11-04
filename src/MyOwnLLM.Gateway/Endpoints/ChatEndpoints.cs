@@ -13,7 +13,8 @@ namespace MyOwnLLM.Gateway.Endpoints;
 
 /// <param name="Context">Code the client read for this question; goes before the conversation so it stays in the prompt cache.</param>
 /// <param name="JsonSchema">Forces the answer into this JSON shape.</param>
-public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream, string? Context = null, string? JsonSchema = null);
+/// <param name="Conventions">The project's AGENTS.md. Apart from Context, so a project that has one still gets the law book.</param>
+public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream, string? Context = null, string? JsonSchema = null, string? Conventions = null);
 public sealed record InfillRequest(string Prefix, string Suffix, int? MaxTokens);
 public sealed record StatusRequest(string ProjectPath);
 public sealed record FeedbackRequest(string Id, bool Accepted);
@@ -76,7 +77,7 @@ public static class ChatEndpoints
         // user's own code are untested, and earlier work showed a small model describes the wrong thing when given extra
         // material. Add them when a test set covers them.
         var passages = request.Context is null && request.JsonSchema is null ? s.LawBook.Search(question) : [];
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question, passages), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages, out var usedPassages);
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question, passages, request.Conventions), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages, out var usedPassages);
         var watch = Stopwatch.StartNew();
 
         string answer;
@@ -154,7 +155,7 @@ public static class ChatEndpoints
         if (request.Messages is null || request.Messages.Any(m => m?.Content is null)) throw new BadRequestException("messages is required, each with its content");
         var project = ProjectPath(http);
         var note = await ConversationNoteFor(s, project, request.Messages.Count == 0);
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, ""), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
+        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, "", Conventions: request.Conventions), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
         await s.Queue.EnqueueAsync(WorkKind.Chat, t => s.Llama.ChatAsync(prompt, 1, t), http.RequestAborted);
         http.Response.StatusCode = StatusCodes.Status204NoContent;
     });
