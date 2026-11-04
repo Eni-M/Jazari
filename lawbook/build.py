@@ -353,9 +353,10 @@ def fetch(source, work):
     """A sparse checkout of the source's folders at its pinned commit, reused when already there."""
     path = os.path.join(work, source["repo"].replace("/", "_"))
     folders = source["folders"] + source.get("snippet_folders", [])
-    git = lambda *a: subprocess.run(["git", "-C", path, *a], check=True, capture_output=True, text=True).stdout.strip()
+    # Long paths on: dotnet/docs has file names of 150 characters, past Windows' 260 once inside a work folder.
+    git = lambda *a: subprocess.run(["git", "-c", "core.longpaths=true", "-C", path, *a], check=True, capture_output=True, text=True).stdout.strip()
     if not os.path.isdir(os.path.join(path, ".git")):
-        subprocess.run(["git", "clone", "-q", "--filter=blob:none", "--sparse", "--no-checkout",
+        subprocess.run(["git", "-c", "core.longpaths=true", "clone", "-q", "--filter=blob:none", "--sparse", "--no-checkout",
                         f"https://github.com/{source['repo']}", path], check=True)
     git("sparse-checkout", "set", *folders)
     if git("rev-parse", "HEAD") != source["commit"] or git("status", "--porcelain"):
