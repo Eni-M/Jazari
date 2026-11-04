@@ -73,6 +73,15 @@ def run(args, cwd=None, timeout=COMMAND_TIMEOUT_S):
         return -1, ""
 
 
+def test_command(project, project_text, test_filter):
+    """.NET 10's dotnet test refuses an xunit.v3 project that opts into Microsoft.Testing.Platform, so such a project's
+    test app runs itself, with xunit's own VSTest-filter option."""
+    # ponytail: an xunit.v3 project with UseMicrosoftTestingPlatformRunner speaks MTP and would need --filter-class instead
+    if re.search(r'Include="xunit\.v3"', project_text):
+        return ["dotnet", "run", "--project", project, "--no-build", "--", "-filterVSTest", test_filter]
+    return ["dotnet", "test", project, "--no-build", "--nologo", "--filter", test_filter]
+
+
 def git(folder, *args):
     return run(["git", "-C", folder, "-c", "core.fsmonitor=false", *args])
 
@@ -97,7 +106,8 @@ class Worktree:
         return run(["dotnet", "build", project, "--no-restore", "--disable-build-servers", "-v", "q", "-nologo"], cwd=self.path)[0] == 0
 
     def test(self, project, test_filter):
-        return run(["dotnet", "test", project, "--no-build", "--nologo", "--filter", test_filter], cwd=self.path)[0] == 0
+        with open(os.path.join(self.path, project), encoding="utf-8", errors="replace") as f:
+            return run(test_command(project, f.read(), test_filter), cwd=self.path)[0] == 0
 
     def reset(self, file):
         git(self.path, "checkout", "--", file)

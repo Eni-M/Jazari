@@ -1,6 +1,6 @@
 import os, shutil, subprocess, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from repo_bench import candidates_to_tasks, closeness, first_code_block, passed, task_is_valid
+from repo_bench import candidates_to_tasks, closeness, first_code_block, passed, task_is_valid, test_command
 from compare import pooled_report
 from score import held_out
 
@@ -45,6 +45,11 @@ class SelectionTests(unittest.TestCase):
     def test_without_tests_every_sized_candidate_is_build_only(self):
         found = [{"file": "S.cs", "method": "Refund", "class": "S", "lines": 12}]
         self.assertIsNone(candidates_to_tasks("repo", "C:/r", "abc", found, None, limit=10)[0]["test_filter"])
+
+    def test_an_xunit_v3_project_runs_its_own_test_app_and_others_use_dotnet_test(self):
+        v3 = test_command("T.csproj", '<PackageReference Include="xunit.v3" Version="4.0.0" />', "FullyQualifiedName~STests")
+        self.assertEqual(v3[:3] + v3[-3:], ["dotnet", "run", "--project", "--", "-filterVSTest", "FullyQualifiedName~STests"])
+        self.assertEqual(test_command("T.csproj", '<PackageReference Include="xunit" Version="2.9.0" />', "F")[:2], ["dotnet", "test"])
 
 
 class PoolingTests(unittest.TestCase):
