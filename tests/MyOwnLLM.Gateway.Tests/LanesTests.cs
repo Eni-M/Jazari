@@ -141,6 +141,41 @@ public class LanesTests
     }
 
     [Fact]
+    public async Task The_swap_back_to_fast_reports_its_stage_too()
+    {
+        await _lanes.EnsureAsync(Lane.Deep, null, CancellationToken.None);
+        var stages = new List<string>();
+        await _lanes.EnsureAsync(Lane.Fast, s => { stages.Add(s); return Task.CompletedTask; }, CancellationToken.None);
+        Assert.Equal(["loading fast model"], stages);
+    }
+
+    [Fact]
+    public async Task A_load_already_under_way_is_not_asked_for_twice()
+    {
+        _router.States = new() { ["fast"] = ModelState.Loading, ["deep"] = ModelState.Unloaded };
+        _ = Task.Run(async () => { await Task.Delay(30); lock (_router.States) _router.States["fast"] = ModelState.Loaded; });
+
+        Assert.Equal("fast", await _lanes.EnsureAsync(Lane.Fast, null, CancellationToken.None));
+        Assert.Empty(_router.Loads);
+    }
+
+    [Fact]
+    public async Task A_stuck_model_server_makes_deep_unavailable_rather_than_hanging()
+    {
+        var stuck = new Lanes(() => new StuckLlama(), _queue, _time);
+        Assert.False(await stuck.DeepAvailableAsync(CancellationToken.None));
+    }
+
+    sealed class StuckLlama : ILlamaClient
+    {
+        public async Task<IReadOnlyDictionary<string, ModelState>?> ModelStatesAsync(CancellationToken ct) { await Task.Delay(Timeout.Infinite, ct); return null; }
+        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null, string? model = null) => throw new NotSupportedException();
+        public IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? model = null) => throw new NotSupportedException();
+        public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct, string? model = null) => throw new NotSupportedException();
+        public Task<int?> ContextTokensAsync(CancellationToken ct) => throw new NotSupportedException();
+    }
+
+    [Fact]
     public async Task Background_work_during_the_hold_uses_the_loaded_model_without_a_swap()
     {
         await _lanes.EnsureAsync(Lane.Deep, null, CancellationToken.None);

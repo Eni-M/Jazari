@@ -19,17 +19,17 @@ public static class DeepAnswer
     const string PlanNotes = "\n\nYour own notes for this answer. Use them, and don't repeat or mention them:\n";
 
     public static async Task<DeepResult> RunAsync(ILlamaClient llama, SnippetChecker checker, string? model, PromptParts parts, int contextTokens,
-        Func<string, int?, Task> stage, CancellationToken ct)
+        Func<string, int?, Task> stage, CancellationToken ct, Func<PromptProgress, Task>? reading = null)
     {
         var prompt = PromptBuilder.Build(parts with { KeepHistory = HistoryMessages }, contextTokens, AnswerTokens + PlanTokens, out var dropped, out var usedPassages);
         var question = prompt[^1];
         var start = prompt.SkipLast(1).ToList();
 
         await stage("reading", null);
-        var (plan, _, _) = await GenerateAsync(llama, [.. start, question with { Content = question.Content + PlanRequest }], PlanTokens, model, stage, 0, ct);
+        var (plan, _, _) = await GenerateAsync(llama, [.. start, question with { Content = question.Content + PlanRequest }], PlanTokens, model, stage, reading, 0, ct);
         var written = Estimate(plan);
         var withPlan = string.IsNullOrWhiteSpace(plan) ? question : question with { Content = question.Content + PlanNotes + plan.Trim() };
-        var (answer, cutOff, stats) = await GenerateAsync(llama, [.. start, withPlan], AnswerTokens, model, stage, written, ct);
+        var (answer, cutOff, stats) = await GenerateAsync(llama, [.. start, withPlan], AnswerTokens, model, stage, reading, written, ct);
 
         await stage("checking the code", null);
         checker.Load();
@@ -54,7 +54,7 @@ public static class DeepAnswer
         $"This C# code doesn't compile:\n```csharp\n{code}\n```\nThe compiler says:\n{string.Join('\n', errors)}\nGive the corrected code, using only APIs that exist, in one code block and nothing else.";
 
     static async Task<(string Text, bool CutOff, AnswerStats? Stats)> GenerateAsync(ILlamaClient llama, IReadOnlyList<ChatMessage> messages, int maxTokens, string? model,
-        Func<string, int?, Task> stage, int writtenBefore, CancellationToken ct)
+        Func<string, int?, Task> stage, Func<PromptProgress, Task>? reading, int writtenBefore, CancellationToken ct)
     {
         var text = new StringBuilder();
         var (cutOff, stats, parts) = (false, (AnswerStats?)null, 0);
@@ -62,6 +62,7 @@ public static class DeepAnswer
         {
             cutOff |= part.CutOff;
             stats = part.Stats ?? stats;
+            if (part.Progress is { } progress && reading is not null) await reading(progress);
             if (part.Text is not { } piece) continue;
             text.Append(piece);
             // A stream part is about a token. Not on every one: nobody reads a count that fast.

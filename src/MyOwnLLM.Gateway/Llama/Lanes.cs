@@ -38,7 +38,14 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
     Task? _loading;
     ITimer? _hold;
 
-    public async Task<bool> DeepAvailableAsync(CancellationToken ct) => await llama().ModelStatesAsync(ct) is { } states && states.ContainsKey(DeepModel);
+    /// <summary>A quick look only: /v1/info says this, and a stuck model server mustn't make the gateway look down too.</summary>
+    public async Task<bool> DeepAvailableAsync(CancellationToken ct)
+    {
+        using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        quick.CancelAfter(TimeSpan.FromSeconds(2));
+        try { return await llama().ModelStatesAsync(quick.Token) is { } states && states.ContainsKey(DeepModel); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return false; }
+    }
 
     public async Task<string?> EnsureAsync(Lane? lane, Func<string, Task>? stage, CancellationToken ct)
     {
@@ -64,7 +71,7 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
         };
         if (states[name] is ModelState.Loaded) return name;
 
-        if (lane is Lane.Deep && stage is not null) await stage("loading smart model");
+        if (stage is not null) await stage(name == DeepModel ? "loading smart model" : "loading fast model");
         var load = Task.Run(() => LoadAsync(name), CancellationToken.None);
         lock (_gate) _loading = load;
         _ = load.ContinueWith(_ => { lock (_gate) if (_loading == load) _loading = null; }, TaskScheduler.Default);
@@ -86,7 +93,9 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
     async Task WaitForLoadAsync(string name)
     {
         var client = llama();
-        await client.LoadModelAsync(name, CancellationToken.None);
+        // A window starting up may have asked already, and the router refuses to load what it's loading.
+        if ((await client.ModelStatesAsync(CancellationToken.None))?.GetValueOrDefault(name) is not ModelState.Loading)
+            await client.LoadModelAsync(name, CancellationToken.None);
         var started = _time.GetUtcNow();
         var seen = false;
         while (true)

@@ -25,6 +25,7 @@ sealed class ScriptedLlama(params string[] replies) : ILlamaClient
     {
         Calls.Add((messages, maxTokens, model));
         if (BeforeReply is not null) await BeforeReply(ct);
+        yield return new(null, Progress: new(100, 0, 50));
         yield return new(Next());
     }
 
@@ -117,6 +118,15 @@ public class DeepAnswerTests
     public async Task Package_code_says_what_it_needs() =>
         Assert.Equal("not checked: needs Microsoft.EntityFrameworkCore",
             (await Run(new ScriptedLlama("plan", "```csharp\nusing Microsoft.EntityFrameworkCore;\nclass Db : DbContext { }\n```"))).CheckRow);
+
+    [Fact]
+    public async Task Reading_progress_comes_through_so_a_long_read_shows_how_far_it_is()
+    {
+        var seen = new List<PromptProgress>();
+        await DeepAnswer.RunAsync(new ScriptedLlama("plan", Good), Checker, "deep", new PromptParts(null, null, [], "q"), 16384, (_, _) => Task.CompletedTask, CancellationToken.None,
+            p => { seen.Add(p); return Task.CompletedTask; });
+        Assert.Equal(50, seen[0].Processed);
+    }
 
     [Fact]
     public async Task An_empty_plan_or_a_cut_off_plan_still_answers()

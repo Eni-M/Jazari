@@ -69,6 +69,29 @@ public class ServerLauncherTests
     public void Router_states_are_read(string json, bool loaded, bool loading, bool failed) =>
         Assert.Equal(new RouterHealth.RouterState(loaded, loading, failed), RouterHealth.Read(json));
 
+    sealed class StubRouter(string models) : HttpMessageHandler
+    {
+        public List<string> Asked { get; } = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Asked.Add(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(models) });
+        }
+    }
+
+    [Theory]
+    [InlineData(true, new[] { "/models", "/models/load" })]
+    [InlineData(false, new[] { "/models" })]
+    public async Task Only_the_start_asks_for_a_load_and_the_doctor_only_looks(bool asks, string[] expected)
+    {
+        var stub = new StubRouter("""{"data":[{"id":"fast","status":{"value":"unloaded"}}]}""");
+        var health = new RouterHealth(new HttpClient(stub) { BaseAddress = new Uri("http://127.0.0.1:8080") }, () => "k") { AsksForLoad = asks };
+
+        Assert.False(await health.ReadyAsync(CancellationToken.None));
+
+        Assert.Equal(expected, stub.Asked);
+    }
+
     [Fact]
     public void A_plain_server_has_no_router_state() => Assert.Null(RouterHealth.Read("""{"data":[{"id":"m.gguf"}]}"""));
 

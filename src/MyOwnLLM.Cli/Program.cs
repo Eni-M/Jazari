@@ -69,7 +69,7 @@ if (cli.Command == "doctor")
     using var doctorHttp = new HttpClient { BaseAddress = settings.GatewayUrl, Timeout = TimeSpan.FromSeconds(5) };
     if (settings.Key is not null) doctorHttp.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.Key);
     var lawBook = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "law-book.db");
-    var checks = await new Doctor(config, settings.Key, new GatewayClient(doctorHttp), LlamaReady, File.Exists, ServerLauncher.DefaultLogDir, lawBook,
+    var checks = await new Doctor(config, settings.Key, new GatewayClient(doctorHttp), new RouterHealth(health, LlamaKey) { AsksForLoad = false }.ReadyAsync, File.Exists, ServerLauncher.DefaultLogDir, lawBook,
         DeviceTuner.IsMeasured(Tuning.DefaultPath, config?.Model), ct => UpdateCheck.IsUpdateAvailableAsync(runner, config, TimeSpan.FromSeconds(5), ct))
         .RunAsync(CancellationToken.None);
     var doctorUi = new Ui(Console.Out, theme, Columns);

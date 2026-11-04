@@ -181,6 +181,8 @@ public sealed class RouterHealth(HttpClient http, Func<string?> key)
 {
     /// <summary>The router gave up on the fast model: its settings don't work on this PC.</summary>
     public bool FastFailed { get; private set; }
+    /// <summary>Off for jazari doctor, which only looks.</summary>
+    public bool AsksForLoad { get; init; } = true;
     bool _asked;
     int _unloadedAfterAsking;
     const int UnloadedChecksBeforeFailing = 10; // the state can take a moment to change after asking
@@ -202,7 +204,7 @@ public sealed class RouterHealth(HttpClient http, Func<string?> key)
             if (read.AnyLoaded) return true;
             if (read.AnyLoading) return false;
             if (read.FastFailed || (_asked && ++_unloadedAfterAsking > UnloadedChecksBeforeFailing)) { FastFailed = true; return false; }
-            if (!_asked)
+            if (!_asked && AsksForLoad)
             {
                 _asked = true;
                 using var load = await http.SendAsync(WithKey(new(HttpMethod.Post, "/models/load") { Content = System.Net.Http.Json.JsonContent.Create(new { model = "fast" }) }), ct);

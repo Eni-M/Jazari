@@ -98,7 +98,7 @@ public static class ChatEndpoints
                 answer = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
                 {
                     var text = new StringBuilder();
-                    var model = await s.Lanes.EnsureAsync(Lane.Fast, null, ct);
+                    var model = await s.Lanes.EnsureAsync(Lane.Fast, stage => WriteEventAsync(http, new { stage, tokens = (int?)null }, ct), ct);
                     await foreach (var part in s.Llama.ChatStreamAsync(prompt, maxTokens, ct, model))
                     {
                         stats = part.Stats ?? stats;
@@ -178,7 +178,8 @@ public static class ChatEndpoints
             result = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
             {
                 var model = await s.Lanes.EnsureAsync(Lane.Deep, stage => Stage(stage, null), ct);
-                try { return await DeepAnswer.RunAsync(s.Llama, checker, model, parts, await s.Limits.ContextTokensAsync(ct), Stage, ct); }
+                Task Reading(PromptProgress p) => streaming ? WriteEventAsync(http, new { progress = new { total = p.Total, cached = p.Cached, processed = p.Processed } }, ct) : Task.CompletedTask;
+                try { return await DeepAnswer.RunAsync(s.Llama, checker, model, parts, await s.Limits.ContextTokensAsync(ct), Stage, ct, Reading); }
                 finally { s.Lanes.HoldDeep(); }
             }, http.RequestAborted);
         }
@@ -281,6 +282,7 @@ public static class ChatEndpoints
     /// already on screen, so a check that fails or runs long only means no note under it.</summary>
     static async Task<object?> ChecksFor(HttpContext http, string answer)
     {
+        if (!answer.Contains("```", StringComparison.Ordinal)) return null; // no code: don't load the reference packs for it
         try
         {
             var checker = http.RequestServices.GetRequiredService<SnippetChecker>();
