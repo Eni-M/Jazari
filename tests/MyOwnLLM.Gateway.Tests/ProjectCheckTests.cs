@@ -70,13 +70,53 @@ public class ProjectCheckTests(SmallProject small) : IClassFixture<SmallProject>
     public void Trust_is_remembered_for_that_project_only_and_a_damaged_file_trusts_nothing()
     {
         var file = Path.Combine(small.Dir, "trust.json");
+        var project = Path.Combine(small.Dir, "Small.csproj");
         var trust = new ProjectTrust(file);
-        Assert.False(trust.IsTrusted(small.Dir));
-        trust.Trust(small.Dir);
-        Assert.True(new ProjectTrust(file).IsTrusted(small.Dir + Path.DirectorySeparatorChar));
-        Assert.False(trust.IsTrusted(Path.GetTempPath()));
+        Assert.False(trust.IsTrusted(project, small.Dir));
+        trust.Trust(project, small.Dir);
+        Assert.True(new ProjectTrust(file).IsTrusted(project, small.Dir));
+        Assert.False(trust.IsTrusted(Path.Combine(small.Dir, "Other.csproj"), small.Dir));
         File.WriteAllText(file, "not json");
-        Assert.False(trust.IsTrusted(small.Dir));
+        Assert.False(trust.IsTrusted(project, small.Dir));
+    }
+}
+
+public class ProjectTrustChangeTests : IDisposable
+{
+    readonly string _root = Directory.CreateTempSubdirectory("jazari-trust").FullName;
+    readonly string _project;
+    readonly ProjectTrust _trust;
+
+    public ProjectTrustChangeTests()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(_root, "src")).FullName;
+        _project = Path.Combine(folder, "P.csproj");
+        File.WriteAllText(_project, "<Project />");
+        File.WriteAllText(Path.Combine(_root, "Directory.Build.props"), "<Project />");
+        _trust = new ProjectTrust(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+        _trust.Trust(_project, _root);
+    }
+
+    public void Dispose() => Directory.Delete(_root, recursive: true);
+
+    [Theory]
+    [InlineData("src/P.csproj")]
+    [InlineData("Directory.Build.props")]
+    [InlineData("src/Directory.Build.targets")]
+    [InlineData("src/custom.targets")]
+    [InlineData("global.json")]
+    public void Changing_or_adding_a_build_file_asks_again(string file)
+    {
+        Assert.True(_trust.IsTrusted(_project, _root));
+        File.WriteAllText(Path.Combine(_root, file), "<Project><Target Name=\"Evil\" /></Project>");
+        Assert.False(_trust.IsTrusted(_project, _root));
+    }
+
+    [Fact]
+    public void Changing_source_code_does_not_ask_again()
+    {
+        File.WriteAllText(Path.Combine(_root, "src", "A.cs"), "class A { }");
+        Assert.True(_trust.IsTrusted(_project, _root));
     }
 }
 
@@ -163,7 +203,7 @@ public class DeepEditTests : IDisposable
     public async Task The_file_is_written_only_after_yes_as_today()
     {
         _gateway.Complete = (_, _) => Task.FromResult(Edit);
-        new ProjectTrust(Path.Combine(_dir, "trust.json")).Trust(_dir);
+        new ProjectTrust(Path.Combine(_dir, "trust.json")).Trust(Path.Combine(_dir, "P.csproj"), _dir);
         var answers = new Queue<bool>([false]);
         var session = new Session(_gateway, new Ui(_output, new Theme(ColorMode.None, true), 200), () => new MarkdownStream(_output, new Theme(ColorMode.None, true), 200), _dir)
         {

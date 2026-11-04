@@ -637,13 +637,13 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     /// <summary>Where the projects the user trusted are remembered.</summary>
     public string TrustFile { get; init; } = ProjectTrust.DefaultPath;
 
-    /// <summary>Whether this project's build scripts may run: asked once per project, and no means the same question next time.</summary>
-    bool MayLoadProject()
+    /// <summary>Whether this project's build scripts may run: asked once for them as they are now, and no means the same question next time.</summary>
+    bool MayLoadProject(string projectFile)
     {
         var trust = new ProjectTrust(TrustFile);
-        if (trust.IsTrusted(project)) return true;
+        if (trust.IsTrusted(projectFile, project)) return true;
         if (!Confirm("Checking this edit loads the project, which runs its build scripts. Only say yes for code you trust. Load it?")) return false;
-        trust.Trust(project);
+        trust.Trust(projectFile, project);
         return true;
     }
 
@@ -686,7 +686,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
         // Only /deep, and only if the syntax check above didn't already use the one retry.
         IReadOnlyList<string>? projectErrors = null;
-        if (deep && broken.Count == 0 && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && ProjectCheck.FindProject(path, project) is not null && MayLoadProject())
+        if (deep && broken.Count == 0 && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && ProjectCheck.FindProject(path, project) is { } projectFile && MayLoadProject(projectFile))
         {
             ui.Metadata("Checking the project. Loading it can take a minute.");
             projectErrors = await ProjectErrors(path, project, original, text, ct);

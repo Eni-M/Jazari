@@ -28,7 +28,7 @@ Inside a session:
 | `/docs <question>` | Shows the .NET docs passage for a question, with its page, without asking the model. |
 | `/save [file]` | Saves the conversation as Markdown in the project. |
 | `/deep [question]` | Asks with a smarter, slower model, when it's worth the wait: up to about 3 minutes, with each stage shown. It writes a short plan first, compiles any C# it wrote against the .NET reference packs (the code never runs), and repairs a block that doesn't compile once. The answer ends with a `check` row: `checked: code compiles`, `checked: 1 error fixed`, `not checked: no code` or `could not fix: <error>`. Alone, it asks the last question again, with the first answer still above to compare. The next plain question goes back to the fast model. |
-| `/deep /edit <file> <what>` | `/edit` with the smarter model. A `.cs` change is also checked against the whole project, and only errors it adds count. Loading a project runs its build scripts, so Jazari asks once per project first; no means the syntax check alone. |
+| `/deep /edit <file> <what>` | `/edit` with the smarter model. A `.cs` change is also checked against the whole project, and only errors it adds count. Loading a project runs its build scripts, so Jazari asks first, and again whenever the project's build files change; no means the syntax check alone. |
 
 Reviews come from a small local model, so check each finding. It reads about 30 tokens/s: about 3 to 7 hours for a project with 350,000 tokens of real code.
 

@@ -49,25 +49,52 @@ public static class ProjectCheck
     }
 }
 
-/// <summary>Which projects the user said may have their build scripts run. A damaged or missing file means none.</summary>
+/// <summary>
+/// Which projects the user said may have their build scripts run, as they were then: a pull that changes those scripts asks
+/// again. A damaged or missing file means none. ponytail: covers the project file and the .props and .targets files in its
+/// folder and those above it up to the project root, plus global.json and nuget.config; a script imported from elsewhere
+/// isn't seen. Evaluating the project to list every import would run the scripts this exists to ask about.
+/// </summary>
 public sealed class ProjectTrust(string path)
 {
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "trusted-projects.json");
 
-    static string Key(string root) => Path.GetFullPath(root).TrimEnd('\\', '/').ToLowerInvariant();
+    static string Key(string projectFile) => Path.GetFullPath(projectFile).ToLowerInvariant();
 
-    HashSet<string> Read()
+    static string BuildInputsHash(string projectFile, string root)
     {
-        try { return JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText(path)) ?? []; }
+        var top = Path.GetFullPath(root).TrimEnd('\\', '/');
+        var files = new List<string> { Path.GetFullPath(projectFile) };
+        for (var dir = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(projectFile))!); dir is not null; dir = dir.Parent)
+        {
+            files.AddRange(dir.GetFiles().Where(f => f.Extension.ToLowerInvariant() is ".props" or ".targets" || f.Name.ToLowerInvariant() is "global.json" or "nuget.config").Select(f => f.FullName));
+            if (string.Equals(dir.FullName.TrimEnd('\\', '/'), top, StringComparison.OrdinalIgnoreCase)) break;
+        }
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        foreach (var file in files.Order(StringComparer.OrdinalIgnoreCase))
+        {
+            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(file.ToLowerInvariant() + "\n"));
+            hash.AppendData(File.ReadAllBytes(file));
+        }
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    Dictionary<string, string> Read()
+    {
+        try { return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path)) ?? []; }
         catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) { return []; }
     }
 
-    public bool IsTrusted(string projectRoot) => Read().Contains(Key(projectRoot));
+    public bool IsTrusted(string projectFile, string root)
+    {
+        try { return Read().TryGetValue(Key(projectFile), out var trusted) && trusted == BuildInputsHash(projectFile, root); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
 
-    public void Trust(string projectRoot)
+    public void Trust(string projectFile, string root)
     {
         var trusted = Read();
-        trusted.Add(Key(projectRoot));
+        trusted[Key(projectFile)] = BuildInputsHash(projectFile, root);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         File.WriteAllText(path, JsonSerializer.Serialize(trusted));
     }
