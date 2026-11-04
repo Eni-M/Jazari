@@ -43,6 +43,18 @@ public sealed class ThinkingIndicator
         else _sink.Changed();
     }
 
+    /// <summary>A named step of a long answer, with how many tokens are written so far if it knows.</summary>
+    public void Stage(string stage, int? tokens)
+    {
+        if (_sink is null || _block is null) return;
+        lock (_sink.Gate)
+        {
+            if (_stopped) return;
+            _block.Stage(stage, tokens);
+        }
+        _sink.Changed();
+    }
+
     /// <summary>Takes the line away, so the answer starts where it was.</summary>
     public Task StopAsync()
     {

@@ -91,6 +91,7 @@ New-Item -ItemType Directory -Force (Split-Path $configPath) | Out-Null
     gatewayExe      = $previous.gatewayExe
     llamaServer     = $previous.llamaServer
     model           = $previous.model
+    deepModel       = $previous.deepModel
 } | ConvertTo-Json | Set-Content -Encoding UTF8 "$configPath.new"
 Move-Item -Force "$configPath.new" $configPath
 

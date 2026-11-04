@@ -18,22 +18,28 @@ sealed class FakeGateway : IGatewayClient
 
     public Task<GatewayInfo> InfoAsync(CancellationToken ct) => Info(ct);
 
-    public IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null)
+    public IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null, bool deep = false)
     {
         Asked.Add((history.ToList(), question));
+        LastDeep = deep;
         LastContext = context;
         LastConventions = conventions;
         return Chat(history, question, ct);
     }
 
+    public bool LastDeep { get; private set; }
+    public bool LastCompleteDeep { get; private set; }
+    public string? LastCompleteQuestion { get; private set; }
     public string? LastContext { get; private set; }
     public string? LastConventions { get; private set; }
     public Func<string, string, Task<string>> Complete { get; set; } = (_, _) => Task.FromResult("""{"findings":[]}""");
     public int Completions { get; private set; }
-    public Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null)
+    public Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false)
     {
         Completions++;
         LastConventions = conventions;
+        LastCompleteDeep = deep;
+        LastCompleteQuestion = question;
         return Complete(question, context);
     }
 

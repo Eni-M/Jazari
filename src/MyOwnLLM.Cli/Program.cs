@@ -152,6 +152,7 @@ if (cli.Command == "session")
     };
     if (editor is not null)
     {
+        editor.OffersDeep = () => interactive.OffersDeep;
         interactive.StartingModel = Session.ModelFromFile(config?.Model);
         // What starting has to say waits in a buffer: the prompt is open and being typed in meanwhile.
         async Task<(bool, BlockBuffer)> Start()
@@ -183,11 +184,11 @@ switch (cli.Command)
 {
     case "ask" when cli.Json:
         if (Console.IsInputRedirected && await PipedInput.ReadAsync(Console.In, TimeSpan.FromSeconds(3)) is { } pipedJson) session.UsePipedInput(pipedJson);
-        Console.WriteLine(await session.AnswerAsJsonAsync(cli.Text!, cts.Token));
+        Console.WriteLine(await session.AnswerAsJsonAsync(cli.Text!, cts.Token, cli.Deep));
         return session.LastFailed ? 1 : 0;
     case "ask":
         if (Console.IsInputRedirected && await PipedInput.ReadAsync(Console.In, TimeSpan.FromSeconds(3)) is { } piped) session.UsePipedInput(piped);
-        await session.AskAsync(cli.Text!, cts.Token);
+        await session.AskAsync(cli.Text!, cts.Token, cli.Deep);
         break;
     case "status":
         await session.HandleAsync("/status", cts.Token);

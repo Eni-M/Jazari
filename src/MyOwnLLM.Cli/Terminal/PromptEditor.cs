@@ -40,12 +40,16 @@ public sealed class PromptBuffer(Func<string> directory, IEnumerable<string>? hi
     /// <summary>Where a chosen item replaces the text from, and what can be chosen. No items: no menu.</summary>
     public (int Start, IReadOnlyList<string> Items) Menu { get; private set; } = (0, []);
     public IReadOnlyList<string> History => _history;
+    /// <summary>Whether the last answer's code failed its check, so Ctrl+D asks again with /deep.</summary>
+    public Func<bool>? OffersDeep { get; set; }
 
     public KeyResult Apply(ConsoleKeyInfo key, bool morePending = false)
     {
         var control = key.Modifiers.HasFlag(ConsoleModifiers.Control);
         var pressed = key.Key;
         if (control && pressed == ConsoleKey.C) return KeyResult.Cancel;
+        // Ctrl, because a plain D at an empty prompt is how "Does this..." starts.
+        if (control && pressed == ConsoleKey.D && Text.Length == 0 && OffersDeep?.Invoke() == true) { Insert("/deep"); return KeyResult.Submit; }
 
         // A key waiting right behind Enter means a paste, and a pasted line break doesn't send.
         if (pressed == ConsoleKey.Enter && (morePending || key.Modifiers.HasFlag(ConsoleModifiers.Shift) || key.Modifiers.HasFlag(ConsoleModifiers.Alt) || control)
@@ -435,6 +439,8 @@ public sealed class PromptEditor : ILineReader, IPanel
     public Func<bool>? Interrupt { get; set; }
     /// <summary>An answer or command is running, so Enter queues.</summary>
     public bool Busy { get; set; }
+
+    public Func<bool>? OffersDeep { get => _buffer.OffersDeep; set => _buffer.OffersDeep = value; }
 
     public PromptEditor(Ui ui, Screen screen, ITerminal terminal, Func<string> directory, string? historyFile = null)
     {

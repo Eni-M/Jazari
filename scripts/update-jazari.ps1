@@ -90,6 +90,22 @@ function Repair-LawBook {
     Say-Repaired "law book"
 }
 
+# The smart model /deep uses. Optional, like the law book: installed only once the manifest names it, and Jazari works without it.
+function Repair-DeepModel {
+    if (-not $manifest.deepModelUrl) { return }
+    $model = Join-Path $installDir "models\$($manifest.deepModelFile)"
+    $download = "$model.download"
+    $verified = { param($file) (Test-Path $file) -and (Get-FileHash -Algorithm SHA256 $file).Hash -eq $manifest.deepModelSha256 }
+    if (& $verified $model) {
+        if (Test-Path $download) { Remove-Item -Force $download }
+        Say-Ok "smart model"; return
+    }
+    New-Item -ItemType Directory -Force (Split-Path $model) | Out-Null
+    Get-Verified $manifest.deepModelUrl $download $verified
+    Move-Item -Force $download $model
+    Say-Repaired "smart model"
+}
+
 function Repair-Model {
     $model = Join-Path $installDir "models\$($manifest.modelFile)"
     $download = "$model.download"
@@ -232,6 +248,7 @@ try { Repair-Model } catch { Say-Error "model" $_ }
 try { Repair-Llama } catch { Say-Error "llama.cpp" $_ }
 # Jazari answers without the law book, so a failed download only warns: it's no reason to call the whole update failed.
 try { Repair-LawBook } catch { Write-Host "! law book not installed ($_); Jazari answers without it, and the next update tries again" }
+try { Repair-DeepModel } catch { Write-Host "! smart model not installed ($_); /deep stays off, and the next update tries again" }
 try { Repair-Builds } catch { Say-Error "gateway and app" $_ }
 
 # 7. config: current paths, and installedCommit only when everything above worked
@@ -256,6 +273,7 @@ try {
         gatewayExe      = $paths.gatewayExe
         llamaServer     = $paths.llamaServer
         model           = $paths.model
+        deepModel       = if ($manifest.deepModelFile) { Join-Path $installDir "models\$($manifest.deepModelFile)" } else { $null }
     } | ConvertTo-Json | Set-Content -Encoding UTF8 "$configPath.new"
     Move-Item -Force "$configPath.new" $configPath
     if ($stale) { Say-Repaired "config" } else { Say-Ok "config" }

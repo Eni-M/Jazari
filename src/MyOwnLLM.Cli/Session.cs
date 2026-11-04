@@ -18,7 +18,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         ("/edit <file> <what>", "Change a file, after showing you the change"), ("/undo", "Undo the last /edit"),
         ("/commit", "Write a commit message for the staged changes"), ("/docs <question>", "Look it up in the .NET docs, without the model"),
         ("/save [file]", "Save the conversation as Markdown"),
-        ("/clear", "Clear conversation and files read"), ("/retry", "Ask the last question again"), ("/details", "Details of the last error"), ("/exit", "Quit"),
+        ("/clear", "Clear conversation and files read"), ("/retry", "Ask the last question again"), ("/deep [question]", "Ask with the smarter model; alone, ask the last question again"), ("/details", "Details of the last error"), ("/exit", "Quit"),
     ];
 
     /// <summary>The command names alone, for Tab completion.</summary>
@@ -140,6 +140,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/docs": return DocsAsync(Argument(input), ct);
             case "/save": Save(Argument(input)); break;
             case "/clear": _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ForgetSaved(); ui.Metadata("Conversation cleared."); break;
+            case "/deep": return DeepAsync(Argument(input), ct);
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
             case "/details": Details(); break;
             case "/exit": ExitRequested = true; break;
@@ -148,10 +149,38 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         return Task.CompletedTask;
     }
 
-    public async Task AskAsync(string question, CancellationToken ct)
+    /// <summary>Whether the last answer's code failed its check and a smart model is there to try: Ctrl+D asks again with /deep.</summary>
+    public bool OffersDeep { get; private set; }
+
+    /// <summary>
+    /// /deep: this question, or alone the last one again. Asking again leaves out the answer it replaces, which a small model
+    /// would only copy; on screen and in /save it stays above, so the two can be compared.
+    /// </summary>
+    async Task DeepAsync(string? question, CancellationToken ct)
+    {
+        if (question is not null && question.StartsWith("/edit ", StringComparison.OrdinalIgnoreCase))
+        {
+            await Stoppable(() => EditAsync(question["/edit ".Length..], ct, deep: true), ct);
+            return;
+        }
+        var again = question is null;
+        question ??= _lastQuestion ?? _history.LastOrDefault(t => t.Role == "user")?.Content;
+        if (question is null) { await Note("Nothing to ask again. /deep <question> asks a new one."); return; }
+        try { _info = await gateway.InfoAsync(ct); }
+        catch (GatewayException e) { Fail(e); return; }
+        if (!_info.DeepAvailable) { await Note("/deep needs the smart model, which isn't installed. Run: jazari update"); return; }
+        var replaces = again && _history.Count >= 2 && _history[^2].Content == question;
+        await AskAsync(question, ct, deep: true, replaces ? _history.SkipLast(2).ToList() : null);
+    }
+
+    public Task AskAsync(string question, CancellationToken ct, bool deep) => AskAsync(question, ct, deep, null);
+    public Task AskAsync(string question, CancellationToken ct) => AskAsync(question, ct, false, null);
+
+    async Task AskAsync(string question, CancellationToken ct, bool deep, IReadOnlyList<ChatTurn>? sentHistory)
     {
         _lastQuestion = question;
         LastFailed = false;
+        OffersDeep = false;
         if (EchoQuestions) ui.UserMessage(question);
         ui.Blank();
 
@@ -173,12 +202,17 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var cutOff = false;
         var dropped = 0;
         IReadOnlyList<DocSource>? sources = null;
+        string? check = null;
+        IReadOnlyList<BlockNote>? checks = null;
         var watch = Stopwatch.StartNew();
         try
         {
-            await foreach (var chunk in gateway.ChatAsync(_history, question, project, ct, _context, Conventions()).WithCancellation(ct))
+            await foreach (var chunk in gateway.ChatAsync(sentHistory ?? _history, question, project, ct, _context, Conventions(), deep).WithCancellation(ct))
             {
                 if (chunk.Progress is { } progress) { thinking.Report(progress); continue; }
+                if (chunk.Stage is { } stage) { thinking.Stage(stage, chunk.StageTokens); continue; }
+                check = chunk.Check ?? check;
+                checks = chunk.Checks ?? checks;
                 timings = chunk.Timings ?? timings;
                 cutOff |= chunk.CutOff;
                 dropped = Math.Max(dropped, chunk.DroppedTurns);
@@ -216,6 +250,20 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
                 var text = $"{source.Title} {dot} {source.Url}";
                 if (ui.Live) ui.Row("source", text, Tone.Secondary);
                 else ui.Metadata(text);
+            }
+            if (check is not null)
+            {
+                if (ui.Live) ui.Row("check", check, Tone.Secondary);
+                else ui.Metadata(check);
+            }
+            // Under the answer rather than the block: the check ends after the block is on screen. Annotated, not retried:
+            // a retry costs 15 to 30 s here, and this is enough for the reader to decide.
+            if (checks?.FirstOrDefault(c => c.State == "doesnotcompile") is { Errors: [var error, ..] } broken)
+            {
+                OffersDeep = _info?.DeepAvailable == true;
+                var note = $"block {broken.Block} doesn't compile: {error}{(OffersDeep ? $" {dot} Ctrl+D for /deep" : "")}";
+                if (ui.Live) ui.Row("code", note, Tone.Secondary);
+                else ui.Metadata(note);
             }
             if (cutOff && ui.Live) ui.Row("cut", "The answer reached its length limit. Say \"go on\" for the rest.", Tone.Secondary, Tone.Danger);
             else if (cutOff) ui.Metadata("The answer reached its length limit. Say \"go on\" for the rest.");
@@ -256,18 +304,19 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     /// `jazari ask --json`: the answer as one JSON object, for scripts and CI, as Gemini CLI, Qwen Code and Codex offer:
     /// answer, id (for jazari feedback), cut_off, sources, seconds, and error (null when it worked).
     /// </summary>
-    public async Task<string> AnswerAsJsonAsync(string question, CancellationToken ct)
+    public async Task<string> AnswerAsJsonAsync(string question, CancellationToken ct, bool deep = false)
     {
         var answer = new StringBuilder();
-        string? id = null, error = null;
+        string? id = null, error = null, check = null;
         var cutOff = false;
         IReadOnlyList<DocSource>? sources = null;
         var watch = Stopwatch.StartNew();
         try
         {
-            await foreach (var chunk in gateway.ChatAsync([], question, project, ct, _context, Conventions()).WithCancellation(ct))
+            await foreach (var chunk in gateway.ChatAsync([], question, project, ct, _context, Conventions(), deep).WithCancellation(ct))
             {
                 if (chunk.Error is not null) { error = chunk.Error; break; }
+                check = chunk.Check ?? check;
                 answer.Append(chunk.Content);
                 id = chunk.Id ?? id;
                 cutOff |= chunk.CutOff;
@@ -280,7 +329,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         return System.Text.Json.JsonSerializer.Serialize(new
         {
             answer = answer.ToString(), id, cut_off = cutOff, sources = sources?.Select(s => new { title = s.Title, url = s.Url }),
-            seconds = Math.Round(watch.Elapsed.TotalSeconds, 1), error,
+            seconds = Math.Round(watch.Elapsed.TotalSeconds, 1), error, check,
         });
     }
 
@@ -583,7 +632,22 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         catch (Exception e) when (e is System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException) { return null; }
     }
 
-    async Task EditAsync(string? argument, CancellationToken ct)
+    /// <summary>The errors an edit adds to the project (file, project root, before, after). Replaced in tests.</summary>
+    public Func<string, string, string, string, CancellationToken, Task<IReadOnlyList<string>?>> ProjectErrors { get; init; } = ProjectCheck.NewErrorsAsync;
+    /// <summary>Where the projects the user trusted are remembered.</summary>
+    public string TrustFile { get; init; } = ProjectTrust.DefaultPath;
+
+    /// <summary>Whether this project's build scripts may run: asked once per project, and no means the same question next time.</summary>
+    bool MayLoadProject()
+    {
+        var trust = new ProjectTrust(TrustFile);
+        if (trust.IsTrusted(project)) return true;
+        if (!Confirm("Checking this edit loads the project, which runs its build scripts. Only say yes for code you trust. Load it?")) return false;
+        trust.Trust(project);
+        return true;
+    }
+
+    async Task EditAsync(string? argument, CancellationToken ct, bool deep = false)
     {
         if (PathAndRest(argument) is not (var file, { Length: > 0 } request)) { ui.Metadata("Usage: /edit <file> <what to change>, the file in \"quotes\" if its name has spaces"); return; }
         var path = Resolve(file);
@@ -599,7 +663,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         // Asks for the edits and applies them in memory. Null when stopped or the gateway failed (already reported).
         async Task<(string? Text, List<Replacement> Applied, string? Problem)?> ProposeAsync(string question)
         {
-            if (await WithThinking(() => gateway.CompleteAsync(question, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct, Conventions()), ct) is not (true, var reply)) return null;
+            if (await WithThinking(() => gateway.CompleteAsync(question, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct, Conventions(), deep), ct) is not (true, var reply)) return null;
             if (FileEdit.Parse(reply) is not { } edits) return (null, [], "the model's answer couldn't be read");
             var applied = new List<Replacement>();
             var (newText, problem) = FileEdit.Apply(original, edits, applied);
@@ -620,6 +684,23 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
                 (text, applied, broken) = (retried, retriedApplied, still);
         }
 
+        // Only /deep, and only if the syntax check above didn't already use the one retry.
+        IReadOnlyList<string>? projectErrors = null;
+        if (deep && broken.Count == 0 && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && ProjectCheck.FindProject(path, project) is not null && MayLoadProject())
+        {
+            ui.Metadata("Checking the project. Loading it can take a minute.");
+            projectErrors = await ProjectErrors(path, project, original, text, ct);
+            if (projectErrors is { Count: > 0 })
+            {
+                ui.Metadata($"That change doesn't compile in the project ({projectErrors[0]}). Asking once more, with the errors.");
+                if (await ProposeAsync($"{asked}\n\nYour previous edits don't compile: {string.Join("; ", projectErrors.Take(3))}. Give the edits again so they do.")
+                    is not var (again, againApplied, _)) return;
+                if (again is not null && FileEdit.NewSyntaxErrors(path, original, again).Count == 0
+                    && await ProjectErrors(path, project, original, again, ct) is { } after && after.Count < projectErrors.Count)
+                    (text, applied, projectErrors) = (again, againApplied, after);
+            }
+        }
+
         if (ui.Live) ui.Row($"{watch.Elapsed.TotalSeconds:0.0}s", applied.Count == 1
             ? $"One change in {file}{(LineOf(original, applied[0].Search) is var at and > 0 ? $", line {at}" : "")}:"
             : $"{applied.Count} changes in {file}:");
@@ -633,6 +714,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         }
         if (broken.Count > 0)
             ui.Error("This change breaks the C# syntax.", string.Join("; ", broken.Take(3)), "Say no, then /edit again with a clearer request.");
+        if (projectErrors is { Count: > 0 })
+            ui.Error("This change doesn't compile in the project.", string.Join("; ", projectErrors.Take(3)), "Say no, then /deep /edit again with a clearer request.");
         if (!Confirm($"Apply this change to {file}?")) { ui.Metadata("Nothing changed."); return; }
         var written = FileEdit.Encode(text, stored.Encoding);
         File.WriteAllBytes(path, written);

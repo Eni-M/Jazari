@@ -23,18 +23,23 @@ Inside a session:
 |---|---|
 | `/copy [n]` | Copies a code block of the last answer. Blocks are numbered on screen. |
 | `/read <path>` | Reads a file or folder for the next questions, up to about 5,000 tokens, riskiest files first. C# files that don't fit go as an outline of their types and signatures, so the model still knows what exists and where. |
-| `/review [path]` | Reviews a whole project, riskiest files first, and writes a report. Also `jazari review [path]`. It can be stopped and carries on; later runs only re-read what changed. `/review --changed` reads only what changed since the last commit, as whole methods: minutes, not hours. Reports mark findings new, still there or resolved. Before the model reads anything, rules find secrets (cloud keys, tokens, passwords in connection strings) and a few C# patterns (SQL built from values, async void, an empty catch of everything, accepting any TLS certificate, MD5 or SHA1); secrets are masked in the report. Nothing is built or run. |
+| `/review [path]` | Reviews a whole project, riskiest files first, and writes a report. Also `jazari review [path]`. It can be stopped and carries on; later runs only re-read what changed. `/review --changed` reads only what changed since the last commit, as whole methods: minutes, not hours. Reports mark findings new, still there or resolved. Before the model reads anything, rules find secrets (cloud keys, tokens, passwords in connection strings) and a few C# patterns (SQL built from values, async void, an empty catch of everything, accepting any TLS certificate, MD5 or SHA1); secrets are masked in the report. `/review` builds and runs nothing. |
 | `/edit <file> <what>` | Asks for a change, shows it, and writes it only after you say yes. `/undo` puts it back. A `.cs` change that breaks the syntax is flagged first. Quote paths with spaces. |
 | `/docs <question>` | Shows the .NET docs passage for a question, with its page, without asking the model. |
 | `/save [file]` | Saves the conversation as Markdown in the project. |
+| `/deep [question]` | Asks with a smarter, slower model, when it's worth the wait: up to about 3 minutes, with each stage shown. It writes a short plan first, compiles any C# it wrote against the .NET reference packs (the code never runs), and repairs a block that doesn't compile once. The answer ends with a `check` row: `checked: code compiles`, `checked: 1 error fixed`, `not checked: no code` or `could not fix: <error>`. Alone, it asks the last question again, with the first answer still above to compare. The next plain question goes back to the fast model. |
+| `/deep /edit <file> <what>` | `/edit` with the smarter model. A `.cs` change is also checked against the whole project, and only errors it adds count. Loading a project runs its build scripts, so Jazari asks once per project first; no means the syntax check alone. |
 
 Reviews come from a small local model, so check each finding. It reads about 30 tokens/s: about 3 to 7 hours for a project with 350,000 tokens of real code.
 
 ```powershell
 jazari stop                    # shut the background servers down
 jazari doctor                  # what's wrong and what to do about it; changes nothing
-jazari ask "..." --json        # one JSON object (answer, id, sources, cut_off, seconds, error), for scripts
+jazari ask "..." --json        # one JSON object (answer, id, sources, cut_off, seconds, error, check), for scripts
+jazari ask "..." --deep        # the smarter model, as /deep
 ```
+
+C# in plain answers is compiled too, without running it or slowing the answer. If a block calls something that doesn't exist, a `code` row says so under the answer, and `Ctrl+D` asks again with `/deep`. Blocks that use NuGet packages show no such row, because they can't be judged here.
 
 Answers can draw on the law book, excerpts of Microsoft's .NET docs searched offline: the answer then names the page in a `source` row, and `/docs` shows the passage itself. `jazari update` installs it once the manifest names it (`lawBookUrl`, `lawBookSha256`); until then Jazari answers without it. Sources and licences (text CC BY 4.0, code MIT): [lawbook/NOTICE.md](lawbook/NOTICE.md).
 

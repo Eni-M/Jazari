@@ -21,6 +21,15 @@ public class DoctorTests : IDisposable
         Assert.All(await Run(), c => Assert.True(c.Ok && c.Fix is null, $"{c.Name}: {c.Detail}"));
 
     [Fact]
+    public async Task A_missing_smart_model_is_said_but_is_not_something_to_fix()
+    {
+        var check = Named(await Run(), "Smart model");
+        Assert.True(check.Ok);
+        Assert.Null(check.Fix);
+        Assert.Contains("/deep is off", check.Detail);
+    }
+
+    [Fact]
     public async Task No_install_says_how_to_install()
     {
         var checks = await new Doctor(null, null, _gateway, _ => Task.FromResult(false), _ => false, _logs, "", false, _ => Task.FromResult(false)).RunAsync(default);

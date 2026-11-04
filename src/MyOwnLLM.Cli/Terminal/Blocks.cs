@@ -71,6 +71,16 @@ public sealed class ThinkingBlock(Theme theme, TimeProvider time, string label =
         (_latest, _latestAt) = (progress, at);
     }
 
+    string? _stage;
+    int? _stageTokens;
+
+    /// <summary>A named step of a long answer. Reading keeps its progress; any later step replaces it.</summary>
+    public void Stage(string stage, int? tokens)
+    {
+        (_stage, _stageTokens) = (char.ToUpperInvariant(stage[0]) + stage[1..], tokens);
+        if (stage != "reading") (_first, _latest) = (null, null);
+    }
+
     public int? Percent => _latest is { Total: > 0 } p ? Math.Clamp(p.Processed * 100 / p.Total, 0, 100) : null;
 
     public override IReadOnlyList<Line> Render(int columns)
@@ -83,7 +93,11 @@ public sealed class ThinkingBlock(Theme theme, TimeProvider time, string label =
             var left = Remaining(p);
             text = $"Reading {p.Processed:N0} of {p.Total:N0} tokens {dot} {Percent}%{(left is null ? "" : $" {dot} {left}")}";
         }
-        else text = seconds == 0 ? label : $"{label} {dot} {seconds}s";
+        else
+        {
+            var what = _stage is null ? label : _stageTokens is { } tokens ? $"{_stage} {dot} {tokens:N0} tokens" : _stage;
+            text = seconds == 0 ? what : $"{what} {dot} {seconds}s";
+        }
         return [Layout.Row("live", Tone.Accent).Add(TextWidth.Fit(text, Layout.Body(columns)), Tone.Muted).Build()];
     }
 

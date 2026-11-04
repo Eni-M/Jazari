@@ -4,7 +4,8 @@ using System.Text.Json;
 
 namespace MyOwnLLM.Cli;
 
-public sealed record GatewayInfo(string Name, string Model, string Version);
+/// <param name="DeepAvailable">Whether /deep has a smart model to use. An older gateway doesn't say: false.</param>
+public sealed record GatewayInfo(string Name, string Model, string Version, bool DeepAvailable = false);
 public sealed record ChatTurn(string Role, string Content);
 
 /// <summary>Anything that went wrong talking to the gateway, already phrased for the user. <see cref="Status"/> is null when it couldn't be reached.</summary>
@@ -17,9 +18,9 @@ public sealed class GatewayException(string message, string? cause, int? status,
 public interface IGatewayClient
 {
     Task<GatewayInfo> InfoAsync(CancellationToken ct);
-    IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null);
+    IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null, bool deep = false);
     /// <summary>One answer, not streamed and outside the conversation, forced into the shape of <paramref name="jsonSchema"/>.</summary>
-    Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null);
+    Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false);
     Task<(string Id, string Summary)> StatusAsync(string project, CancellationToken ct);
     Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct);
     /// <summary>Has the model read the conversation and context now, so the next question only adds itself.</summary>
@@ -37,21 +38,21 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
     {
         using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Get, "/v1/info"), ct);
         var json = await ReadJson(response, ct);
-        return Unexpected(() => new GatewayInfo(json.GetProperty("name").GetString() ?? "Jazari", json.GetProperty("model").GetString() ?? "?", json.GetProperty("version").GetString() ?? "?"));
+        return Unexpected(() => new GatewayInfo(json.GetProperty("name").GetString() ?? "Jazari", json.GetProperty("model").GetString() ?? "?", json.GetProperty("version").GetString() ?? "?", json.TryGetProperty("deep_available", out var deep) && deep.ValueKind == JsonValueKind.True));
     }
 
-    public async Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null)
+    public async Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false)
     {
-        var body = new { messages = new[] { new { role = "user", content = question } }, max_tokens = maxTokens, context, json_schema = jsonSchema, conventions };
+        var body = new { messages = new[] { new { role = "user", content = question } }, max_tokens = maxTokens, context, json_schema = jsonSchema, conventions, deep = deep ? true : (bool?)null };
         using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(body) }, ct);
         var json = await ReadJson(response, ct);
         return Unexpected(() => json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "");
     }
 
-    public async IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, [EnumeratorCancellation] CancellationToken ct, string? context = null, string? conventions = null)
+    public async IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, [EnumeratorCancellation] CancellationToken ct, string? context = null, string? conventions = null, bool deep = false)
     {
         var messages = history.Select(t => new { role = t.Role, content = t.Content }).Append(new { role = "user", content = question });
-        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(new { messages, stream = true, context, conventions }) };
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(new { messages, stream = true, context, conventions, deep = deep ? true : (bool?)null }) };
         request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project)); // header values must be ASCII, and folders can have accents
         using var response = await SendAsync(request, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));

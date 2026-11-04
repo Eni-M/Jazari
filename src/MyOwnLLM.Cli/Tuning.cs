@@ -10,7 +10,7 @@ namespace MyOwnLLM.Cli;
 /// </summary>
 public sealed partial record Tuning(
     string Fingerprint, string Device, int Threads, int GpuLayers, bool FlashAttention, int ContextTokens,
-    double PromptPerSecond = 0, double AnswerPerSecond = 0, string? DeviceName = null, string? ModelFile = null, int? DeepThreads = null)
+    double PromptPerSecond = 0, double AnswerPerSecond = 0, string? DeviceName = null, string? ModelFile = null)
 {
     /// <summary>
     /// Prompts kept in RAM for reuse, with at most 8 checkpoints per conversation (-ctxcp 8). On Granite 4.0-H Tiny a
@@ -99,7 +99,7 @@ public sealed partial record Tuning(
 
             """;
         return shared + Section("fast", fastModel, Device, GpuLayers, Threads, FlashAttention)
-            + (deepModel is null ? "" : Section("deep", deepModel, "none", 0, DeepThreads ?? Threads, true));
+            + (deepModel is null ? "" : Section("deep", deepModel, "none", 0, Threads, true));
     }
 
     /// <summary>llama-server as a router: the port stays up while the gateway swaps models, and nothing loads unless asked.</summary>

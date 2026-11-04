@@ -67,4 +67,16 @@ public class JazariConfigTests : IDisposable
 
     [Fact]
     public void Stop_command_parses() => Assert.Equal("stop", CliArgs.Parse(["stop"]).Command);
+
+    [Fact]
+    public void An_old_config_without_a_deep_model_still_loads()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            System.IO.File.WriteAllText(path, """{"home":"h","gatewayExe":"g","llamaServer":"l","model":"m"}""");
+            Assert.Null(JazariConfig.Load(path)!.DeepModel);
+        }
+        finally { System.IO.File.Delete(path); }
+    }
 }

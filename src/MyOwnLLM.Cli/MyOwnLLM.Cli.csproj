@@ -14,6 +14,9 @@
     <PackageReference Include="TextCopy" Version="6.2.1" />
     <!-- Parses C# for /edit's syntax check; nothing is compiled or run. -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <!-- /deep /edit checks the whole project; loading one runs its build scripts, so Jazari asks first. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.9.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
   </ItemGroup>
 
 </Project>

@@ -47,6 +47,9 @@ public sealed class Doctor(
         checks.Add(measured
             ? new("Tuning", true, "measured on this PC")
             : new("Tuning", true, "safe CPU settings", "jazari tune measures this PC for faster ones (a few minutes)."));
+        checks.Add(config.DeepModel is { } deep && fileExists(deep)
+            ? new("Smart model", true, "installed, for /deep")
+            : new("Smart model", true, "not installed, so /deep is off; everything else works without it"));
         checks.Add(fileExists(lawBookFile)
             ? new("Law book", true, "installed")
             : new("Law book", true, "not installed; answers work without it"));
