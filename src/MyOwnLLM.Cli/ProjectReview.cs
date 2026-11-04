@@ -11,6 +11,9 @@ public sealed record Finding(string File, int? Line, string Quote, string Proble
 {
     /// <summary>Not in the project's previous review.</summary>
     public bool New { get; init; }
+
+    /// <summary>The StaticChecks rule that found it; null when the model did.</summary>
+    public string? Rule { get; init; }
 }
 
 /// <summary>
@@ -71,7 +74,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             : $"Reviewing what changed since the last commit: {files.Select(f => f.Path).Distinct().Count()} files, {units.Count} parts. Ctrl+C stops; running it again carries on.");
         if (ignored.Count > 0) ui.Metadata($"The project's .jazariignore left out {ignored.Count} file{(ignored.Count == 1 ? "" : "s")}; the report names them.");
 
-        List<Finding> findings = [];
+        List<Finding> findings = StaticChecks.Scan(files); // certain, and free: before the model's slow pass, which may be stopped
         List<string> failed = [];
         for (var i = 0; i < units.Count; i++)
         {
@@ -100,7 +103,8 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         findings = history.Current;
         File.WriteAllText(report, Report(changed is null ? $"Review of {root}" : $"Review of the changes in {root}", files.Count, skipped, failed, findings, ignored, history));
         var ambiguous = findings.Count(f => f.Ambiguous);
-        ui.Metadata($"{findings.Count(f => f.Verified)} verified, {(ambiguous > 0 ? $"{ambiguous} ambiguous, " : "")}" +
+        var rules = findings.Count(f => f.Rule is not null);
+        ui.Metadata($"{(rules > 0 ? $"{rules} found by rules, " : "")}{findings.Count(f => f.Verified && f.Rule is null)} verified, {(ambiguous > 0 ? $"{ambiguous} ambiguous, " : "")}" +
             $"{findings.Count(f => !f.Verified && !f.Ambiguous)} unverified. Report: {report}");
         return report;
     }
@@ -253,7 +257,8 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         text.Append("\nThis is a small local model's opinion: check each finding. \"Verified\" only means the quoted line exists.\n");
         (string Title, Func<Finding, bool> In)[] groups =
         [
-            ("Verified", f => f.Verified),
+            ("Found by rules, without the model", f => f.Rule is not null),
+            ("Verified", f => f.Verified && f.Rule is null),
             ("Ambiguous: the quoted line appears more than once", f => f.Ambiguous),
             ("Unverified: the quoted line wasn't found", f => !f.Verified && !f.Ambiguous),
         ];
@@ -263,7 +268,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             if (group.Count == 0) continue;
             text.Append($"\n## {title} ({group.Count})\n");
             foreach (var f in group)
-                text.Append($"\n### [{f.Severity}] {f.File}{(f.Line is { } line ? $":{line}" : "")}{(f.New ? " (new)" : "")}\n\n{f.Problem}\n\n`{f.Quote.Replace('`', '\'')}`\n")
+                text.Append($"\n### [{f.Severity}] {f.File}{(f.Line is { } line ? $":{line}" : "")}{(f.Rule is { } rule ? $" `{rule}`" : "")}{(f.New ? " (new)" : "")}\n\n{f.Problem}\n\n`{f.Quote.Replace('`', '\'')}`\n")
                     .Append(string.IsNullOrWhiteSpace(f.Fix) ? "" : $"\n**Fix:** {f.Fix}\n");
         }
         if (findings.Count == 0) text.Append("\nNo findings.\n");
