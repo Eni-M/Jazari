@@ -94,7 +94,7 @@ public static partial class ProjectFiles
         return CodeExtensions.Contains(Path.GetExtension(path)) && !Noise().IsMatch(name) && !IsSecret(path);
     }
 
-    static bool IsLink(FileInfo file)
+    internal static bool IsLink(FileInfo file)
     {
         try { return file.LinkTarget is not null; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; } // can't tell: don't follow it

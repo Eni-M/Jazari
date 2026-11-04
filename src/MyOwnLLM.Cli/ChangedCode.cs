@@ -56,15 +56,30 @@ public static partial class ChangedCode
 
         foreach (var (path, changed) in ranges.OrderBy(r => r.Key, StringComparer.OrdinalIgnoreCase))
         {
-            if (!Reviewable(path) || ProjectFiles.TryRead(Path.Combine(root, path)) is not { } text) continue;
+            if (!Reviewable(path) || Read(root, path) is not { } text) continue;
             var lines = text.Split('\n');
             var spans = path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ? MemberSpans(text, changed) : changed.Select(c => (c.From - Around, c.To + Around));
             foreach (var (from, to) in Merge(spans.Select(s => (Math.Max(s.Item1, 1), Math.Min(s.Item2, lines.Length)))))
                 parts.Add(new(path, string.Join('\n', lines[(from - 1)..to]), from));
         }
         foreach (var path in newFiles.Where(p => !ranges.ContainsKey(p)).Order(StringComparer.OrdinalIgnoreCase))
-            if (Reviewable(path) && ProjectFiles.TryRead(Path.Combine(root, path)) is { } text) parts.Add(new(path, text));
+            if (Reviewable(path) && Read(root, path) is { } text) parts.Add(new(path, text));
         return (parts, ignored);
+    }
+
+    /// <summary>
+    /// A file git named, read only if it really is inside the project and no link leads to it: git tracks links as links,
+    /// and a cloned repository's notes.txt linked to ~/.ssh/id_rsa must not reach the model, as the full review's walk
+    /// already ensures. Null otherwise.
+    /// </summary>
+    static string? Read(string root, string path)
+    {
+        var top = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var full = Path.GetFullPath(Path.Combine(top, path));
+        if (!full.StartsWith(top + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return null;
+        for (var dir = new FileInfo(full).Directory; dir is not null && dir.FullName.Length > top.Length; dir = dir.Parent)
+            if (dir.Attributes.HasFlag(FileAttributes.ReparsePoint) && dir.LinkTarget is not null) return null;
+        return ProjectFiles.IsLink(new FileInfo(full)) ? null : ProjectFiles.TryRead(full);
     }
 
     /// <summary>For each change, the members it touches, whole; or the change with lines around it when it touches none.</summary>

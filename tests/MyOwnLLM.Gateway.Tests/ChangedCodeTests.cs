@@ -110,6 +110,25 @@ public class ChangedCodeTests : IDisposable
     }
 
     [Fact]
+    public void A_path_outside_the_project_or_through_a_link_is_never_read()
+    {
+        var outside = Directory.CreateTempSubdirectory("jazari outside").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(outside, "id_rsa.cs"), "PRIVATE KEY");
+            var escape = Path.GetRelativePath(_dir, Path.Combine(outside, "id_rsa.cs")).Replace('\\', '/'); // ../jazari outside…/id_rsa.cs
+
+            var (parts, _) = ChangedCode.Parts(_dir, new() { [escape] = [(1, 1)] }, [escape]);
+            Assert.Empty(parts);
+
+            try { File.CreateSymbolicLink(Path.Combine(_dir, "notes.cs"), Path.Combine(outside, "id_rsa.cs")); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; } // Windows without the right to make links
+            Assert.Empty(ChangedCode.Parts(_dir, new() { ["notes.cs"] = [(1, 1)] }, ["notes.cs"]).Parts);
+        }
+        finally { Directory.Delete(outside, recursive: true); }
+    }
+
+    [Fact]
     public void A_changed_file_the_jazariignore_hides_is_named()
     {
         Add(".jazariignore", "Secret*.cs\n");
