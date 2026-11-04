@@ -72,6 +72,17 @@ public static partial class ProjectFiles
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
     }
 
+    /// <summary>
+    /// The files the project's .jazariignore kept out that would otherwise have been read. A cloned repository's own
+    /// .jazariignore could hide a file from /review, so the report names every one of them.
+    /// </summary>
+    public static List<string> IgnoredFiles(string target)
+    {
+        if (!Directory.Exists(target) || IgnorePatterns(target) is not { Length: > 0 } patterns) return [];
+        return [.. Walk(target).Select(p => Path.GetRelativePath(target, p).Replace('\\', '/'))
+            .Where(r => Wanted(r) && IsIgnored(r, patterns)).Order(StringComparer.OrdinalIgnoreCase)];
+    }
+
     public static bool IsIgnored(string relative, IReadOnlyList<string> patterns) => patterns.Any(pattern =>
         pattern.EndsWith('/')
             ? relative.Split('/').SkipLast(1).Any(folder => System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(pattern.TrimEnd('/'), folder))

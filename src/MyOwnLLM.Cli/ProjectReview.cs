@@ -54,6 +54,9 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         var store = Path.Combine(storeDir, Hash(Path.GetFullPath(root).ToLowerInvariant())[..16] + ".jsonl");
         var done = Saved(store);
         ui.Metadata($"Reviewing {files.Count} files in {units.Count} parts, riskiest first. {skipped} skipped. Ctrl+C stops; running it again carries on.");
+        // A cloned repository's .jazariignore could hide its worst file from a security review: never silently.
+        var ignored = ProjectFiles.IgnoredFiles(root);
+        if (ignored.Count > 0) ui.Metadata($"The project's .jazariignore left out {ignored.Count} file{(ignored.Count == 1 ? "" : "s")}; the report names them.");
 
         List<Finding> findings = [];
         List<string> failed = [];
@@ -80,7 +83,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         var report = Path.Combine(storeDir, $"{Path.GetFileName(Path.GetFullPath(root).TrimEnd('\\', '/'))}-{DateTime.Now:yyyyMMdd-HHmm}.md");
         // The same finding twice (a part read again after a change elsewhere in it, a model repeating itself) is one finding.
         findings = [.. findings.DistinctBy(f => (f.File, f.Line, Squeeze(f.Quote), f.Problem))];
-        File.WriteAllText(report, Report(root, files.Count, skipped, failed, findings));
+        File.WriteAllText(report, Report(root, files.Count, skipped, failed, findings, ignored));
         var ambiguous = findings.Count(f => f.Ambiguous);
         ui.Metadata($"{findings.Count(f => f.Verified)} verified, {(ambiguous > 0 ? $"{ambiguous} ambiguous, " : "")}" +
             $"{findings.Count(f => !f.Verified && !f.Ambiguous)} unverified. Report: {report}");
@@ -196,7 +199,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     /// </summary>
     static string Quoted(string quote) => Squeeze(LineNumber().Replace(Squeeze(quote).Trim('`'), "")).Trim('`').Trim();
 
-    static string Report(string root, int files, int skipped, List<string> failed, List<Finding> findings)
+    static string Report(string root, int files, int skipped, List<string> failed, List<Finding> findings, List<string> ignored)
     {
         var text = new StringBuilder($"# Review of {root}\n\n{DateTime.Now:yyyy-MM-dd HH:mm}. {files} files read, {skipped} skipped");
         text.Append(failed.Count > 0 ? $", {failed.Count} parts failed and will be retried on the next run.\n" : ".\n");
@@ -221,6 +224,10 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         if (failed.Count > 0)
             text.Append($"\n## Not reviewed this run ({failed.Count})\n\nThe model's answer for these couldn't be read. The next run tries them again.\n\n")
                 .Append(string.Concat(failed.Select(f => $"- {f}\n")));
+        if (ignored.Count > 0)
+            text.Append($"\n## Left out by the project's .jazariignore ({ignored.Count})\n\nThe repository's own ignore file kept these from the review. " +
+                    "If you didn't write it, check them yourself.\n\n")
+                .Append(string.Concat(ignored.Select(f => $"- {f}\n")));
         return text.ToString();
     }
 
