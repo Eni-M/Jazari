@@ -105,10 +105,55 @@ public class ProjectTrustChangeTests : IDisposable
     [InlineData("src/Directory.Build.targets")]
     [InlineData("src/custom.targets")]
     [InlineData("global.json")]
+    [InlineData("src/P.csproj.user")]
+    [InlineData("src/obj/P.csproj.nuget.g.targets")]
+    [InlineData("src/Directory.Build.rsp")]
     public void Changing_or_adding_a_build_file_asks_again(string file)
     {
         Assert.True(_trust.IsTrusted(_project, _root));
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(_root, file))!);
         File.WriteAllText(Path.Combine(_root, file), "<Project><Target Name=\"Evil\" /></Project>");
+        Assert.False(_trust.IsTrusted(_project, _root));
+    }
+
+    [Theory]
+    [InlineData("<ProjectReference Include=\"..\\lib\\L.csproj\" />", "lib/L.csproj")]
+    [InlineData("<ProjectReference Include=\"..\\lib\\L.csproj\" />", "lib/L.targets")]
+    [InlineData("<Import Project=\"..\\shared\\S.targets\" />", "shared/S.targets")]
+    public void A_change_in_what_the_project_names_asks_again(string line, string changed)
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "lib"));
+        Directory.CreateDirectory(Path.Combine(_root, "shared"));
+        File.WriteAllText(Path.Combine(_root, "lib", "L.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(_root, "shared", "S.targets"), "<Project />");
+        File.WriteAllText(_project, $"<Project><ItemGroup>{line}</ItemGroup></Project>");
+        _trust.Trust(_project, _root);
+        Assert.True(_trust.IsTrusted(_project, _root));
+
+        File.WriteAllText(Path.Combine(_root, changed), "<Project><Target Name=\"Evil\" /></Project>");
+
+        Assert.False(_trust.IsTrusted(_project, _root));
+    }
+
+    [Fact]
+    public void Projects_that_reference_each_other_and_files_that_are_not_xml_are_fine()
+    {
+        File.WriteAllText(_project, "<Project><ItemGroup><ProjectReference Include=\"P.csproj\" /></ItemGroup></Project>");
+        File.WriteAllText(Path.Combine(_root, "broken.props"), "not xml");
+        _trust.Trust(_project, _root);
+        Assert.True(_trust.IsTrusted(_project, _root));
+    }
+
+    [Fact]
+    public void Bytes_moved_from_one_file_to_another_ask_again()
+    {
+        File.WriteAllText(_project, "<Project />AB");
+        File.WriteAllText(Path.Combine(_root, "Directory.Build.props"), "CD");
+        _trust.Trust(_project, _root);
+
+        File.WriteAllText(_project, "<Project />");
+        File.WriteAllText(Path.Combine(_root, "Directory.Build.props"), "ABCD");
+
         Assert.False(_trust.IsTrusted(_project, _root));
     }
 

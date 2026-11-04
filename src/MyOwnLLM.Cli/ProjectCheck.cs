@@ -50,10 +50,12 @@ public static class ProjectCheck
 }
 
 /// <summary>
-/// Which projects the user said may have their build scripts run, as they were then: a pull that changes those scripts asks
-/// again. A damaged or missing file means none. ponytail: covers the project file and the .props and .targets files in its
-/// folder and those above it up to the project root, plus global.json and nuget.config; a script imported from elsewhere
-/// isn't seen. Evaluating the project to list every import would run the scripts this exists to ask about.
+/// Which projects the user said may have their build scripts run, as they were then: a change to those scripts asks again. A
+/// damaged or missing file means none. Covered: each project file (following ProjectReference and Import paths written out
+/// literally), its .user file, the .props and .targets MSBuild imports from obj, and the .props, .targets, global.json,
+/// nuget.config and Directory.Build.rsp in its folder and those above it up to the project root. A restore that changes
+/// packages asks again too. ponytail: a path built from MSBuild properties isn't followed, because working it out means
+/// evaluating the project, which runs the scripts this exists to ask about.
 /// </summary>
 public sealed class ProjectTrust(string path)
 {
@@ -61,20 +63,62 @@ public sealed class ProjectTrust(string path)
 
     static string Key(string projectFile) => Path.GetFullPath(projectFile).ToLowerInvariant();
 
-    static string BuildInputsHash(string projectFile, string root)
+    static IEnumerable<string> BuildFiles(string projectFile, string root)
     {
         var top = Path.GetFullPath(root).TrimEnd('\\', '/');
-        var files = new List<string> { Path.GetFullPath(projectFile) };
-        for (var dir = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(projectFile))!); dir is not null; dir = dir.Parent)
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var waiting = new Stack<string>([Path.GetFullPath(projectFile)]);
+        while (waiting.TryPop(out var file))
         {
-            files.AddRange(dir.GetFiles().Where(f => f.Extension.ToLowerInvariant() is ".props" or ".targets" || f.Name.ToLowerInvariant() is "global.json" or "nuget.config").Select(f => f.FullName));
-            if (string.Equals(dir.FullName.TrimEnd('\\', '/'), top, StringComparison.OrdinalIgnoreCase)) break;
+            if (!seen.Add(file) || !File.Exists(file)) continue;
+            files.Add(file);
+            foreach (var linked in LiteralPaths(file)) waiting.Push(linked);
+            if (Path.GetExtension(file).ToLowerInvariant() is ".props" or ".targets") continue;
+
+            var folder = Path.GetDirectoryName(file)!;
+            files.Add(file + ".user");
+            var obj = Path.Combine(folder, "obj");
+            if (Directory.Exists(obj)) foreach (var generated in Directory.GetFiles(obj).Where(IsScript)) waiting.Push(generated);
+            for (var dir = new DirectoryInfo(folder); dir is not null; dir = dir.Parent)
+            {
+                foreach (var nearby in dir.GetFiles().Where(f => IsScript(f.Name) || f.Name.ToLowerInvariant() is "global.json" or "nuget.config" or "directory.build.rsp")) waiting.Push(nearby.FullName);
+                if (string.Equals(dir.FullName.TrimEnd('\\', '/'), top, StringComparison.OrdinalIgnoreCase)) break;
+            }
         }
-        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
-        foreach (var file in files.Order(StringComparer.OrdinalIgnoreCase))
+        return files.Where(File.Exists);
+    }
+
+    static bool IsScript(string file) => Path.GetExtension(file).ToLowerInvariant() is ".props" or ".targets";
+
+    /// <summary>Other files this one names outright. Read as plain XML, so nothing in it runs; a file that isn't XML names nothing.</summary>
+    static IEnumerable<string> LiteralPaths(string file)
+    {
+        if (Path.GetExtension(file).ToLowerInvariant() is not (".csproj" or ".props" or ".targets")) return [];
+        try
         {
-            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(file.ToLowerInvariant() + "\n"));
-            hash.AppendData(File.ReadAllBytes(file));
+            var folder = Path.GetDirectoryName(file)!;
+            return System.Xml.Linq.XDocument.Load(file).Descendants()
+                .Select(e => e.Name.LocalName switch { "ProjectReference" => e.Attribute("Include")?.Value, "Import" => e.Attribute("Project")?.Value, _ => null })
+                .Where(p => p is { Length: > 0 } && !p.Contains('$') && !p.Contains('*') && p.IndexOfAny(Path.GetInvalidPathChars()) < 0)
+                .Select(p => Path.GetFullPath(Path.Combine(folder, p!.Replace('\\', Path.DirectorySeparatorChar)))).ToList();
+        }
+        catch (Exception e) when (e is System.Xml.XmlException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return []; }
+    }
+
+    /// <summary>Each file as its path and contents, both with their lengths, so bytes moved from one file to another change the hash.</summary>
+    static string BuildInputsHash(string projectFile, string root)
+    {
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        void Framed(byte[] bytes)
+        {
+            hash.AppendData(BitConverter.GetBytes((long)bytes.Length));
+            hash.AppendData(bytes);
+        }
+        foreach (var file in BuildFiles(projectFile, root).Order(StringComparer.OrdinalIgnoreCase))
+        {
+            Framed(System.Text.Encoding.UTF8.GetBytes(Path.GetRelativePath(root, file).ToLowerInvariant()));
+            Framed(File.ReadAllBytes(file));
         }
         return Convert.ToHexString(hash.GetHashAndReset());
     }
@@ -93,9 +137,13 @@ public sealed class ProjectTrust(string path)
 
     public void Trust(string projectFile, string root)
     {
-        var trusted = Read();
-        trusted[Key(projectFile)] = BuildInputsHash(projectFile, root);
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        File.WriteAllText(path, JsonSerializer.Serialize(trusted));
+        try
+        {
+            var trusted = Read();
+            trusted[Key(projectFile)] = BuildInputsHash(projectFile, root);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            File.WriteAllText(path, JsonSerializer.Serialize(trusted));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // a file in use: this yes still counts, and the next edit asks again
     }
 }
