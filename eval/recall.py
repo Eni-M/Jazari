@@ -22,13 +22,14 @@ FACTS = [
     Fact("The refund service retries 3 times before giving up.", "How many times does the refund service retry?", r"\b(3|three)\b"),
     Fact("Invoices are kept for 7 years.", "How long are invoices kept?", r"\b(7|seven)\b"),
     Fact("The staging database listens on port 5433.", "Which port does the staging database listen on?", r"5433"),
-    Fact("Order ids start with the prefix ORD-.", "What prefix do order ids start with?", r"ORD"),
+    # The prefixes are matched as capitals: ignoring case, "ORD" was found in any answer saying "order" (task 6 handoff).
+    Fact("Order ids start with the prefix ORD-.", "What prefix do order ids start with?", r"(?-i:\bORD\b)"),
     Fact("The payment timeout is 45 seconds.", "What is the payment timeout?", r"\b45\b"),
     Fact("Deployments are frozen on Fridays.", "On which day are deployments frozen?", r"Friday"),
     Fact("The email service retries 5 times before giving up.", "How many times does the email service retry?", r"\b(5|five)\b"),
     Fact("Audit logs are kept for 2 years.", "How long are audit logs kept?", r"\b(2|two)\b"),
     Fact("The production database listens on port 6432.", "Which port does the production database listen on?", r"6432"),
-    Fact("Customer ids start with the prefix CUS-.", "What prefix do customer ids start with?", r"CUS"),
+    Fact("Customer ids start with the prefix CUS-.", "What prefix do customer ids start with?", r"(?-i:\bCUS\b)"),
     Fact("The login timeout is 20 seconds.", "What is the login timeout?", r"\b20\b"),
     Fact("Backups run on Sundays.", "On which day do backups run?", r"Sunday"),
 ]
@@ -38,11 +39,12 @@ def is_right(answer, want):
     return bool(re.search(want, answer, re.I))
 
 
-def llama_args(llama, model, threads, context):
+def llama_args(llama, model, threads, context, cache_ram=1024, ctxcp=8):
     # Tuning.ServerArgs's settings for a T480 CPU run. The server path is made absolute: on Windows a relative one with
-    # forward slashes, like spike/bin/llama-server.exe, fails to start with WinError 2.
+    # forward slashes, like spike/bin/llama-server.exe, fails to start with WinError 2. cache_ram and ctxcp can be set
+    # back to the old 2048 and 32, to measure what the flags alone change, on one commit.
     return [os.path.abspath(llama), "-m", model, "-dev", "none", "-ngl", "0", "-t", str(threads), "--poll", "0", "-fa", "off", "-c", str(context),
-            "--cache-ram", "1024", "-ctxcp", "8", "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(LLAMA_PORT)]
+            "--cache-ram", str(cache_ram), "-ctxcp", str(ctxcp), "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(LLAMA_PORT)]
 
 
 def filler(chunk=CHUNK):
@@ -109,13 +111,53 @@ def working_set_mib(pid):
     return parse_working_set(out)
 
 
+def memory_mib(pid):
+    """Windows' own numbers for a process, in MiB, or {} where they can't be read. The working set holds the resident
+    pages of the memory-mapped model file (4.2 GB for H-Tiny), which Windows fills and trims as it likes; private bytes
+    are what the server allocated itself (prompt cache, checkpoints, buffers), which is what the cache flags change.
+    Both peaks cover the server's whole life so far."""
+    if os.name != "nt":
+        return {}
+    import ctypes
+    from ctypes import wintypes
+
+    class Counters(ctypes.Structure):  # PROCESS_MEMORY_COUNTERS_EX
+        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [(name, ctypes.c_size_t) for name in (
+            "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage",
+            "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage", "PrivateUsage")]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(0x1000 | 0x0010, False, pid)  # query limited information, read memory
+    if not handle:
+        return {}
+    try:
+        counters = Counters(cb=ctypes.sizeof(Counters))
+        if not kernel32.K32GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            return {}
+    finally:
+        kernel32.CloseHandle(handle)
+    mib = lambda n: n // (1 << 20)
+    return {"working_set": mib(counters.WorkingSetSize), "peak_working_set": mib(counters.PeakWorkingSetSize),
+            "private": mib(counters.PrivateUsage), "peak_private": mib(counters.PeakPagefileUsage)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--label", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--llama", default=os.path.join(os.environ.get("LOCALAPPDATA", ""), "Jazari", "llama", "llama-server.exe"))
+    parser.add_argument("--cache-ram", type=int, default=1024, help="MiB of prompt cache; the shipped 1024, or the old 2048 to compare")
+    parser.add_argument("--ctxcp", type=int, default=8, help="checkpoints per conversation; the shipped 8, or llama-server's old default 32")
     a = parser.parse_args()
+    os.makedirs(RESULTS, exist_ok=True)
+    log = os.path.join(RESULTS, f"{a.label}-llama.log")  # both servers' output, the deep one first
+    if os.path.exists(log):
+        os.remove(log)
 
     try:
         build_gateway()
@@ -126,7 +168,7 @@ def main():
     running = []
 
     def start(context):
-        llama = launch(llama_args(a.llama, a.model, a.threads, context), LLAMA_PORT)
+        llama = launch(llama_args(a.llama, a.model, a.threads, context, a.cache_ram, a.ctxcp), LLAMA_PORT, log)
         running.append(llama)
         gateway = launch(["dotnet", GATEWAY_DLL], GATEWAY_PORT, env=env, cwd=folder)
         running.append(gateway)
@@ -144,6 +186,7 @@ def main():
         deep_history = conversation(ask, filler())
         deep = exam(ask, deep_history)
         memory = working_set_mib(llama.pid)  # after the deep questions, when the server holds the most
+        counters = memory_mib(llama.pid)
         # The gateway restarts too: it asks llama-server for the context size only once a minute.
         stop(running)
         time.sleep(5)
@@ -159,13 +202,14 @@ def main():
         stop(running)
         shutil.rmtree(folder, ignore_errors=True)
 
-    result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "short": short, "deep": deep, "cut": cut,
-              "deep_tokens": estimated_tokens(deep_history), "working_set_mib": memory}
-    os.makedirs(RESULTS, exist_ok=True)
+    result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "cache_ram": a.cache_ram, "ctxcp": a.ctxcp,
+              "short": short, "deep": deep, "cut": cut, "deep_tokens": estimated_tokens(deep_history), "working_set_mib": memory,
+              "deep_server_mib": counters, "llama_log": log}
     with open(os.path.join(RESULTS, f"{a.label}.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
     print(f'{a.label}: short {short["score"]}/12, deep {deep["score"]}/12, cut {cut["score"]}/12, median {deep["median_s"]} s deep, '
-          f'{result["deep_tokens"]} tokens deep, server {memory} MiB')
+          f'{result["deep_tokens"]} tokens deep, server {memory} MiB; private {counters.get("private")} MiB, '
+          f'peak private {counters.get("peak_private")} MiB, peak working set {counters.get("peak_working_set")} MiB')
 
 
 if __name__ == "__main__":

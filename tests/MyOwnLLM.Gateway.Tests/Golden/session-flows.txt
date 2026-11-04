@@ -17,6 +17,7 @@ ASK
 (just type)          Ask a question; answers keep the conversation
 /retry               Ask the last question again
 /status              Where are we left at?
+/docs <question>     Look it up in the .NET docs, without the model
 
 FILES AND CODE
 /read <path>         Read a file or folder for the next questions
@@ -31,6 +32,7 @@ FILES AND CODE
 
 SESSION
 /model               Show the model
+/save [file]         Save the conversation as Markdown
 /clear               Clear conversation and files read
 /details             Details of the last error
 /help                Available commands

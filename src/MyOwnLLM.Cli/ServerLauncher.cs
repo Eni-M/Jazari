@@ -17,6 +17,20 @@ public sealed class ServerLauncher(
 
     public static string DefaultLogDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "logs");
 
+    /// <summary>llama-server's key, in the gateway's data folder, where the gateway reads it (GatewayOptions.LlamaKeyFile).</summary>
+    public static string LlamaKeyFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "llama-server.key");
+
+    /// <summary>Makes the key once, at random; later starts reuse it, so a running gateway and a restarted server still agree.</summary>
+    public static string EnsureLlamaKey(string path)
+    {
+        if (!File.Exists(path))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            File.WriteAllText(path, Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+        }
+        return path;
+    }
+
     public async Task<ConnectionState> EnsureRunningAsync(JazariConfig? config, CancellationToken ct)
     {
         var (gatewayState, llamaUp) = (await GatewayStateAsync(ct), await llamaReady(ct));
@@ -77,7 +91,7 @@ public sealed class ServerLauncher(
         return ConnectionState.GatewayNotRunning;
     }
 
-    static string ReadLog(string path)
+    internal static string ReadLog(string path)
     {
         try
         {

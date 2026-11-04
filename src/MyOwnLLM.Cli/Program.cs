@@ -5,6 +5,9 @@ using MyOwnLLM.Cli.Terminal;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 ConsoleText.EnableEscapes();
+// --plain goes before any command; it's passed on as JAZARI_PLAIN so everything below reads one setting.
+if (args is ["--plain", .. var afterPlain]) { Environment.SetEnvironmentVariable("JAZARI_PLAIN", "1"); args = afterPlain; }
+var plain = ColorModeDetector.IsPlain(Environment.GetEnvironmentVariable);
 CliArgs cli;
 try { cli = CliArgs.Parse(args); }
 catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
@@ -31,7 +34,7 @@ if (cli.Command == "tune")
 {
     // The model must have the PC to itself while it's measured.
     if (ServerLauncher.StopServers(config!) > 0) Console.WriteLine("Stopped Jazari's servers; they start again with the new settings.");
-    var tuneTheme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001,
+    var tuneTheme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001 && !plain,
     edges: ColorModeDetector.DrawsEdges(Environment.GetEnvironmentVariable));
     var tuneUi = new Ui(Console.Out, tuneTheme, Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20));
     await new DeviceTuner(runner, tuneUi).MeasureAsync(config!, DeviceTuner.ReadMachine(), Tuning.DefaultPath, CancellationToken.None);
@@ -42,6 +45,39 @@ var updateAvailable = cli.Command == "session"
     ? Task.Run(() => UpdateCheck.IsUpdateAvailableAsync(runner, config, TimeSpan.FromSeconds(5), CancellationToken.None))
     : Task.FromResult(false);
 var settings = Settings.FromEnvironment(Environment.GetEnvironmentVariable);
+
+var version = typeof(CliArgs).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
+var theme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001 && !plain,
+    edges: ColorModeDetector.DrawsEdges(Environment.GetEnvironmentVariable));
+// One less than the terminal's columns, so a full line never makes the terminal wrap (the renderer relies on this).
+int Columns() => Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20);
+var width = Columns();
+var directory = Path.GetFullPath(cli.RepoPath ?? Directory.GetCurrentDirectory());
+
+using var health = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+async Task<bool> LlamaReady(CancellationToken ct)
+{
+    try { return (await health.GetAsync("http://127.0.0.1:8080/health", ct)).IsSuccessStatusCode; }
+    catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { return false; }
+}
+
+// Before the first-run key below: the doctor only looks. It makes no key and starts no server.
+if (cli.Command == "doctor")
+{
+    using var doctorHttp = new HttpClient { BaseAddress = settings.GatewayUrl, Timeout = TimeSpan.FromSeconds(5) };
+    if (settings.Key is not null) doctorHttp.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.Key);
+    var lawBook = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "law-book.db");
+    var checks = await new Doctor(config, settings.Key, new GatewayClient(doctorHttp), LlamaReady, File.Exists, ServerLauncher.DefaultLogDir, lawBook,
+        DeviceTuner.IsMeasured(Tuning.DefaultPath, config?.Model), ct => UpdateCheck.IsUpdateAvailableAsync(runner, config, TimeSpan.FromSeconds(5), ct))
+        .RunAsync(CancellationToken.None);
+    var doctorUi = new Ui(Console.Out, theme, Columns);
+    foreach (var check in checks)
+    {
+        doctorUi.Line($"{(check.Ok ? "ok " : "FIX")}  {check.Name}: {check.Detail}", check.Ok ? Tone.Primary : Tone.Danger);
+        if (check.Fix is not null) doctorUi.Line($"     {check.Fix}", Tone.Muted);
+    }
+    return checks.All(c => c.Ok) ? 0 : 1;
+}
 
 // First run: create a key through the gateway and save it as JAZARI_KEY, so the user never has to.
 var provisioner = new KeyProvisioner(runner, KeyProvisioner.SaveToEnvironment);
@@ -58,24 +94,10 @@ using var http = new HttpClient { BaseAddress = settings.GatewayUrl, Timeout = T
 if (key is not null) http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
 var gateway = new GatewayClient(http);
 
-var version = typeof(CliArgs).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
-var theme = new Theme(ColorModeDetector.Detect(Environment.GetEnvironmentVariable, Console.IsOutputRedirected), unicode: Console.OutputEncoding.CodePage == 65001,
-    edges: ColorModeDetector.DrawsEdges(Environment.GetEnvironmentVariable));
-// One less than the terminal's columns, so a full line never makes the terminal wrap (the renderer relies on this).
-int Columns() => Console.IsOutputRedirected ? 100 : Math.Max(Console.WindowWidth - 1, 20);
-var width = Columns();
-var directory = Path.GetFullPath(cli.RepoPath ?? Directory.GetCurrentDirectory());
-
 // Start llama-server and the gateway in the background if they aren't running yet.
-using var health = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-async Task<bool> LlamaReady(CancellationToken ct)
-{
-    try { return (await health.GetAsync("http://127.0.0.1:8080/health", ct)).IsSuccessStatusCode; }
-    catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { return false; }
-}
 // Tuning only ever runs when asked: a start uses what was measured, or safe CPU settings.
-Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), c.Model).ServerArgs(c.Model));
-Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.FallBack(DeviceTuner.ReadMachine()).ServerArgs(c.Model));
+Task<string[]> TunedArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), c.Model).ServerArgs(c.Model, ServerLauncher.EnsureLlamaKey(ServerLauncher.LlamaKeyFile)));
+Task<string[]> SafeArgs(JazariConfig c, CancellationToken ct) => Task.FromResult(DeviceTuner.FallBack(DeviceTuner.ReadMachine()).ServerArgs(c.Model, ServerLauncher.EnsureLlamaKey(ServerLauncher.LlamaKeyFile)));
 // A key the gateway doesn't know (e.g. its key file was reset): make a new one, like on first run. It's kept only if the
 // gateway answering here accepts it: a 401 from some other server on the port mustn't replace a working key.
 async Task<bool> Accepted(string candidate, CancellationToken ct)
@@ -101,8 +123,9 @@ if (cli.Command == "session")
 {
     var tuning = DeviceTuner.ForStart(Tuning.DefaultPath, DeviceTuner.ReadMachine(), config?.Model);
     var measured = DeviceTuner.IsMeasured(Tuning.DefaultPath, config?.Model);
-    // The panel prompt needs a real console; pipes and some IDE terminals get plain line input instead.
-    var piped = Console.IsInputRedirected || Console.IsOutputRedirected;
+    // The panel prompt needs a real console; pipes, some IDE terminals and --plain get plain line input instead.
+    var redirected = Console.IsInputRedirected || Console.IsOutputRedirected;
+    var piped = redirected || plain;
     // A real console gets the screen: it owns the window, draws the conversation and keeps the panel at the bottom.
     var terminal = piped ? null : new SystemTerminal();
     var screen = terminal is null ? null : new Screen(terminal, theme, bottom: true, paced: true);
@@ -112,7 +135,7 @@ if (cli.Command == "session")
     var interactive = new Session(gateway, ui,
         screen is null ? () => new MarkdownStream(Console.Out, theme, Columns()) : () => new MarkdownStream(screen, theme), directory)
     {
-        EchoQuestions = piped,
+        EchoQuestions = redirected, // a real console in --plain shows what was typed already
         Tuning = tuning,
         Confirm = editor is not null ? editor.Ask : question => { Console.Write($"{question} [y/n] "); return Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes"; },
     };

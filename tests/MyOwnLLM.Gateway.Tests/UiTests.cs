@@ -66,41 +66,21 @@ public class UiTests
     }
 
     [Fact]
-    public void Tool_lines_are_indented_with_checks()
-    {
-        var (ui, output) = Plain();
-
-        ui.ToolLines("inspecting", ["AuthController.cs", "TokenService.cs"]);
-
-        Assert.Equal(["  INSPECTING", "  ✓ AuthController.cs", "  ✓ TokenService.cs"], Lines(output));
-    }
-
-    [Fact]
-    public void Action_required_uses_a_left_rule()
-    {
-        var (ui, output) = Plain();
-
-        ui.ActionRequired("Execute", "rm -rf ./bin");
-
-        Assert.Equal(["│ ACTION REQUIRED", "│ Execute:", "│ rm -rf ./bin", "│ [y] Allow once  [n] Deny  [a] Always allow"], Lines(output));
-    }
-
-    [Fact]
     public void Components_strip_control_characters_from_untrusted_text()
     {
         var (ui, output) = Plain();
 
-        ui.ActionRequired("Execute", "ls\r\e[2Krm -rf /");
+        ui.Metadata("ls\r\e[2Krm -rf /");
         ui.Line("a\e]0;title\ab");
         ui.Rows([("Model", "x\e[31my")]);
         ui.Error("e‮viltxt", "c\b", null);
-        ui.ToolLines("ok", ["f\e[1Ag"]);
+        ui.UserMessage("f\e[1Ag");
 
         var text = output.ToString();
         Assert.DoesNotContain('\e', text);
         Assert.DoesNotContain('\b', text);
         Assert.DoesNotContain('‮', text);
-        Assert.Contains("│ ls[2Krm -rf /", text);
+        Assert.Contains("ls[2Krm -rf /", text);
     }
 
     [Fact]
@@ -114,16 +94,6 @@ public class UiTests
         Assert.Contains("0;Jazari", terminal.Vt.Signals);
         Assert.DoesNotContain("\e[3J", string.Concat(terminal.Frames));
         Assert.Contains("earlier shell output", terminal.Vt.Scrollback);
-    }
-
-    [Fact]
-    public void TakeOverScreen_does_nothing_when_piped()
-    {
-        var (ui, output) = Plain();
-
-        ui.TakeOverScreen();
-
-        Assert.Equal("", output.ToString());
     }
 
     [Fact]

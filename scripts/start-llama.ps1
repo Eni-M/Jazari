@@ -7,5 +7,5 @@ param(
 $server = "$PSScriptRoot\..\spike\bin\llama-server.exe"
 & $server -m $ModelPath `
     -dev none -t 6 --poll 0 `
-    -c 16384 --cache-ram 2048 -np 1 --cache-reuse 256 --no-webui `
+    -c 16384 --cache-ram 1024 -ctxcp 8 -np 1 --cache-reuse 256 --no-webui `
     --host 127.0.0.1 --port $Port

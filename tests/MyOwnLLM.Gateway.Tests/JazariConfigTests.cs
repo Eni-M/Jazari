@@ -56,5 +56,15 @@ public class JazariConfigTests : IDisposable
     }
 
     [Fact]
+    public void A_file_that_cant_be_read_loads_as_null()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(File)!);
+        System.IO.File.WriteAllText(File, "{}");
+        using var held = new FileStream(File, FileMode.Open, FileAccess.Read, FileShare.None); // an update writing it, say
+
+        Assert.Null(JazariConfig.Load(File));
+    }
+
+    [Fact]
     public void Stop_command_parses() => Assert.Equal("stop", CliArgs.Parse(["stop"]).Command);
 }

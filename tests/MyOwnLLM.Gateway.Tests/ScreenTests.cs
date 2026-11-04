@@ -127,8 +127,79 @@ public class ScreenTests
             screen.RenderNow();
             Assert.Equal(0, terminal.Vt.SoftWraps);
             Assert.Equal("edge", terminal.Vt.Text(height - 4));
-            Assert.Equal(1, terminal.Vt.Lines.Count(l => l.Contains("theend"))); // the end of the answer, exactly once
+            Assert.Equal(1, terminal.Vt.Everything.Count(l => l.Contains("theend"))); // the end of the answer, exactly once, on screen or in the scrollback
         }
+    }
+
+    [Fact]
+    public void A_taller_window_shows_no_row_twice()
+    {
+        var (screen, terminal, _) = Start();
+        for (var i = 1; i <= 30; i++) Say(screen, $"row {i}");
+
+        terminal.Resize(60, 20); // Windows Terminal keeps the window's top row and adds blank rows at the bottom
+        screen.RenderNow();
+        for (var i = 31; i <= 40; i++) Say(screen, $"row {i}");
+
+        Assert.Equal(Enumerable.Range(1, 40).Select(i => $"row {i}"), Conversation(terminal));
+        Assert.Equal("edge", terminal.Vt.Text(16));
+    }
+
+    [Fact]
+    public void A_shorter_then_taller_window_shows_no_row_twice_and_loses_none()
+    {
+        var (screen, terminal, _) = Start(height: 20);
+        for (var i = 1; i <= 30; i++) Say(screen, $"row {i}");
+
+        foreach (var height in new[] { 12, 20, 9, 24 })
+        {
+            terminal.Resize(60, height);
+            screen.RenderNow();
+        }
+        for (var i = 31; i <= 40; i++) Say(screen, $"row {i}");
+
+        Assert.Equal(Enumerable.Range(1, 40).Select(i => $"row {i}"), Conversation(terminal));
+    }
+
+    [Fact]
+    public void A_shorter_window_loses_no_row_of_an_answer_still_being_written()
+    {
+        var (screen, terminal, _) = Start(height: 30);
+        var answer = new AnswerBlock(Color);
+        screen.Append(answer);
+        answer.Feed("line 1\nline 2\n");
+        screen.Changed();
+
+        terminal.Resize(60, 12); // more rows gone than the conversation has: the rest of what left the window is blank
+        screen.RenderNow();
+        for (var i = 3; i <= 40; i++)
+        {
+            answer.Feed($"line {i}\n");
+            screen.Changed();
+        }
+
+        Assert.Equal(Enumerable.Range(1, 40).Select(i => $"line {i}"), Conversation(terminal));
+    }
+
+    [Fact]
+    public void Without_a_resize_an_answer_with_code_shows_every_row_once()
+    {
+        var (screen, terminal, panel) = Start(width: 100, height: 14);
+        var stream = new MarkdownStream(screen, Color);
+        var words = new List<string>();
+        for (var i = 1; i <= 60; i++)
+        {
+            words.Add($"w{i}");
+            stream.Write(i % 20 == 1 ? $"```csharp\nw{i}\n```\n" : i % 7 == 0 ? $"w{i}\n\n" : $"w{i}\n");
+            panel.Extra = i % 3; // the command menu opening and closing over the conversation
+            screen.RenderNow();
+        }
+        panel.Extra = 0;
+        stream.Complete();
+        stream.StampTime("3.2s");
+
+        var shown = Conversation(terminal).SelectMany(r => r.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Where(w => System.Text.RegularExpressions.Regex.IsMatch(w, @"^w\d+$"));
+        Assert.Equal(words, shown);
     }
 
     [Fact]

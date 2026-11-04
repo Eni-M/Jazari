@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using MyOwnLLM.Gateway.Llama;
 
 namespace MyOwnLLM.Gateway.Tests;
@@ -47,6 +49,63 @@ public class LlamaClientTests
         Assert.True(doc.RootElement.GetProperty("cache_prompt").GetBoolean());
         Assert.False(doc.RootElement.GetProperty("stream").GetBoolean());
         Assert.Equal("hello", doc.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task The_servers_key_goes_with_every_request_once_the_file_exists()
+    {
+        var keyFile = Path.Combine(Directory.CreateTempSubdirectory("llama-key").FullName, "llama-server.key");
+        var handler = new FakeHandler((_, _) => Json("""{"choices":[{"message":{"content":"hi"}}],"default_generation_settings":{"n_ctx":8192}}"""));
+        var client = new LlamaClient(new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8080") }, keyFile);
+
+        await client.ChatAsync(Hello, 5, default);
+        Assert.Null(handler.Request!.Headers.Authorization); // no file yet: no key (eval/'s own server has none)
+
+        File.WriteAllText(keyFile, "ABC123\n");
+        await client.ChatAsync(Hello, 5, default);
+        Assert.Equal("Bearer ABC123", handler.Request!.Headers.Authorization!.ToString());
+        Assert.Equal(8192, await client.ContextTokensAsync(default));
+        Assert.Equal("Bearer ABC123", handler.Request!.Headers.Authorization!.ToString()); // /props needs it too
+    }
+
+    [Fact]
+    public async Task The_gateway_builds_its_llama_client_with_the_data_folders_key_file()
+    {
+        var dir = Directory.CreateTempSubdirectory("llama-di").FullName;
+        File.WriteAllText(Path.Combine(dir, "llama-server.key"), "FROMDI");
+        var seen = new FakeHandler((_, _) => Json("""{"choices":[{"message":{"content":"hi"}}]}"""));
+        using var factory = new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Gateway:DataDir", dir);
+            b.ConfigureServices(s => s.AddHttpClient("llama").ConfigurePrimaryHttpMessageHandler(() => seen));
+        });
+
+        await factory.Services.GetRequiredService<ILlamaClient>().ChatAsync(Hello, 5, default);
+
+        Assert.Equal("Bearer FROMDI", seen.Request!.Headers.Authorization!.ToString());
+    }
+
+    [Fact]
+    public async Task Every_chat_request_pins_its_sampling()
+    {
+        var bodies = new List<string>();
+        foreach (var call in new Func<LlamaClient, Task>[]
+        {
+            c => c.ChatAsync(Hello, 5, default),
+            c => c.ChatAsync(Hello, 5, default, """{"type":"object"}"""),
+            async c => { await foreach (var _ in c.ChatStreamAsync(Hello, 5, default)) { } },
+        })
+        {
+            var (client, handler) = Create((_, _) => Json("""{"choices":[{"message":{"content":"hi"}}]}"""));
+            await call(client);
+            bodies.Add(handler.Body!);
+        }
+        foreach (var body in bodies)
+        {
+            var root = JsonDocument.Parse(body).RootElement;
+            Assert.Equal((0.2, 40, 0.95, 0.05), (root.GetProperty("temperature").GetDouble(), root.GetProperty("top_k").GetInt32(),
+                root.GetProperty("top_p").GetDouble(), root.GetProperty("min_p").GetDouble()));
+        }
     }
 
     [Fact]

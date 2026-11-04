@@ -17,14 +17,19 @@ public sealed class GatewayException(string message, string? cause, int? status,
 public interface IGatewayClient
 {
     Task<GatewayInfo> InfoAsync(CancellationToken ct);
-    IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null);
+    IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null);
     /// <summary>One answer, not streamed and outside the conversation, forced into the shape of <paramref name="jsonSchema"/>.</summary>
-    Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct);
+    Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null);
     Task<(string Id, string Summary)> StatusAsync(string project, CancellationToken ct);
     Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct);
     /// <summary>Has the model read the conversation and context now, so the next question only adds itself.</summary>
-    Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct);
+    Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct, string? conventions = null);
+    /// <summary>The law book's passages for a question, and whether there is a law book at all.</summary>
+    Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct);
 }
+
+/// <summary>A passage of Microsoft's .NET docs, with the page it's from.</summary>
+public sealed record DocPassage(string Title, string Url, string Text);
 
 public sealed class GatewayClient(HttpClient http) : IGatewayClient
 {
@@ -35,18 +40,18 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
         return Unexpected(() => new GatewayInfo(json.GetProperty("name").GetString() ?? "Jazari", json.GetProperty("model").GetString() ?? "?", json.GetProperty("version").GetString() ?? "?"));
     }
 
-    public async Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct)
+    public async Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null)
     {
-        var body = new { messages = new[] { new { role = "user", content = question } }, max_tokens = maxTokens, context, json_schema = jsonSchema };
+        var body = new { messages = new[] { new { role = "user", content = question } }, max_tokens = maxTokens, context, json_schema = jsonSchema, conventions };
         using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(body) }, ct);
         var json = await ReadJson(response, ct);
         return Unexpected(() => json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "");
     }
 
-    public async IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, [EnumeratorCancellation] CancellationToken ct, string? context = null)
+    public async IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, [EnumeratorCancellation] CancellationToken ct, string? context = null, string? conventions = null)
     {
         var messages = history.Select(t => new { role = t.Role, content = t.Content }).Append(new { role = "user", content = question });
-        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(new { messages, stream = true, context }) };
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(new { messages, stream = true, context, conventions }) };
         request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project)); // header values must be ASCII, and folders can have accents
         using var response = await SendAsync(request, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
@@ -67,12 +72,20 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
         return Unexpected(() => (json.GetProperty("id").GetString() ?? "", json.GetProperty("summary").GetString() ?? ""));
     }
 
-    public async Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct)
+    public async Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct, string? conventions = null)
     {
         var messages = history.Select(t => new { role = t.Role, content = t.Content });
-        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/warm") { Content = JsonContent.Create(new { messages, context }) };
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/warm") { Content = JsonContent.Create(new { messages, context, conventions }) };
         request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project)); // header values must be ASCII, and folders can have accents
         using var _ = await SendAsync(request, ct);
+    }
+
+    public async Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct)
+    {
+        using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Post, "/v1/docs") { Content = JsonContent.Create(new { question }) }, ct);
+        var json = await ReadJson(response, ct);
+        return Unexpected(() => (json.GetProperty("available").GetBoolean(), (IReadOnlyList<DocPassage>)json.GetProperty("passages").EnumerateArray()
+            .Select(p => new DocPassage(p.GetProperty("title").GetString() ?? "", p.GetProperty("url").GetString() ?? "", p.GetProperty("text").GetString() ?? "")).ToList()));
     }
 
     public async Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct)

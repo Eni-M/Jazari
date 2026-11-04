@@ -45,6 +45,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     /// <summary>Returns the report's path, or null when there was nothing to review or the review stopped early.</summary>
     public async Task<string?> RunAsync(string root, CancellationToken ct)
     {
+        if (!File.Exists(root) && !Directory.Exists(root)) { ui.Metadata($"Can't find {root}."); return null; }
         var (files, skipped) = ProjectFiles.Load(root);
         if (files.Count == 0) { ui.Metadata($"Nothing to review in {root}."); return null; }
 
@@ -55,7 +56,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         ui.Metadata($"Reviewing {files.Count} files in {units.Count} parts, riskiest first. {skipped} skipped. Ctrl+C stops; running it again carries on.");
 
         List<Finding> findings = [];
-        var failed = 0;
+        List<string> failed = [];
         for (var i = 0; i < units.Count; i++)
         {
             var key = Key(units[i]);
@@ -71,12 +72,14 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             catch (GatewayException e) { ui.Error("The review stopped.", e.Message, "Run it again to carry on."); return null; }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { ui.Metadata("Stopped. Run it again to carry on."); return null; }
 
-            if (found is null) { failed++; continue; } // not saved, so the next run tries this part again
+            if (found is null) { failed.Add(Describe(units[i])); continue; } // not saved, so the next run tries this part again
             File.AppendAllText(store, JsonSerializer.Serialize(new SavedPart(key, found)) + "\n");
             findings.AddRange(found);
         }
 
         var report = Path.Combine(storeDir, $"{Path.GetFileName(Path.GetFullPath(root).TrimEnd('\\', '/'))}-{DateTime.Now:yyyyMMdd-HHmm}.md");
+        // The same finding twice (a part read again after a change elsewhere in it, a model repeating itself) is one finding.
+        findings = [.. findings.DistinctBy(f => (f.File, f.Line, Squeeze(f.Quote), f.Problem))];
         File.WriteAllText(report, Report(root, files.Count, skipped, failed, findings));
         var ambiguous = findings.Count(f => f.Ambiguous);
         ui.Metadata($"{findings.Count(f => f.Verified)} verified, {(ambiguous > 0 ? $"{ambiguous} ambiguous, " : "")}" +
@@ -169,7 +172,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     /// </summary>
     static Finding Check(string file, string quote, string problem, string severity, string fix, List<ProjectFile> unit)
     {
-        var wanted = Squeeze(quote);
+        var wanted = Quoted(quote);
         if (wanted.Length >= MinQuoteChars && Word().IsMatch(wanted))
             // The named file first; the model sometimes names the wrong one of the part.
             foreach (var candidate in unit.OrderBy(f => f.Path.Equals(file, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
@@ -187,10 +190,16 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
 
     static string Squeeze(string text) => Spaces().Replace(text, " ").Trim();
 
-    static string Report(string root, int files, int skipped, int failed, List<Finding> findings)
+    /// <summary>
+    /// The line as the model meant it: small models wrap a quote in backticks or copy the line number in front of it
+    /// ("12: var x = 1;"), which used to leave a real line "unverified".
+    /// </summary>
+    static string Quoted(string quote) => Squeeze(LineNumber().Replace(Squeeze(quote).Trim('`'), "")).Trim('`').Trim();
+
+    static string Report(string root, int files, int skipped, List<string> failed, List<Finding> findings)
     {
         var text = new StringBuilder($"# Review of {root}\n\n{DateTime.Now:yyyy-MM-dd HH:mm}. {files} files read, {skipped} skipped");
-        text.Append(failed > 0 ? $", {failed} parts failed and will be retried on the next run.\n" : ".\n");
+        text.Append(failed.Count > 0 ? $", {failed.Count} parts failed and will be retried on the next run.\n" : ".\n");
         text.Append("\nThis is a small local model's opinion: check each finding. \"Verified\" only means the quoted line exists.\n");
         (string Title, Func<Finding, bool> In)[] groups =
         [
@@ -208,9 +217,14 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
                     .Append(string.IsNullOrWhiteSpace(f.Fix) ? "" : $"\n**Fix:** {f.Fix}\n");
         }
         if (findings.Count == 0) text.Append("\nNo findings.\n");
+        // Coverage: no findings in a part that was never reviewed isn't a clean bill of health, so the report names them.
+        if (failed.Count > 0)
+            text.Append($"\n## Not reviewed this run ({failed.Count})\n\nThe model's answer for these couldn't be read. The next run tries them again.\n\n")
+                .Append(string.Concat(failed.Select(f => $"- {f}\n")));
         return text.ToString();
     }
 
     [GeneratedRegex(@"\s+")] private static partial Regex Spaces();
+    [GeneratedRegex(@"^(?:line\s*)?\d+\s*[:|.]\s+", RegexOptions.IgnoreCase)] private static partial Regex LineNumber();
     [GeneratedRegex(@"[A-Za-z_]{3,}")] private static partial Regex Word();
 }

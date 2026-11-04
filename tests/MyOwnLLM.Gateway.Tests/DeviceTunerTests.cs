@@ -61,10 +61,36 @@ public class DeviceTunerTests : IDisposable
     [Fact]
     public void Server_args_keep_memory_small()
     {
-        var args = new Tuning("f", "Vulkan0", 4, 99, true, 16384).ServerArgs("m.gguf");
+        var args = new Tuning("f", "Vulkan0", 4, 99, true, 16384).ServerArgs("m.gguf", "k.key");
 
         Assert.Equal("8", args[Array.IndexOf(args, "-ctxcp") + 1]);
         Assert.Equal("1024", args[Array.IndexOf(args, "--cache-ram") + 1]);
+        Assert.Equal("8192", args[Array.IndexOf(args, "-cms") + 1]);
+        Assert.Equal("900", args[Array.IndexOf(args, "--sleep-idle-seconds") + 1]);
+    }
+
+    [Fact]
+    public void The_server_only_answers_the_gateway()
+    {
+        var args = new Tuning("f", "none", 4, 0, false, 16384).ServerArgs("m.gguf", @"C:\d\llama-server.key");
+
+        Assert.Equal(@"C:\d\llama-server.key", args[Array.IndexOf(args, "--api-key-file") + 1]);
+        Assert.Equal("localhost", args[Array.IndexOf(args, "--cors-origins") + 1]);
+        Assert.Contains("--no-cors-credentials", args);
+        Assert.Contains("--no-webui", args);
+    }
+
+    [Fact]
+    public void The_key_is_made_once_and_kept()
+    {
+        var path = Path.Combine(_dir, "sub", "llama-server.key");
+
+        ServerLauncher.EnsureLlamaKey(path);
+        var first = File.ReadAllText(path);
+        ServerLauncher.EnsureLlamaKey(path);
+
+        Assert.Equal(64, first.Length);
+        Assert.Equal(first, File.ReadAllText(path));
     }
 
     [Fact]
@@ -81,7 +107,7 @@ public class DeviceTunerTests : IDisposable
     [Fact]
     public void Server_args_carry_the_tuned_settings()
     {
-        var args = new Tuning("f", "Vulkan0", 4, 99, true, 16384).ServerArgs("m.gguf");
+        var args = new Tuning("f", "Vulkan0", 4, 99, true, 16384).ServerArgs("m.gguf", "k.key");
 
         Assert.Equal("Vulkan0", args[Array.IndexOf(args, "-dev") + 1]);
         Assert.Equal("99", args[Array.IndexOf(args, "-ngl") + 1]);

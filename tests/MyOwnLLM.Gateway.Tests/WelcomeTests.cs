@@ -47,6 +47,10 @@ public class WelcomeTests
         Assert.Contains("Directory   D:/work/api", Render(ConnectionState.Available, directory: @"D:\work\api"));
 
     [Fact]
+    public void A_folder_whose_name_starts_like_home_is_not_home() =>
+        Assert.Contains("Directory   " + (Home + "2\\api").Replace('\\', '/'), Render(ConnectionState.Available, directory: Home + "2\\api"));
+
+    [Fact]
     public void Welcome_fits_40_columns() =>
         Assert.All(Render(ConnectionState.GatewayNotRunning, width: 40, directory: Path.Combine(Home, "a-very-long-folder-name", "another-long-folder-name"), runningOn: IrisXe),
             l => Assert.True(l.Length <= 40, $"too long: '{l}'"));
@@ -55,12 +59,13 @@ public class WelcomeTests
     public void Available_has_no_setup_hint() => Assert.DoesNotContain(Render(ConnectionState.Available), l => l.StartsWith("TO GET STARTED"));
 
     [Theory]
-    [InlineData(ConnectionState.NoKey, "add-key", "JAZARI_KEY")]
+    [InlineData(ConnectionState.NoKey, "jazari update", "creates the key")]
     [InlineData(ConnectionState.GatewayNotRunning, "jazari update", "start-llama.ps1")]
-    [InlineData(ConnectionState.KeyRejected, "add-key", "JAZARI_KEY")]
+    [InlineData(ConnectionState.KeyRejected, "jazari update", "new key")]
     public void Problems_come_with_next_steps(ConnectionState state, string first, string second)
     {
         var text = string.Join("\n", Render(state));
+        if (state != ConnectionState.GatewayNotRunning) Assert.DoesNotContain("dotnet run", text); // installed users may have no clone
 
         Assert.Contains("TO GET STARTED", text);
         Assert.Contains(first, text);

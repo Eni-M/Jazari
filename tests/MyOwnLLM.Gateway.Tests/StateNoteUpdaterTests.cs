@@ -181,13 +181,25 @@ public class StateNoteUpdaterTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Full_queue_does_not_throw()
+    public async Task An_update_turned_away_by_a_full_queue_is_queued_by_the_next_exchange()
     {
-        var full = new RequestQueue(capacity: 1); // never run, so the first item fills it
-        _ = full.EnqueueAsync(WorkKind.Chat, _ => Task.FromResult(0), default);
-        var updater = new StateNoteUpdater(full, _llama, _state, NullLogger<StateNoteUpdater>.Instance, TimeSpan.Zero);
+        var queue = new RequestQueue(capacity: 1); // not running yet, so one waiting item fills it
+        using var filler = new CancellationTokenSource();
+        _ = queue.EnqueueAsync(WorkKind.Chat, _ => Task.FromResult(0), filler.Token);
+        var updater = new StateNoteUpdater(queue, _llama, _state, NullLogger<StateNoteUpdater>.Instance, TimeSpan.Zero);
+        _llama.Chat = _ => Task.FromResult("note");
 
-        updater.Record(Project, "q", "a");
-        updater.Record(Project, "q2", "a2"); // a dropped update must not block later ones from being queued
+        updater.Record(Project, "first question", "a"); // turned away: the queue is full
+        filler.Cancel(); // the waiting item leaves, making room
+        updater.Record(Project, "second question", "a");
+        using var stop = new CancellationTokenSource();
+        var running = queue.RunAsync(stop.Token);
+
+        await WaitForNote("note");
+        var sent = Assert.Single(_llama.Calls).Messages[^1].Content;
+        Assert.Contains("first question", sent); // the turned-away exchanges weren't lost
+        Assert.Contains("second question", sent);
+        stop.Cancel();
+        try { await running; } catch (OperationCanceledException) { }
     }
 }

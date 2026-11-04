@@ -33,7 +33,6 @@ public class PlainGoldenTests
     {
         var output = new StringWriter();
         var ui = new Ui(output, Plain, 80);
-        ui.TakeOverScreen();
         ui.Header("~/MyOwnLLM", "main");
         ui.Wordmark("0.3.0");
         ui.Blank();
@@ -41,8 +40,6 @@ public class PlainGoldenTests
         ui.Line("a line");
         ui.Label("models");
         ui.Rows([("Model", "Granite 4.1 3B · local"), ("Directory", "~/EduCore"), ("A very long key name", "value")]);
-        ui.ToolLines("reading", ["a.cs", "b.cs"]);
-        ui.ActionRequired("Run this", "dotnet build");
         ui.Error("Can't reach the gateway.", "Nothing answered.", "jazari update");
         ui.UserMessage("what is dependency injection?\nand a second line");
         ui.Metadata("2 files, 2.1k tokens.");

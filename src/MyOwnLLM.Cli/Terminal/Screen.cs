@@ -305,16 +305,11 @@ public sealed class Screen : IBlockSink
             row -= rows;
             block++;
         }
+        // Past the end (blank rows left the window too): rows the last block gains later still have to show.
+        if (block < _blocks.Count) row = Math.Min(row, Lines(_blocks[block], columns).Count);
     }
 
     bool Resizing => _paced && _clock.ElapsedMilliseconds - _lastResize < SettleMilliseconds;
-
-    void Retreat(int count, int columns)
-    {
-        _anchorRow -= count;
-        while (_anchorRow < 0 && _anchorBlock > 0) _anchorRow += Lines(_blocks[--_anchorBlock], columns).Count;
-        _anchorRow = Math.Max(_anchorRow, 0);
-    }
 
     static string Go(int row, int column = 0) => $"\e[{row + 1};{column + 1}H";
 
@@ -378,8 +373,9 @@ public sealed class Screen : IBlockSink
     /// <summary>
     /// The window changed size, or the layout width changed (a resize started or settled). A new width lays every block
     /// out again; the first visible row keeps its place in its block by proportion, measured from where it was last set,
-    /// so a long drag doesn't drift. A taller window shows rows from the scrollback again, as the terminal does; a
-    /// shorter one has pushed its top rows into the scrollback. The window is cleared (not the scrollback) and redrawn.
+    /// so a long drag doesn't drift. A shorter window has pushed its top rows into the scrollback. A taller one keeps its
+    /// top row and gains blank rows at the bottom: Windows Terminal, and VS Code on Windows, don't bring rows back from the
+    /// scrollback, so showing them again would show them twice. The window is cleared (not the scrollback) and redrawn.
     /// </summary>
     void Resize(int width, int height, int layout, StringBuilder frame)
     {
@@ -390,10 +386,10 @@ public sealed class Screen : IBlockSink
             var after = Lines(_blocks[block], layout).Count;
             _anchorRow = before == 0 ? 0 : Math.Min(after, row * after / before);
         }
-        if (_height > 0 && height != _height)
+        // ponytail: Windows terminals only. A terminal that does bring rows back (xterm.js outside Windows) has them erased by the clear below; detect it if Jazari ever ships there.
+        if (_height > 0 && height < _height)
         {
-            if (height > _height) Retreat(height - _height, layout);
-            else Advance(ref _anchorBlock, ref _anchorRow, _height - height, layout);
+            Advance(ref _anchorBlock, ref _anchorRow, _height - height, layout);
             _anchorAt = (_anchorBlock, _anchorRow, layout);
         }
         frame.Append("\e[0m\e[H\e[J");

@@ -20,6 +20,19 @@ public sealed partial record Tuning(
     /// </summary>
     public const int CacheRamMiB = 1024;
 
+    /// <summary>
+    /// llama-server's spacing between checkpoints at b11982, written out: later builds keep 8192 as the default but may
+    /// not, and every measurement here was made with it. Change it only with a recall/ run (docs/HANDOFF-task-6.md).
+    /// </summary>
+    public const int CheckpointMinStep = 8192;
+
+    /// <summary>
+    /// After 15 minutes without a request llama-server unloads the model and gives back its ~8.7 GB; the next question
+    /// loads it again (seconds on an SSD). /health and /props don't wake it, so jazari's checks and the gateway's context
+    /// size polling leave it asleep (checked on b11982 with a small model).
+    /// </summary>
+    public const int SleepIdleSeconds = 900;
+
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jazari", "tuning.json");
 
     /// <summary>
@@ -43,11 +56,15 @@ public sealed partial record Tuning(
     [GeneratedRegex(@"\(R\)|\(TM\)|\b(Intel|NVIDIA|AMD|GeForce|Radeon|Graphics)\b\s*", RegexOptions.IgnoreCase)]
     private static partial Regex Vendor();
 
-    public string[] ServerArgs(string model) =>
+    /// <param name="keyFile">The key only the gateway knows (ServerLauncher.EnsureLlamaKey): without it any program on the
+    /// PC, or a web page through the browser, could skip the gateway's key and queue. CORS stays closed to other sites.</param>
+    public string[] ServerArgs(string model, string keyFile) =>
     [
         "-m", model, "-dev", Device, "-ngl", GpuLayers.ToString(), "-t", Threads.ToString(), "--poll", "0",
         "-fa", FlashAttention ? "on" : "off", "-c", ContextTokens.ToString(), "--cache-ram", CacheRamMiB.ToString(), "-ctxcp", "8",
+        "-cms", CheckpointMinStep.ToString(), "--sleep-idle-seconds", SleepIdleSeconds.ToString(),
         "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", "8080",
+        "--api-key-file", keyFile, "--cors-origins", "localhost", "--no-cors-credentials",
     ];
 
     public static Tuning? Load(string path)

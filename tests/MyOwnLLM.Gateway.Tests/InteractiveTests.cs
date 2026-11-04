@@ -64,6 +64,23 @@ public class InteractiveTests : IDisposable
     }
 
     [Fact]
+    public void The_history_file_is_cut_back_once_it_doubles()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"jazari-history-{Guid.NewGuid():N}");
+        try
+        {
+            File.WriteAllLines(path, Enumerable.Range(0, 1001).Select(i => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"q{i}"))));
+
+            _ = new PromptEditor(new Ui(_screen, Color, () => 79), _screen, _terminal, () => Path.GetTempPath(), path);
+
+            var kept = File.ReadAllLines(path);
+            Assert.Equal(500, kept.Length);
+            Assert.Equal("q1000", System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(kept[^1])));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task A_question_asks_on_the_panel_and_takes_y()
     {
         _editor.Start();

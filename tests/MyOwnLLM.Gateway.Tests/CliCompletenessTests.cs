@@ -183,6 +183,18 @@ public class CliCompletenessTests : IDisposable
         Assert.Empty(Completions.For("hello", 5, _dir).Items);
     }
 
+    [Fact]
+    public void Tab_completes_a_quoted_path_with_spaces()
+    {
+        Directory.CreateDirectory(Path.Combine(_dir, "My Docs"));
+        File.WriteAllText(Path.Combine(_dir, "My Docs", "Notes.cs"), "");
+
+        var (start, items) = Completions.For("/edit \"My D", 11, _dir);
+        Assert.Equal(7, start);
+        Assert.Equal(["My Docs/"], items);
+        Assert.Equal(["My Docs/Notes.cs"], Completions.For("/edit \"My Docs/N", 16, _dir).Items);
+    }
+
     [Theory]
     [InlineData(new[] { "--help" }, "help")]
     [InlineData(new[] { "-h" }, "help")]

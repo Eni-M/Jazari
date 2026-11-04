@@ -14,7 +14,7 @@ Directory.CreateDirectory(options.DataDir);
 if (args is ["add-key", ..])
 {
     Console.WriteLine(new ApiKeyStore(options.KeyFile).AddKey());
-    Console.WriteLine("Store this key now; only its hash is kept. Set it as MYOWNLLM_KEY.");
+    Console.WriteLine("Store this key now; only its hash is kept. Set it as JAZARI_KEY.");
     return;
 }
 
@@ -38,13 +38,14 @@ builder.Services.AddSingleton<ModelLimits>();
 builder.Services.AddSingleton<LawBook>();
 builder.Services.AddHostedService<QueueWorker>();
 builder.Services.AddHybridCache();
-builder.Services.AddHttpClient<ILlamaClient, LlamaClient>(http =>
+builder.Services.AddHttpClient("llama", http =>
 {
     http.BaseAddress = new Uri(options.LlamaUrl);
     http.Timeout = options.RequestTimeout;
-});
+}).AddTypedClient<ILlamaClient>(http => new LlamaClient(http, options.LlamaKeyFile));
 
 var app = builder.Build();
+app.Use((http, next) => LocalOnly.Allows(http.Request) ? next(http) : Results.StatusCode(StatusCodes.Status403Forbidden).ExecuteAsync(http));
 app.MapGroup("/v1").AddEndpointFilter<ApiKeyFilter>().MapChatEndpoints();
 app.Run();
 
