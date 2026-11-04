@@ -27,7 +27,7 @@ FILES AND CODE
 /undo                Undo the last /edit
 /copy [n]            Copy code block n of the last answer (no number: the last
                      block)
-/review [path]       Review a whole project and write a report
+/review [path]       Review a whole project, or only what changed (--changed)
 /commit              Write a commit message for the staged changes
 
 SESSION

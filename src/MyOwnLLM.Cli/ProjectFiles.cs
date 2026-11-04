@@ -60,7 +60,7 @@ public static partial class ProjectFiles
     /// The project's .jazariignore, like Crush's .crushignore: one pattern a line, # for comments. "secrets/" leaves out a
     /// folder anywhere in the project, "*.generated.cs" a kind of file, "src/legacy/*" a path. * and ? are the wildcards.
     /// </summary>
-    static string[] IgnorePatterns(string root)
+    internal static string[] IgnorePatterns(string root)
     {
         try
         {
@@ -88,7 +88,7 @@ public static partial class ProjectFiles
             ? relative.Split('/').SkipLast(1).Any(folder => System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(pattern.TrimEnd('/'), folder))
             : System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(pattern, pattern.Contains('/') ? relative : Path.GetFileName(relative)));
 
-    static bool Wanted(string path)
+    internal static bool Wanted(string path)
     {
         var name = Path.GetFileName(path);
         return CodeExtensions.Contains(Path.GetExtension(path)) && !Noise().IsMatch(name) && !IsSecret(path);
@@ -109,7 +109,7 @@ public static partial class ProjectFiles
     public static bool IsSecret(string path) =>
         Secret().IsMatch(Path.GetFileName(path)) || path.Split('/', '\\').SkipLast(1).Any(SecretFolders.Contains);
 
-    static string? TryRead(string path)
+    internal static string? TryRead(string path)
     {
         try
         {

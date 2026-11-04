@@ -10,6 +10,7 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
           jazari diff "<question>"        one question about your uncommitted changes
           jazari commit                   a commit message for the staged changes, copied for git commit
           jazari review [path]            review a whole project and write a report
+          jazari review --changed         review only what changed since the last commit
           jazari status                   where we left off
           jazari feedback <ix-id> up|down rate an answer
           jazari tune                     measure the fastest settings for this PC (a few minutes)
@@ -44,6 +45,8 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
                 return new("doctor", null, null, true, null, null);
             case ["review"]:
                 return new("review", null, null, true, null, null);
+            case ["review", "--changed"]:
+                return new("review", "--changed", null, true, null, null);
             case ["review", var path] when !path.StartsWith("--"):
                 return new("review", path, null, true, null, null);
             case ["ask", var text, .. var rest] when !text.StartsWith("--"):

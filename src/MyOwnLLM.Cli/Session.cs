@@ -14,7 +14,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         ("/help", "Available commands"), ("/status", "Where are we left at?"), ("/model", "Show the model"),
         ("/copy [n]", "Copy code block n of the last answer (no number: the last block)"),
         ("/read <path>", "Read a file or folder for the next questions"), ("/diff [ref]", "Read your uncommitted changes (or the changes since ref)"),
-        ("/context", "What the next question will send"), ("/review [path]", "Review a whole project and write a report"),
+        ("/context", "What the next question will send"), ("/review [path]", "Review a whole project, or only what changed (--changed)"),
         ("/edit <file> <what>", "Change a file, after showing you the change"), ("/undo", "Undo the last /edit"),
         ("/commit", "Write a commit message for the staged changes"), ("/docs <question>", "Look it up in the .NET docs, without the model"),
         ("/save [file]", "Save the conversation as Markdown"),
@@ -130,6 +130,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/diff": return Stoppable(() => DiffAsync(Argument(input), ct), ct);
             case "/context": ShowContext(); break;
             case "/commit": return Stoppable(() => CommitAsync(ct), ct);
+            case "/review" when Argument(input) == "--changed": return Stoppable(() => ReviewChangedAsync(ct), ct);
             case "/review": return new ProjectReview(gateway, ui, ReviewDir).RunAsync(Resolve(Argument(input) ?? project), ct);
             case "/edit": return Stoppable(() => EditAsync(input.Split(' ', 2) is [_, var rest] ? rest : null, ct), ct);
             case "/undo": Undo(); break;
@@ -441,6 +442,16 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var (diff, hidden) = WithoutSecrets(output);
         if (hidden.Count > 0 && !quiet) ui.Metadata($"Left out the changes to {string.Join(", ", hidden)}: files like these hold keys and passwords.");
         return diff;
+    }
+
+    /// <summary>/review --changed: only what changed since the last commit, tracked or new (see ChangedCode).</summary>
+    async Task ReviewChangedAsync(CancellationToken ct)
+    {
+        var (exit, diff) = await SafeGitAsync(["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--relative", "-U0", "HEAD"], ct);
+        if (exit != 0) { ui.Metadata(exit == -1 ? "git isn't installed, or isn't on PATH." : "This folder isn't a git repository, or git couldn't read it."); return; }
+        var (_, untracked) = await SafeGitAsync(["ls-files", "--others", "--exclude-standard"], ct);
+        var changed = ChangedCode.Parts(project, ChangedCode.Ranges(diff), untracked.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        await new ProjectReview(gateway, ui, ReviewDir).RunAsync(project, ct, changed);
     }
 
     /// <summary>The diff without the files /read would never send either (.env, *.pem, appsettings.Production.json).</summary>

@@ -23,7 +23,7 @@ Inside a session:
 |---|---|
 | `/copy [n]` | Copies a code block of the last answer. Blocks are numbered on screen. |
 | `/read <path>` | Reads a file or folder for the next questions, up to about 5,000 tokens. |
-| `/review [path]` | Reviews a whole project, riskiest files first, and writes a report. Also `jazari review [path]`. It can be stopped and carries on; later runs only re-read what changed. |
+| `/review [path]` | Reviews a whole project, riskiest files first, and writes a report. Also `jazari review [path]`. It can be stopped and carries on; later runs only re-read what changed. `/review --changed` reads only what changed since the last commit, as whole methods: minutes, not hours. Reports mark findings new, still there or resolved. |
 | `/edit <file> <what>` | Asks for a change, shows it, and writes it only after you say yes. `/undo` puts it back. A `.cs` change that breaks the syntax is flagged first. Quote paths with spaces. |
 | `/docs <question>` | Shows the .NET docs passage for a question, with its page, without asking the model. |
 | `/save [file]` | Saves the conversation as Markdown in the project. |

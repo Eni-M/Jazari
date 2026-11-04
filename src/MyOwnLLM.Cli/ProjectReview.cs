@@ -7,7 +7,11 @@ using MyOwnLLM.Cli.Terminal;
 namespace MyOwnLLM.Cli;
 
 /// <param name="Ambiguous">The quote matches several lines, so which one the finding means isn't known.</param>
-public sealed record Finding(string File, int? Line, string Quote, string Problem, string Severity, string Fix, bool Verified, bool Ambiguous = false);
+public sealed record Finding(string File, int? Line, string Quote, string Problem, string Severity, string Fix, bool Verified, bool Ambiguous = false)
+{
+    /// <summary>Not in the project's previous review.</summary>
+    public bool New { get; init; }
+}
 
 /// <summary>
 /// Reviews a whole project by small parts, riskiest files first. Each finished part is saved straight away, so a stopped
@@ -43,15 +47,17 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         "quote, what can go wrong, and severity (high means an attacker gains something). Add a short fix only when it's clear.";
 
     /// <summary>Returns the report's path, or null when there was nothing to review or the review stopped early.</summary>
-    public async Task<string?> RunAsync(string root, CancellationToken ct)
+    /// <param name="changed">For /review --changed: the changed parts to read instead of the whole project (see ChangedCode),
+    /// and the changed files .jazariignore kept out.</param>
+    public async Task<string?> RunAsync(string root, CancellationToken ct, (List<ProjectFile> Parts, List<string> Ignored)? changed = null)
     {
         if (!File.Exists(root) && !Directory.Exists(root)) { ui.Metadata($"Can't find {root}."); return null; }
-        var (files, skipped) = ProjectFiles.Load(root);
+        var (files, skipped) = changed is { } c ? (c.Parts, 0) : ProjectFiles.Load(root);
         // A cloned repository's .jazariignore could hide its worst file from a security review: never silently.
-        var ignored = ProjectFiles.IgnoredFiles(root);
+        var ignored = changed?.Ignored ?? ProjectFiles.IgnoredFiles(root);
         if (files.Count == 0)
         {
-            ui.Metadata(ignored.Count == 0 ? $"Nothing to review in {root}."
+            ui.Metadata(ignored.Count == 0 ? (changed is null ? $"Nothing to review in {root}." : "No changed code to review since the last commit.")
                 : $"Nothing to review in {root}: the project's .jazariignore left out every file. It hid {string.Join(", ", ignored.Take(10))}{(ignored.Count > 10 ? $" and {ignored.Count - 10} more" : "")}.");
             return null;
         }
@@ -60,7 +66,9 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         Directory.CreateDirectory(storeDir);
         var store = Path.Combine(storeDir, Hash(Path.GetFullPath(root).ToLowerInvariant())[..16] + ".jsonl");
         var done = Saved(store);
-        ui.Metadata($"Reviewing {files.Count} files in {units.Count} parts, riskiest first. {skipped} skipped. Ctrl+C stops; running it again carries on.");
+        ui.Metadata(changed is null
+            ? $"Reviewing {files.Count} files in {units.Count} parts, riskiest first. {skipped} skipped. Ctrl+C stops; running it again carries on."
+            : $"Reviewing what changed since the last commit: {files.Select(f => f.Path).Distinct().Count()} files, {units.Count} parts. Ctrl+C stops; running it again carries on.");
         if (ignored.Count > 0) ui.Metadata($"The project's .jazariignore left out {ignored.Count} file{(ignored.Count == 1 ? "" : "s")}; the report names them.");
 
         List<Finding> findings = [];
@@ -85,10 +93,12 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             findings.AddRange(found);
         }
 
-        var report = Path.Combine(storeDir, $"{Path.GetFileName(Path.GetFullPath(root).TrimEnd('\\', '/'))}-{DateTime.Now:yyyyMMdd-HHmm}.md");
+        var report = Path.Combine(storeDir, $"{Path.GetFileName(Path.GetFullPath(root).TrimEnd('\\', '/'))}{(changed is null ? "" : "-changes")}-{DateTime.Now:yyyyMMdd-HHmm}.md");
         // The same finding twice (a part read again after a change elsewhere in it, a model repeating itself) is one finding.
         findings = [.. findings.DistinctBy(f => (f.File, f.Line, Squeeze(f.Quote), f.Problem))];
-        File.WriteAllText(report, Report(root, files.Count, skipped, failed, findings, ignored));
+        var history = Track(root, Path.Combine(storeDir, Hash(Path.GetFullPath(root).ToLowerInvariant())[..16] + ".findings.json"), findings);
+        findings = history.Current;
+        File.WriteAllText(report, Report(changed is null ? $"Review of {root}" : $"Review of the changes in {root}", files.Count, skipped, failed, findings, ignored, history));
         var ambiguous = findings.Count(f => f.Ambiguous);
         ui.Metadata($"{findings.Count(f => f.Verified)} verified, {(ambiguous > 0 ? $"{ambiguous} ambiguous, " : "")}" +
             $"{findings.Count(f => !f.Verified && !f.Ambiguous)} unverified. Report: {report}");
@@ -96,6 +106,35 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     }
 
     sealed record SavedPart(string Key, List<Finding> Findings);
+
+    /// <param name="Current">This run's findings, each marked new or not.</param>
+    /// <param name="Resolved">Earlier findings whose quoted line is gone from the file: fixed, or the code removed.</param>
+    /// <param name="Earlier">Earlier findings this run didn't report though their line is still there. A small model's findings
+    /// come and go between runs, so they're kept and listed rather than taken as fixed.</param>
+    sealed record History(List<Finding> Current, List<Finding> Resolved, List<Finding> Earlier);
+
+    /// <summary>
+    /// Each finding's story across reviews, kept per project like PR-Agent's finding state: new, still there, resolved.
+    /// Only a deterministic test resolves one (its quoted line is no longer in the file); a /review --changed of a few
+    /// members never resolves findings elsewhere, since those stay in the file and are carried on.
+    /// </summary>
+    static History Track(string root, string stateFile, List<Finding> current)
+    {
+        List<Finding> before = [];
+        try { if (File.Exists(stateFile)) before = JsonSerializer.Deserialize<List<Finding>>(File.ReadAllText(stateFile)) ?? []; }
+        catch (Exception e) when (e is JsonException or IOException) { } // unreadable: everything counts as new this once
+
+        static (string, string) Id(Finding f) => (f.File.ToLowerInvariant(), Quoted(f.Quote));
+        var now = current.Select(Id).ToHashSet();
+        var then = before.Select(Id).ToHashSet();
+        var folder = File.Exists(root) ? Path.GetDirectoryName(Path.GetFullPath(root))! : root;
+        var gone = before.Where(f => !now.Contains(Id(f))).ToLookup(f => ProjectFiles.TryRead(Path.Combine(folder, f.File)) is not { } text || !Squeeze(text).Contains(Quoted(f.Quote), StringComparison.Ordinal));
+        var marked = current.Select(f => f with { New = !then.Contains(Id(f)) }).ToList();
+
+        try { File.WriteAllText(stateFile, JsonSerializer.Serialize(marked.Concat(gone[false]).Select(f => f with { New = false }).ToList())); }
+        catch (IOException) { } // the report is still right; only the next run's comparison is lost
+        return new(marked, [.. gone[true]], [.. gone[false]]);
+    }
 
     static Dictionary<string, List<Finding>> Saved(string store)
     {
@@ -146,14 +185,14 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
                 var line = whole.Length <= maxChars ? whole : whole.Substring(at, Math.Min(maxChars, whole.Length - at));
                 if (Tokens(part.ToString()) + Tokens(line) > unitTokens && part.Length > 0)
                 {
-                    yield return file with { Text = part.ToString(), FirstLine = partStart };
+                    yield return file with { Text = part.ToString(), FirstLine = file.FirstLine + partStart - 1 };
                     part.Clear();
                     partStart = lineNumber;
                 }
                 part.Append(line).Append('\n');
             }
         }
-        if (part.Length > 0) yield return file with { Text = part.ToString(), FirstLine = partStart };
+        if (part.Length > 0) yield return file with { Text = part.ToString(), FirstLine = file.FirstLine + partStart - 1 };
     }
 
     static int Tokens(string text) => (text.Length + 3) / 4;
@@ -204,10 +243,13 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
     /// </summary>
     static string Quoted(string quote) => Squeeze(LineNumber().Replace(Squeeze(quote).Trim('`'), "")).Trim('`').Trim();
 
-    static string Report(string root, int files, int skipped, List<string> failed, List<Finding> findings, List<string> ignored)
+    static string Report(string heading, int files, int skipped, List<string> failed, List<Finding> findings, List<string> ignored, History history)
     {
-        var text = new StringBuilder($"# Review of {root}\n\n{DateTime.Now:yyyy-MM-dd HH:mm}. {files} files read, {skipped} skipped");
+        var text = new StringBuilder($"# {heading}\n\n{DateTime.Now:yyyy-MM-dd HH:mm}. {files} files read, {skipped} skipped");
         text.Append(failed.Count > 0 ? $", {failed.Count} parts failed and will be retried on the next run.\n" : ".\n");
+        var fresh = findings.Count(f => f.New);
+        if (history.Resolved.Count + history.Earlier.Count > 0 || fresh < findings.Count)
+            text.Append($"\nSince the last review: {fresh} new, {findings.Count - fresh} still there, {history.Resolved.Count} resolved.\n");
         text.Append("\nThis is a small local model's opinion: check each finding. \"Verified\" only means the quoted line exists.\n");
         (string Title, Func<Finding, bool> In)[] groups =
         [
@@ -221,10 +263,17 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             if (group.Count == 0) continue;
             text.Append($"\n## {title} ({group.Count})\n");
             foreach (var f in group)
-                text.Append($"\n### [{f.Severity}] {f.File}{(f.Line is { } line ? $":{line}" : "")}\n\n{f.Problem}\n\n`{f.Quote.Replace('`', '\'')}`\n")
+                text.Append($"\n### [{f.Severity}] {f.File}{(f.Line is { } line ? $":{line}" : "")}{(f.New ? " (new)" : "")}\n\n{f.Problem}\n\n`{f.Quote.Replace('`', '\'')}`\n")
                     .Append(string.IsNullOrWhiteSpace(f.Fix) ? "" : $"\n**Fix:** {f.Fix}\n");
         }
         if (findings.Count == 0) text.Append("\nNo findings.\n");
+        if (history.Earlier.Count > 0)
+            text.Append($"\n## From earlier reviews, not reported this time ({history.Earlier.Count})\n\nThe quoted line is still there. " +
+                    "A small model doesn't report the same things every run, so these stay open until the line changes.\n\n")
+                .Append(string.Concat(history.Earlier.Select(f => $"- [{f.Severity}] {f.File}: {f.Problem} `{f.Quote.Replace('`', '\'')}`\n")));
+        if (history.Resolved.Count > 0)
+            text.Append($"\n## Resolved since the last review ({history.Resolved.Count})\n\nThe line each one quoted is no longer in the file.\n\n")
+                .Append(string.Concat(history.Resolved.Select(f => $"- [{f.Severity}] {f.File}: {f.Problem}\n")));
         // Coverage: no findings in a part that was never reviewed isn't a clean bill of health, so the report names them.
         if (failed.Count > 0)
             text.Append($"\n## Not reviewed this run ({failed.Count})\n\nThe model's answer for these couldn't be read. The next run tries them again.\n\n")
