@@ -49,6 +49,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     public Func<string, bool> Confirm { get; init; } = _ => false;
     /// <summary>Where reviews keep their progress and reports.</summary>
     public string ReviewDir { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "reviews");
+    /// <summary>Where each project's last conversation is kept, so it carries on after leaving. Null keeps it in memory only, as one-off commands do.</summary>
+    public string? ConversationDir { get; init; }
     /// <summary>The settings the model runs on, for the line under the prompt.</summary>
     public Tuning? Tuning { get; init; }
     /// <summary>While the servers start: the model's short name. Null once they've answered or given up.</summary>
@@ -60,6 +62,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     AnswerTimings? _timings;
     int _droppedTurns; // questions the prompt no longer holds, as last said; /clear starts again
     string? _lastAnswer; // the id and numbers an answer used to print, for /details
+    bool _saveFailureShown;
 
     const int MaxReadTokens = 5000; // answers fall from 5.5 to 2.8 tok/s at this size, and keep falling beyond it
     const int EditAnswerTokens = 1000;
@@ -136,7 +139,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/undo": Undo(); break;
             case "/docs": return DocsAsync(Argument(input), ct);
             case "/save": Save(Argument(input)); break;
-            case "/clear": _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ui.Metadata("Conversation cleared."); break;
+            case "/clear": _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ForgetSaved(); ui.Metadata("Conversation cleared."); break;
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
             case "/details": Details(); break;
             case "/exit": ExitRequested = true; break;
@@ -809,5 +812,65 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     {
         _history.Add(new ChatTurn("user", question));
         _history.Add(new ChatTurn("assistant", answer));
+        SaveConversation();
+    }
+
+    /// <summary>The file for this project. The name is a hash, so a listing of the folder doesn't show which projects were worked on.</summary>
+    string SavedPath => Path.Combine(ConversationDir!, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+        Encoding.UTF8.GetBytes(Path.GetFullPath(project).TrimEnd('\\', '/').ToLowerInvariant()))) + ".json");
+
+    /// <summary>
+    /// Carries on this project's last conversation, if there is one. The turns go back exactly as they were sent, and with
+    /// history the gateway keeps the note it began with (ConversationNotes), so the prompt starts the same and the cache
+    /// still fits. Files from /read and /diff stay behind: they may have changed since. A damaged file just starts fresh.
+    /// </summary>
+    public void Resume()
+    {
+        if (ConversationDir is null) return;
+        List<ChatTurn?>? turns;
+        try { turns = System.Text.Json.JsonSerializer.Deserialize<List<ChatTurn?>>(File.ReadAllText(SavedPath)); }
+        catch (Exception e) when (e is System.Text.Json.JsonException or IOException or UnauthorizedAccessException) { return; }
+        if (turns is not { Count: > 0 } || turns.Count % 2 != 0) return;
+        for (var i = 0; i < turns.Count; i++)
+            if (turns[i]?.Content is null || turns[i]!.Role != (i % 2 == 0 ? "user" : "assistant")) return;
+        _history.AddRange(turns!);
+        var questions = _history.Count / 2;
+        ui.Metadata($"Carrying on from your last conversation ({questions} question{(questions == 1 ? "" : "s")}). /clear starts over.");
+    }
+
+    /// <summary>After every answer rather than at /exit, so closing the window or a crash loses nothing. Written whole, then moved into place.</summary>
+    void SaveConversation()
+    {
+        if (ConversationDir is null) return;
+        var saving = $"{SavedPath}.{Environment.ProcessId}.tmp";
+        try
+        {
+            Directory.CreateDirectory(ConversationDir);
+            File.WriteAllText(saving, System.Text.Json.JsonSerializer.Serialize(_history));
+            File.Move(saving, SavedPath, overwrite: true); // ponytail: two windows in one folder, the last to answer wins
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            if (_saveFailureShown) return;
+            _saveFailureShown = true;
+            ui.Metadata($"Couldn't save this conversation, so it won't carry on after you leave: {e.Message}");
+        }
+        finally
+        {
+            // A half-way copy mustn't outlive the save: /clear only knows the real file.
+            try { File.Delete(saving); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    void ForgetSaved()
+    {
+        if (ConversationDir is null) return;
+        try { File.Delete(SavedPath); }
+        catch (DirectoryNotFoundException) { } // nothing was ever saved
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            ui.Metadata($"Couldn't delete the saved conversation, so it may come back next time: {e.Message}");
+        }
     }
 }

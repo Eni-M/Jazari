@@ -27,6 +27,7 @@ public static class InputLoop
         // Like any good CLI, open even when setup is incomplete, and say what's missing instead of exiting.
         var state = hasKey ? await session.ConnectAsync(CancellationToken.None) : ConnectionState.NoKey;
         Welcome.Render(ui, version, session.ModelName, directory, state, runningOn);
+        session.Resume();
         ui.Blank();
         await LoopAsync(session, ui, reader, updateAvailable, Task.CompletedTask);
     }
@@ -60,6 +61,7 @@ public static class InputLoop
             await starting.StopAsync();
             ui.Replay(report);
             Welcome.Opened(ui, state, clock.Elapsed, measured);
+            session.Resume(); // a question typed during the start waits for this, so it goes with the history
         }
 
         // Ctrl+Break while idle, or anything else that ends the process, skips StopAsync: put the cursor back anyway.

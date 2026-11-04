@@ -138,6 +138,7 @@ if (cli.Command == "session")
     {
         EchoQuestions = redirected, // a real console in --plain shows what was typed already
         Tuning = tuning,
+        ConversationDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "conversations"),
         Confirm = editor is not null ? editor.Ask : question => { Console.Write($"{question} [y/n] "); return Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes"; },
     };
     if (editor is not null)
