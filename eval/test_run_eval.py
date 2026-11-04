@@ -84,6 +84,12 @@ class ServerArgsTests(unittest.TestCase):
         self.assertEqual(args[args.index("-ctxcp") + 1], "8")
         self.assertEqual(args[args.index("--cache-ram") + 1], "1024")
 
+    def test_a_router_preset_replaces_the_model_and_keeps_one_loaded(self):
+        args = self.args(router_preset="lanes.ini")
+        self.assertEqual(args[args.index("--models-preset") + 1], "lanes.ini")
+        self.assertEqual(args[args.index("--models-max") + 1], "1")
+        self.assertNotIn("-m", args)
+
 
 class ScenarioTests(unittest.TestCase):
     def test_read_context_is_about_2000_tokens_of_real_code(self):

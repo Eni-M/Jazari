@@ -14,6 +14,9 @@ spike/bin-*/
 spike/dl/
 eval/results/*.json
 eval/results/recall/
+# Private: names from Eni-M's own repos, and code written for them (eval/repo_bench.py)
+eval/repo/tasks.local.json
+eval/results/repo/
 
 # The law book is built, not committed (lawbook/build.py)
 lawbook/out/

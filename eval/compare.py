@@ -9,7 +9,7 @@ import argparse, glob, json, math, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from score import pick, rescore
+from score import held_out, pick, rescore
 
 
 def load():
@@ -99,9 +99,34 @@ def pair_report(base, candidate):
     return "\n".join(lines)
 
 
+def pooled_report(base, candidate, repo_base, repo_candidate):
+    """The ship rule for /deep: the questions and repo tasks together on dev, then held-out on its own. At 39/45 a run can gain
+    at most 6 questions, so the questions alone could pass only at exactly 6 to 0."""
+    pool = lambda run, repo: {"label": run["label"], "answers": run["answers"] + repo["answers"]}
+    def part(run, keep):
+        return {"answers": [a for a in run["answers"] if keep(a["id"])]}
+    both_base, both_candidate = pool(base, repo_base), pool(candidate, repo_candidate)
+    dev = paired(part(both_base, lambda i: not held_out(i)), part(both_candidate, lambda i: not held_out(i)))
+    wins, losses = len(dev["gained"]), len(dev["lost"])
+    right = lambda run: f'{sum(a["passed"] for a in run["answers"])}/{len(run["answers"])}'
+    held_base, held_candidate = part(both_base, held_out), part(both_candidate, held_out)
+    return "\n".join([f'{candidate["label"]} against {base["label"]}, questions and repo tasks together',
+                      f"dev: {wins} gained, {losses} lost, exact McNemar p = {mcnemar_p(wins, losses):.2f}",
+                      f"held-out: {right(held_candidate)} against {right(held_base)}"])
+
+
+def load_repo(label):
+    path = os.path.join(HERE, "results", "repo", f"{label}.json")
+    if not os.path.exists(path):
+        sys.exit(f"no repo benchmark run named {label} in eval/results/repo")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--pair", nargs=2, metavar=("BASE", "CANDIDATE"), help="labels of two saved runs to compare question by question")
+    parser.add_argument("--with-repo", action="store_true", help="with --pair: also pool the repo benchmark's runs of the same labels")
     args = parser.parse_args()
     with open(os.path.join(HERE, "questions.json"), encoding="utf-8") as f:
         questions = json.load(f)
@@ -112,6 +137,8 @@ if __name__ == "__main__":
         if missing:
             sys.exit(f"no saved run named {', '.join(missing)} in eval/results")
         print(pair_report(found[args.pair[0]], found[args.pair[1]]))
+        if args.with_repo:
+            print(pooled_report(found[args.pair[0]], found[args.pair[1]], load_repo(args.pair[0]), load_repo(args.pair[1])))
         print()
     print(table(all_results))
     print()

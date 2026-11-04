@@ -203,8 +203,10 @@ def save_failure(label, reason, folder=os.path.join(HERE, "results")):
         json.dump({"label": label, "failed": reason}, f, indent=1)
 
 
-def chat(messages, max_tokens=MAX_TOKENS, json_schema=None, port=PORT):
+def chat(messages, max_tokens=MAX_TOKENS, json_schema=None, port=PORT, model=None):
     body = {"messages": messages, "max_tokens": max_tokens, "cache_prompt": True, "stream": False, "temperature": TEMPERATURE}
+    if model:  # which lane, when the server is a router
+        body["model"] = model
     if json_schema:
         body["json_schema"] = json.loads(json_schema)
     request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", json.dumps(body).encode(), {"Content-Type": "application/json"})
@@ -213,7 +215,9 @@ def chat(messages, max_tokens=MAX_TOKENS, json_schema=None, port=PORT):
 
 
 def server_args(a):
-    # The same settings as Tuning.ServerArgs.
+    # The same settings as Tuning.ServerArgs. With a router preset the models and their settings come from the preset instead.
+    if getattr(a, "router_preset", None):
+        return [a.llama, "--models-preset", a.router_preset, "--models-max", "1", "--no-webui", "--host", "127.0.0.1", "--port", str(PORT)]
     return [a.llama, "-m", a.model, "-dev", a.device, "-ngl", str(a.gpu_layers), "-t", str(a.threads), "--poll", "0", "-fa", "on",
             "-c", "16384", "--cache-ram", "1024", "-ctxcp", "8", "-np", "1", "--cache-reuse", "256", "--no-webui", "--host", "127.0.0.1", "--port", str(PORT)] + ([] if a.reasoning == "auto" else ["--reasoning", a.reasoning])
 
@@ -226,12 +230,16 @@ def main():
     parser.add_argument("--device", default="none")
     parser.add_argument("--gpu-layers", type=int, default=0)
     parser.add_argument("--reasoning", default="auto", choices=["auto", "on", "off"], help="a model's own thinking; off leaves its answer alone within the token cap")
+    parser.add_argument("--router-preset", help="run llama-server in router mode on this preset file (see measure_lanes.preset_text), asking for --model-name")
+    parser.add_argument("--model-name", help="the preset section to ask, with --router-preset")
     parser.add_argument("--scenarios", action="store_true", help="also time /read, /edit, /review and a conversation")
     parser.add_argument("--limit", type=int, help="only the first N questions, for a quick check")
     parser.add_argument("--llama", default=os.path.join(os.environ.get("LOCALAPPDATA", ""), "Jazari", "llama", "llama-server.exe"))
     parser.add_argument("--law-book", help="send the plain questions through a temporary gateway (port 5099, its own data folder) "
                         "that searches this law book file; the scenarios stay as they are")
     a = parser.parse_args()
+    if bool(a.router_preset) != bool(a.model_name):
+        sys.exit("--router-preset and --model-name go together")
     if a.law_book:
         if not os.path.isfile(a.law_book):
             sys.exit(f"no law book at {a.law_book}: build it with py -I lawbook/build.py")
@@ -251,7 +259,7 @@ def main():
     gateway, folder = [], None
     try:
         try:
-            ask = lambda q: chat([{"role": "system", "content": system}, {"role": "user", "content": q["question"]}])
+            ask = lambda q: chat([{"role": "system", "content": system}, {"role": "user", "content": q["question"]}], model=a.model_name)
             if a.law_book:
                 folder = tempfile.mkdtemp(prefix="jazari-eval-")
                 env = gateway_env(folder, PORT, GATEWAY_PORT, a.law_book)

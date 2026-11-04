@@ -83,9 +83,13 @@ def wait_for_gateway(gateway, key, seconds=60, port=GATEWAY_PORT):
     raise ServerDidNotStart(f"the gateway wasn't ready after {seconds} s")
 
 
-def gateway_chat(key, messages, max_tokens, port=GATEWAY_PORT):
+def gateway_chat(key, messages, max_tokens, port=GATEWAY_PORT, context=None, deep=False):
     """What the CLI sends, without a project folder: no project note goes into the prompt."""
     body = {"messages": messages, "max_tokens": max_tokens, "stream": False}
+    if context:
+        body["context"] = context
+    if deep:
+        body["deep"] = True
     request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", json.dumps(body).encode(),
                                      {"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
     with urllib.request.urlopen(request, timeout=1800) as response:

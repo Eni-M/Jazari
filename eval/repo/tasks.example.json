@@ -1,0 +1,4 @@
+[
+  {"id": "example-OrderService-RefundAsync", "repo": "C:/path/to/repo", "commit": "abc1234", "file": "Services/OrderService.cs", "method": "RefundAsync",
+   "request": "Write the method RefundAsync in full.", "test_filter": "FullyQualifiedName~OrderServiceTests", "category": "repo-tested"}
+]
