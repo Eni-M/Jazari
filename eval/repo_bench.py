@@ -13,6 +13,7 @@ import argparse, difflib, json, os, re, shutil, statistics, subprocess, sys, tem
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from gateway import (GATEWAY_DLL, GATEWAY_PORT, LLAMA_PORT, add_key, build_gateway, gateway_chat, gateway_env, launch, stamp, start_server, stop, wait_for_gateway)
+from run_eval import wait_until_ready
 from score import held_out
 
 TASKS = os.path.join(HERE, "repo", "tasks.local.json")
@@ -226,11 +227,11 @@ def attempt(task, tree, ask):
         return None
     with open(path, encoding="utf-8", errors="replace") as f:
         context = f"--- {os.path.basename(task['file'])} ---\n{f.read()}\n"
-    started = time.time()
+    started, error = time.time(), None
     try:
         answer = ask(task["request"], context)
     except OSError as e:  # the model server went away: counts as a miss, not a crash after an hour's run
-        answer, _ = "", e
+        answer, error = "", str(e)
     seconds = round(time.time() - started, 1)
     code = first_code_block(answer)
     compiled, tests_passed = False, None
@@ -246,7 +247,7 @@ def attempt(task, tree, ask):
             tests_passed = tree.test(task["project"], task["test_filter"])
     tree.reset(task["file"])
     return {"id": task["id"], "category": task["category"], "passed": passed(task, compiled, tests_passed), "compiled": compiled, "tests_passed": tests_passed,
-            "closeness": closeness(code or "", original), "seconds": seconds, "answer": answer}
+            "closeness": closeness(code or "", original), "seconds": seconds, "error": error, "answer": answer}
 
 
 def run_bench(a):
@@ -265,6 +266,7 @@ def run_bench(a):
     trees = {}
     answers = []
     try:
+        wait_until_ready(server, LLAMA_PORT, seconds=300)  # a request before the model has loaded fails at once and counts as a miss
         key = add_key(env, folder)
         gateway = launch(["dotnet", GATEWAY_DLL], GATEWAY_PORT, env=env, cwd=folder)
         processes.append(gateway)
