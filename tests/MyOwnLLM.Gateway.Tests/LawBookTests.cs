@@ -47,13 +47,30 @@ public class LawBookTests : IDisposable
             create.CommandText = "CREATE VIRTUAL TABLE chunks USING fts5(title, text, url UNINDEXED, tokenize=\"porter unicode61\")";
             create.ExecuteNonQuery();
         }
-        foreach (var (title, text, url) in rows)
+        var list = rows.ToList();
+        foreach (var (title, text, url) in list)
         {
             using var insert = db.CreateCommand();
             insert.CommandText = "INSERT INTO chunks(title, text, url) VALUES ($t, $x, $u)";
             insert.Parameters.AddWithValue("$t", title);
             insert.Parameters.AddWithValue("$x", text);
             insert.Parameters.AddWithValue("$u", url);
+            insert.ExecuteNonQuery();
+        }
+        using (var create = db.CreateCommand())
+        {
+            create.CommandText = "CREATE VIRTUAL TABLE pages USING fts5(title, description, slug, url UNINDEXED, tokenize=\"porter unicode61\")";
+            create.ExecuteNonQuery();
+        }
+        // Each page once: its title without the section's heading, and its first passage standing in for the docs' one-line description.
+        foreach (var page in list.GroupBy(r => r.Url.Split('#')[0]))
+        {
+            using var insert = db.CreateCommand();
+            insert.CommandText = "INSERT INTO pages(title, description, slug, url) VALUES ($t, $d, $s, $u)";
+            insert.Parameters.AddWithValue("$t", page.First().Title.Split(':')[0]);
+            insert.Parameters.AddWithValue("$d", page.First().Text);
+            insert.Parameters.AddWithValue("$s", page.Key.Replace("https://learn.microsoft.com/", "").Replace('/', ' ').Replace('-', ' '));
+            insert.Parameters.AddWithValue("$u", page.Key);
             insert.ExecuteNonQuery();
         }
     }
@@ -118,13 +135,60 @@ public class LawBookTests : IDisposable
         Assert.Contains("HasMany", book.Search("How do I configure a one-to-many relationship?")[0].Text);
     }
 
-    [Fact] public void A_question_needs_three_quarters_of_its_words_in_the_passage()
+    [Fact] public void A_page_must_be_about_half_the_question()
     {
-        // Every word is somewhere in the book. The Records passage holds struct, equality and record but not callers, field
-        // or lambda: half the question, which is a near-theme trap, not an answer.
+        // Every word is somewhere in the book, but no page is about most of them: a near-theme trap, not an answer.
         var book = Book();
-        Assert.Empty(book.Search("Struct equality, record callers, field or lambda?"));
-        Assert.NotEmpty(book.Search("Struct equality, record values or lambda?"));
+        Assert.Empty(book.Search("Struct equality, console hello, lambda request?"));
+        Assert.NotEmpty(book.Search("Record equality values?"));
+    }
+
+    [Fact] public void A_passage_that_shares_words_on_a_page_about_something_else_is_not_sent()
+    {
+        // A short command page held "store" and "password" and beat the real answer on word matching alone.
+        var found = Book([
+            ("dotnet nuget update source command: Synopsis", "dotnet nuget update source [--password <PASSWORD>] [--store-password-in-clear-text]", "https://learn.microsoft.com/dotnet/core/tools/dotnet-nuget-update-source#synopsis"),
+            ("Hash passwords in ASP.NET Core: Overview", "Store user passwords as a salted hash with PasswordHasher.", "https://learn.microsoft.com/aspnet/core/security/data-protection/consumer-apis/password-hashing"),
+        ]).Search("How should I store user passwords?");
+        Assert.NotEmpty(found);
+        Assert.All(found, p => Assert.Contains("password-hashing", p.Url));
+    }
+
+    [Fact] public void Passages_come_from_one_page()
+    {
+        // Two pages joined together read as one text to the model, which has no way to tell them apart.
+        var found = Book([
+            ("Output caching: Add the middleware", "Call AddOutputCache to add the output caching middleware.", "https://learn.microsoft.com/aspnet/core/performance/caching/output#add"),
+            ("Output caching: Policies", "Output caching policies decide how long output stays cached.", "https://learn.microsoft.com/aspnet/core/performance/caching/output#policies"),
+            ("Output caching in gRPC", "Output caching does not apply to gRPC output.", "https://learn.microsoft.com/aspnet/core/grpc/caching"),
+        ]).Search("What does output caching do?");
+        Assert.NotEmpty(found);
+        Assert.Single(found.Select(p => p.Url.Split('#')[0]).Distinct());
+    }
+
+    [Fact] public void The_answering_passage_holds_the_questions_rarest_word()
+    {
+        // The page is right, but only one of its passages is about what's asked.
+        var found = Book([
+            ("Caching: Overview", "Caching keeps results in memory and makes results quicker.", "https://learn.microsoft.com/aspnet/core/caching#overview"),
+            ("Caching: Eviction", "Caching eviction removes results from memory.", "https://learn.microsoft.com/aspnet/core/caching#eviction"),
+        ]).Search("What is caching eviction?");
+        Assert.NotEmpty(found);
+        Assert.All(found, p => Assert.Contains("#eviction", p.Url));
+    }
+
+    [Fact] public void A_book_without_the_pages_table_means_no_passages()
+    {
+        var options = Options();
+        Write(options.LawBookFile, SmallBook);
+        using (var db = new SqliteConnection($"Data Source={options.LawBookFile};Pooling=False"))
+        {
+            db.Open();
+            using var cmd = db.CreateCommand();
+            cmd.CommandText = "DROP TABLE pages";
+            cmd.ExecuteNonQuery();
+        }
+        Assert.Empty(new LawBook(options).Search("How do I send a not found result from a minimal API?"));
     }
 
     [Fact] public void At_most_300_tokens_come_back()

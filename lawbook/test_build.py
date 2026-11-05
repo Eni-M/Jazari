@@ -1,6 +1,7 @@
 import os, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import build
 from build import chunks, clean, first_of_each, inline_snippets, keep_latest_version, learn_url, strip_front_matter
 
 
@@ -159,6 +160,22 @@ class RepeatTests(unittest.TestCase):
         later = list(first_of_each([("B", "This change is a behavioral change.", "u2"), ("B", "Other text.", "u2")], seen))
         self.assertEqual(first, [("A", "This change is a behavioral change.", "u1"), ("A", "Own text.", "u1")])
         self.assertEqual(later, [("B", "Other text.", "u2")])
+
+
+class PageTests(unittest.TestCase):
+    def test_a_page_row_has_its_title_description_and_address_words(self):
+        md = "---\ntitle: Output caching\ndescription: 'Learn how to cache responses.'\n---\n# Output caching\n"
+        row = build.page_row(md, "https://learn.microsoft.com/aspnet/core/performance/output-caching")
+        self.assertEqual(row, ("Output caching", "Learn how to cache responses.", "aspnet core performance output caching",
+                               "https://learn.microsoft.com/aspnet/core/performance/output-caching"))
+
+    def test_a_page_without_a_description_still_has_a_row(self):
+        self.assertEqual(build.page_row("# Records\n", "https://learn.microsoft.com/x")[:2], ("Records", ""))
+
+    def test_link_lists_are_not_passages(self):
+        for anchor in ("see-also", "related-content", "additional-resources", "next-steps", "next-step"):
+            self.assertTrue(build.is_link_list(anchor))
+        self.assertFalse(build.is_link_list("register"))
 
 
 class UrlTests(unittest.TestCase):

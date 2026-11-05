@@ -373,6 +373,21 @@ def pages(source, root):
                     yield os.path.join(dirpath, name)
 
 
+def is_link_list(anchor):
+    """A See also section is a list of titles: it matched questions on word count alone and told the model nothing."""
+    return anchor in ("see-also", "related-content", "additional-resources", "next-steps", "next-step")
+
+
+def page_row(md, url):
+    """(title, description, address words, address): what a page says it's about, which the search reads before any passage."""
+    md = md.replace("\r\n", "\n").lstrip("\ufeff")
+    title, _ = strip_front_matter(md)
+    front = re.match(r"---\n(.*?)\n---", md, re.S)
+    description = re.search(r"^description:\s*(.*?)\s*$", front.group(1), re.M) if front else None
+    words = re.sub(r"[-_/]+", " ", url.split("learn.microsoft.com/")[-1]).strip()
+    return title, description.group(1).strip("'\"") if description else "", words, url
+
+
 def page_chunks(source, root, md_path):
     with open(md_path, encoding="utf8", errors="replace") as f:
         title, body = strip_front_matter(f.read())
@@ -380,6 +395,8 @@ def page_chunks(source, root, md_path):
     body = clean(inline_snippets(keep_latest_version(body), md_path, root, tilde_root))
     rel = os.path.relpath(md_path, root).replace(os.sep, "/")
     for heading, anchor, text in sections(title, body):
+        if is_link_list(anchor):
+            continue
         url = learn_url(source["repo"], rel, anchor)
         for piece in pack(text):
             yield heading, piece, url
@@ -402,6 +419,7 @@ def build(out, work):
         os.remove(out)
     db = sqlite3.connect(out)
     db.execute('CREATE VIRTUAL TABLE chunks USING fts5(title, text, url UNINDEXED, tokenize="porter unicode61")')
+    db.execute('CREATE VIRTUAL TABLE pages USING fts5(title, description, slug, url UNINDEXED, tokenize="porter unicode61")')
     total, seen = 0, set()
     for source in sources:
         root = fetch(source, work)
@@ -409,10 +427,15 @@ def build(out, work):
         for md_path in pages(source, root):
             rows = list(first_of_each(page_chunks(source, root, md_path), seen))
             db.executemany("INSERT INTO chunks(title, text, url) VALUES (?, ?, ?)", rows)
+            if rows:
+                with open(md_path, encoding="utf8", errors="replace") as f:
+                    rel = os.path.relpath(md_path, root).replace(os.sep, "/")
+                    db.execute("INSERT INTO pages(title, description, slug, url) VALUES (?, ?, ?, ?)", page_row(f.read(), learn_url(source["repo"], rel, "")))
             count += len(rows); page_count += 1
         print(f"{source['repo']}@{source['commit'][:10]}: {page_count} pages, {count} chunks", flush=True)
         total += count
     db.execute("INSERT INTO chunks(chunks) VALUES ('optimize')")
+    db.execute("INSERT INTO pages(pages) VALUES ('optimize')")
     db.commit()
     db.execute("VACUUM")
     db.close()
