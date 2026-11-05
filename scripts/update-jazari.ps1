@@ -119,6 +119,25 @@ function Repair-Model {
     Say-Repaired "model"
 }
 
+function Test-LawBook($path) {
+    (Test-Path $path) -and (Get-FileHash -Algorithm SHA256 $path).Hash -eq $manifest.lawBookSha256
+}
+
+# Microsoft's .NET docs as a search file, in the gateway's own data folder (its LawBookFile default). Jazari answers
+# without it, so a manifest with no lawBookUrl skips it, and a failed download only warns.
+function Repair-LawBook {
+    if (-not $manifest.lawBookUrl) { return }
+    $book = Join-Path $env:LOCALAPPDATA "MyOwnLLM\law-book.db"
+    $download = "$book.download"
+    if (Test-Path $download) { Remove-Item -Force $download } # left by an interrupted update
+    if (Test-LawBook $book) { Say-Ok "law book"; return }
+    New-Item -ItemType Directory -Force (Split-Path $book) | Out-Null
+    Download $manifest.lawBookUrl $download
+    if (-not (Test-LawBook $download)) { Remove-Item -Force $download; throw "the download doesn't match the pinned checksum" }
+    Move-Item -Force $download $book # the gateway doesn't hold it open between questions
+    Say-Repaired "law book"
+}
+
 function Repair-Llama {
     $llama = Join-Path $installDir "llama"
     $new = "$llama.new"
@@ -250,6 +269,7 @@ try { Repair-Llama } catch { Say-Error "llama.cpp" $_ }
 try { Repair-LawBook } catch { Write-Host "! law book not installed ($_); Jazari answers without it, and the next update tries again" }
 try { Repair-DeepModel } catch { Write-Host "! smart model not installed ($_); /deep stays off, and the next update tries again" }
 try { Repair-Builds } catch { Say-Error "gateway and app" $_ }
+try { Repair-LawBook } catch { Write-Host "! law book not updated ($_). Jazari works without it; the next jazari update tries again." }
 
 # 7. config: current paths, and installedCommit only when everything above worked
 $paths = @{
