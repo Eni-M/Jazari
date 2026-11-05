@@ -660,12 +660,12 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
         var asked = FileEdit.Instructions + request;
         var watch = Stopwatch.StartNew();
-        string? answerId = null; // the answer the change came from, rated down when it's turned down or undone
+        string? lastId = null, answerId; // the answer each proposal came from; answerId is the one shown, rated down when it's turned down or undone
         // Asks for the edits and applies them in memory. Null when stopped or the gateway failed (already reported).
         async Task<(string? Text, List<Replacement> Applied, string? Problem)?> ProposeAsync(string question)
         {
             if (await WithThinking(() => gateway.CompleteAsync(question, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct, Conventions(), deep), ct) is not (true, var reply)) return null;
-            answerId = reply.Id;
+            lastId = reply.Id;
             if (FileEdit.Parse(reply.Text) is not { } edits) return (null, [], "the model's answer couldn't be read");
             var applied = new List<Replacement>();
             var (newText, problem) = FileEdit.Apply(original, edits, applied);
@@ -673,6 +673,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         }
 
         if (await ProposeAsync(asked) is not var (text, applied, problem)) return;
+        answerId = lastId;
         if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return; }
         var broken = FileEdit.NewSyntaxErrors(path, original, text);
         if (broken.Count > 0)
@@ -683,7 +684,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             if (await ProposeAsync($"{asked}\n\nYour previous edits broke the C# syntax: {string.Join("; ", broken.Take(3))}. Give the edits again so the file still parses.")
                 is not var (retried, retriedApplied, _)) return;
             if (retried is not null && FileEdit.NewSyntaxErrors(path, original, retried) is var still && still.Count < broken.Count)
-                (text, applied, broken) = (retried, retriedApplied, still);
+                (text, applied, broken, answerId) = (retried, retriedApplied, still, lastId);
         }
 
         // Only /deep, and only if the syntax check above didn't already use the one retry.
@@ -699,7 +700,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
                     is not var (again, againApplied, _)) return;
                 if (again is not null && FileEdit.NewSyntaxErrors(path, original, again).Count == 0
                     && await ProjectErrors(path, project, original, again, ct) is { } after && after.Count < projectErrors.Count)
-                    (text, applied, projectErrors) = (again, againApplied, after);
+                    (text, applied, projectErrors, answerId) = (again, againApplied, after, lastId);
             }
         }
 

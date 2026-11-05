@@ -17,10 +17,10 @@ public sealed class ServerLauncher(
 
     public static string DefaultLogDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "logs");
 
-    /// <summary>llama-server's key, in the gateway's data folder, where the gateway reads it (GatewayOptions.LlamaKeyFile).</summary>
     /// <summary>The models llama-server's router runs, written at each start from this PC's tuning.</summary>
     public static string LanesFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "llama-lanes.ini");
 
+    /// <summary>llama-server's key, in the gateway's data folder, where the gateway reads it (GatewayOptions.LlamaKeyFile).</summary>
     public static string LlamaKeyFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "llama-server.key");
 
     /// <summary>Makes the key once, at random; later starts reuse it, so a running gateway and a restarted server still agree.</summary>

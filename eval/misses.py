@@ -16,26 +16,30 @@ def words(text):
     return set(re.findall(r"[a-z0-9]+", text.lower())) - STOPWORDS
 
 
-def reasked(prompt, later):
-    """Whether a later question asks mostly the same thing: half of the first one's words, and not the same text."""
+def reasked(prompt, later, kind="chat", later_kind="chat"):
+    """Whether a later question asks mostly the same thing: half of the first one's words. The same text again counts only
+    through /deep after a fast answer; otherwise it's a retry after an error, or "go on"."""
+    if prompt.strip() == later.strip():
+        return kind == "chat" and later_kind == "deep"
     first, second = words(prompt), words(later)
-    return bool(first) and prompt.strip() != later.strip() and len(first & second) / len(first) >= REASK_OVERLAP
+    return bool(first) and len(first & second) / len(first) >= REASK_OVERLAP
 
 
 def misses(rows):
-    """rows: (id, created_utc, project, kind, prompt, model, accepted), oldest first. Yields (row, why)."""
-    rows = [r for r in rows if r[3] in ("chat", "deep")]
-    for i, row in enumerate(rows):
+    """rows: (id, created_utc, project, kind, prompt, model, accepted), oldest first. Yields (row, why). Any kind can be rated
+    down; only questions (chat, deep) can be asked again: /edit, /review and /commit (json) share long fixed instructions."""
+    questions = [r for r in rows if r[3] in ("chat", "deep")]
+    for row in rows:
         if row[6] == 0:
             yield row, "rated down"
             continue
-        if row[6] == 1:
+        if row[6] == 1 or row[3] not in ("chat", "deep"):
             continue
         when = datetime.datetime.fromisoformat(row[1])
-        for later in rows[i + 1:]:
+        for later in questions[questions.index(row) + 1:]:
             if datetime.datetime.fromisoformat(later[1]) - when > datetime.timedelta(minutes=REASK_MINUTES):
                 break
-            if later[2] == row[2] and reasked(row[4], later[4]):
+            if later[2] == row[2] and reasked(row[4], later[4], row[3], later[3]):
                 yield row, f"asked again as #{later[0]}"
                 break
 

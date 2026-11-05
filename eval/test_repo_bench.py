@@ -1,6 +1,7 @@
 import os, shutil, subprocess, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from repo_bench import candidates_to_tasks, closeness, first_code_block, passed, task_is_valid, test_command
+import repo_bench
+from repo_bench import MTP_REFUSED, Worktree, candidates_to_tasks, closeness, first_code_block, passed, task_is_valid
 from compare import pooled_report
 from score import held_out
 
@@ -46,10 +47,27 @@ class SelectionTests(unittest.TestCase):
         found = [{"file": "S.cs", "method": "Refund", "class": "S", "lines": 12}]
         self.assertIsNone(candidates_to_tasks("repo", "C:/r", "abc", found, None, limit=10)[0]["test_filter"])
 
-    def test_an_xunit_v3_project_runs_its_own_test_app_and_others_use_dotnet_test(self):
-        v3 = test_command("T.csproj", '<PackageReference Include="xunit.v3" Version="4.0.0" />', "FullyQualifiedName~STests")
-        self.assertEqual(v3[:3] + v3[-3:], ["dotnet", "run", "--project", "--", "-filterVSTest", "FullyQualifiedName~STests"])
-        self.assertEqual(test_command("T.csproj", '<PackageReference Include="xunit" Version="2.9.0" />', "F")[:2], ["dotnet", "test"])
+    def test_a_project_dotnet_test_refuses_runs_its_own_test_app_from_then_on(self):
+        calls, real = [], repo_bench.run
+        repo_bench.run = lambda args, cwd=None: (calls.append(args[1]), (1, f"x: error : {MTP_REFUSED} on .NET 10") if args[1] == "test" else (0, ""))[1]
+        try:
+            tree = object.__new__(Worktree)
+            tree.path, tree.runs_itself = ".", set()
+            self.assertTrue(tree.test("T.csproj", "FullyQualifiedName~STests"))
+            self.assertTrue(tree.test("T.csproj", "FullyQualifiedName~STests"))
+        finally:
+            repo_bench.run = real
+        self.assertEqual(calls, ["test", "run", "run"])
+
+    def test_a_plain_test_failure_is_a_failure(self):
+        real = repo_bench.run
+        repo_bench.run = lambda args, cwd=None: (1, "Failed: 1")
+        try:
+            tree = object.__new__(Worktree)
+            tree.path, tree.runs_itself = ".", set()
+            self.assertFalse(tree.test("T.csproj", "F"))
+        finally:
+            repo_bench.run = real
 
 
 class PoolingTests(unittest.TestCase):

@@ -66,21 +66,24 @@ def candidates_to_tasks(name, repo, commit, found, test_files, limit):
 
 
 def run(args, cwd=None, timeout=COMMAND_TIMEOUT_S):
-    """Exit code and output of a command, which stays in memory: it can hold private code."""
+    """Exit code and output of a command, which stays in memory: it can hold private code. On a timeout the whole process
+    tree goes: dotnet test starts the test app, which would keep the clone's files open and its containers running."""
+    p = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     try:
-        out = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
-        return out.returncode, out.stdout
+        out, _ = p.communicate(timeout=timeout)
+        return p.returncode, out
     except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+        else:
+            p.kill()
+        p.communicate()
         return -1, ""
 
 
-def test_command(project, project_text, test_filter):
-    """.NET 10's dotnet test refuses an xunit.v3 project that opts into Microsoft.Testing.Platform, so such a project's
-    test app runs itself, with xunit's own VSTest-filter option."""
-    # ponytail: an xunit.v3 project with UseMicrosoftTestingPlatformRunner speaks MTP and would need --filter-class instead
-    if re.search(r'Include="xunit\.v3"', project_text):
-        return ["dotnet", "run", "--project", project, "--no-build", "--", "-filterVSTest", test_filter]
-    return ["dotnet", "test", project, "--no-build", "--nologo", "--filter", test_filter]
+# .NET 10's dotnet test refuses a project on Microsoft.Testing.Platform unless the repo opts into its new mode; wherever the
+# project's packages are named, it says so, and then the test app runs itself.
+MTP_REFUSED = "Testing with VSTest target is no longer supported"
 
 
 def git(folder, *args):
@@ -93,6 +96,7 @@ class Worktree:
     def __init__(self, repo, commit):
         self.path = tempfile.mkdtemp(prefix="jazari-bench-")
         self.restored = set()
+        self.runs_itself = set()  # projects dotnet test refused
         code, _ = run(["git", "clone", "--quiet", "--no-hardlinks", "--no-checkout", repo, self.path])
         if code == 0:
             code, _ = git(self.path, "checkout", "--quiet", "--detach", commit)
@@ -107,8 +111,13 @@ class Worktree:
         return run(["dotnet", "build", project, "--no-restore", "--disable-build-servers", "-v", "q", "-nologo"], cwd=self.path)[0] == 0
 
     def test(self, project, test_filter):
-        with open(os.path.join(self.path, project), encoding="utf-8", errors="replace") as f:
-            return run(test_command(project, f.read(), test_filter), cwd=self.path)[0] == 0
+        if project not in self.runs_itself:
+            code, out = run(["dotnet", "test", project, "--no-build", "--nologo", "--filter", test_filter], cwd=self.path)
+            if MTP_REFUSED not in out:
+                return code == 0
+            self.runs_itself.add(project)
+        # ponytail: -filterVSTest is xunit.v3's own runner; an MSTest or NUnit app on the platform takes --filter instead
+        return run(["dotnet", "run", "--project", project, "--no-build", "--", "-filterVSTest", test_filter], cwd=self.path)[0] == 0
 
     def reset(self, file):
         git(self.path, "checkout", "--", file)
@@ -197,7 +206,7 @@ def validate(a):
     build_blank()
     tasks = load_tasks()
     trees = worktrees(tasks)
-    valid, kept = [], {}
+    valid, kept, failing = [], {}, 0
     try:
         for task in tasks:
             tree = trees[(task["repo"], task["commit"])]
@@ -206,6 +215,7 @@ def validate(a):
             ok = True
             if task["test_filter"]:
                 original_ok = tree.test(task["project"], task["test_filter"])
+                failing += not original_ok
                 ok = original_ok and blank(tree, task) is not None and tree.build(task["project"]) and task_is_valid(tree.test(task["project"], task["test_filter"]), original_ok)
                 tree.reset(task["file"])
             if ok:
@@ -217,6 +227,8 @@ def validate(a):
             tree.close()
     save_tasks(valid)
     print(f"{len(valid)} of {len(tasks)} tasks are valid, {sum(held_out(t['id']) for t in valid)} of them held out")
+    if failing:  # all of them failing means the tests can't run here (Docker stopped, a test runner): not that the tasks are bad
+        print(f"{failing} tasks' tests failed on the original code, so they were dropped")
 
 
 def attempt(task, tree, ask):

@@ -657,6 +657,7 @@ public class ProjectToolsTests : IDisposable
 
         Assert.Equal(2, _gateway.Completions);
         Assert.Contains("This change breaks the C# syntax.", _output.ToString());
+        Assert.Equal([("ix-1", false)], _gateway.Feedback); // the change shown, not the retry that was no better
     }
 
     [Theory]

@@ -23,6 +23,16 @@ class MissesTests(unittest.TestCase):
         self.assertFalse(reasked("register a scoped service", "what is a record struct"))
         self.assertFalse(reasked("go on", "go on"))  # the same text again is a retry, not a rephrasing
 
+    def test_the_same_question_again_through_deep_is_a_miss(self):
+        found = misses([row(1, 0, "How do I add CORS?"), row(2, 1, "How do I add CORS?", kind="deep")])
+        self.assertEqual([(r[0], why) for r, why in found], [(1, "asked again as #2")])
+
+    def test_edits_and_reviews_are_never_asked_again_but_can_be_rated_down(self):
+        instructions = "Change the file as asked and answer with search and replace edits only. "
+        found = misses([row(1, 0, instructions + "rename a", kind="json"), row(2, 1, instructions + "rename b", kind="json"),
+                        row(3, 2, instructions + "rename c", accepted=0, kind="json")])
+        self.assertEqual([(r[0], why) for r, why in found], [(3, "rated down")])
+
 
 if __name__ == "__main__":
     unittest.main()
