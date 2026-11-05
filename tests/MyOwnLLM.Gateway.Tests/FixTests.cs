@@ -272,4 +272,11 @@ public class FixTests : IDisposable
         await NewSession().HandleAsync("/fix", default);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(_lastContext!, "--- A.cs ---"));
     }
+
+    [Fact] public async Task Help_lists_fix()
+    {
+        await NewSession().HandleAsync("/help", default);
+        Assert.Contains("/fix [project]", Text);
+        Assert.Contains("Fix a compile error, then rebuild to check", Text);
+    }
 }

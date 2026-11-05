@@ -17,6 +17,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         ("/read <path>", "Read a file or folder for the next questions"), ("/diff [ref]", "Read your uncommitted changes (or the changes since ref)"),
         ("/context", "What the next question will send"), ("/review [path]", "Review a whole project, or only what changed (--changed)"),
         ("/edit <file> <what>", "Change a file, after showing you the change"), ("/undo", "Undo the last /edit"),
+        ("/fix [project]", "Fix a compile error, then rebuild to check"),
         ("/commit", "Write a commit message for the staged changes"), ("/docs <question>", "Look it up in the .NET docs, without the model"),
         ("/save [file]", "Save the conversation as Markdown"),
         ("/clear", "Clear conversation and files read"), ("/retry", "Ask the last question again"), ("/deep [question]", "Ask with the smarter model; alone, ask the last question again"), ("/details", "Details of the last error"), ("/exit", "Quit"),
@@ -945,7 +946,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     static readonly (string Label, string[] Commands)[] HelpGroups =
     [
         ("Ask", ["/retry", "/status", "/docs"]),
-        ("Files and code", ["/read", "/diff", "/context", "/edit", "/undo", "/copy", "/review", "/commit"]),
+        ("Files and code", ["/read", "/diff", "/context", "/edit", "/fix", "/undo", "/copy", "/review", "/commit"]),
         ("Session", ["/model", "/save", "/clear", "/details", "/help", "/exit"]),
     ];
 

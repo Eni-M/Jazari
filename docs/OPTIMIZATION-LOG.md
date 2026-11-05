@@ -306,3 +306,17 @@ A review of one EF Core configuration file returned 27 findings, none of them re
 The verdict field stops everything, real bugs included, so it stayed out. The shipped prompt still reports false alarms on schema code, and only 3 planted bugs measure what it finds: try it on real code with logic before trusting it further. The answer limit went from 500 to 1024 tokens: replies reached 494 and 535.
 
 Follow-ups: history reached the model and it stayed on topic in every replay. The failures came from `/exit` ending the conversation, `/docs` answers not joining it, and the law book searching a follow-up's own words ("more" found a page titled Learn more). `/docs` answers now join the conversation, and a follow-up under three search words with no API name isn't searched. Conversations still don't survive `/exit`.
+
+## `/fix` (2026-11-05)
+
+`/fix` builds, reads the compiler's errors, proposes one change to the first editable file, writes it on yes and rebuilds. Plain code decides everything except the edit. The model also gets the code the errors name, and the law book's page for the error code when a book is installed. Compile errors only: running tests needs a sandbox first.
+
+Measured by `eval/fix_bench.py` on 12 seeded errors in a small project, Granite 4.0-H Tiny on the CPU, no law book. The ship rule, set before the run: at least 7 fixed, none left worse, median under 2 minutes. Other work shared the CPU during the run, so the times are on the slow side.
+
+| Result | Seeds |
+|---|---|
+| Fixed, 7 | CS0103, CS1061, CS0246, CS0029, CS0161, CS8618, CS4014 |
+| The edit couldn't apply, nothing written, 3 | CS7036, CS1002, CS0266: its search text wasn't in the file, or appeared twice |
+| Written, no better, undo offered, 2 | CS1503, CS0535 |
+
+Median 36 s, and none left with more errors. That only just passes. Every fix was read: none deleted code to hide an error, though `string?` for CS8618 and `"5"` for CS0029 are the easy way out, so the build passing doesn't mean the change is what the user wanted. A failed CS1503 also changed an unrelated line, which the undo question covers. Twelve seeds in one small project say little about real code. The failed edits point at the next thing to try, a second try when the search text doesn't apply; new seeds would have to judge that, not these.
