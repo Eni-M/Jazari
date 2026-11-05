@@ -37,6 +37,11 @@ public static class FixTarget
             [.. editable.Where(e => string.Equals(e.File, editable[0].File, StringComparison.OrdinalIgnoreCase)).Take(MaxErrors)];
     }
 
+    /// <summary>What the model is told of an error. A #error or #warning holds whatever the project wrote, and the request isn't
+    /// the part of the prompt marked as data, so the text stays out. Other messages only quote code names.</summary>
+    public static string MessageForModel(BuildError error) =>
+        error.Code is "CS1029" or "CS1030" ? "a #error or #warning directive in the code" : error.Message;
+
     static bool IsBuildOutput(string folder) => folder.Equals("obj", StringComparison.OrdinalIgnoreCase) || folder.Equals("bin", StringComparison.OrdinalIgnoreCase);
 
     static bool Inside(string path, string root)

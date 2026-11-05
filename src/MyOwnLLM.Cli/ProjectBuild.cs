@@ -15,7 +15,7 @@ public static class ProjectBuild
     public static async Task<BuildResult?> RunAsync(string projectFile, IProcessRunner runner, string? dotnet, CancellationToken ct, TimeSpan? timeout = null)
     {
         if (dotnet is null) return null;
-        string[] args = ["build", projectFile, "--no-restore", "-nologo", "-v", "q", "-clp:NoSummary", "-nodeReuse:false", "-p:UseSharedCompilation=false"];
+        string[] args = ["build", projectFile, "--no-restore", "-nologo", "-v", "q", "-clp:NoSummary", "--disable-build-servers"];
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
         limit.CancelAfter(timeout ?? TimeSpan.FromSeconds(TimeoutSeconds));
         try

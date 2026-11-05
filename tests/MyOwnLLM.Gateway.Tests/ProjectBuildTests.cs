@@ -28,7 +28,7 @@ public class ProjectBuildTests
         var runner = new FakeBuild(0, "");
         await ProjectBuild.RunAsync(Project, runner, @"C:\dotnet\dotnet.exe", default);
         Assert.Equal(@"C:\dotnet\dotnet.exe", runner.Exe);
-        Assert.Equal(["build", Project, "--no-restore", "-nologo", "-v", "q", "-clp:NoSummary", "-nodeReuse:false", "-p:UseSharedCompilation=false"], runner.Args);
+        Assert.Equal(["build", Project, "--no-restore", "-nologo", "-v", "q", "-clp:NoSummary", "--disable-build-servers"], runner.Args);
         Assert.Equal(@"C:\src\App", runner.Folder);
         Assert.Equal("1", runner.Environment!["DOTNET_CLI_TELEMETRY_OPTOUT"]);
     }
@@ -75,5 +75,27 @@ public class ProjectBuildTests
             Assert.Null(UpdateCheck.FromAbsolutePath("dotnet.exe", ".;relative"));
         }
         finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact] public async Task A_real_build_reads_a_path_with_spaces_and_accents()
+    {
+        // MSBuild writes UTF-8 when redirected, and a reader using the console's code page turned Caf\u00e9 into Caf\u251c\u2310.
+        var root = Directory.CreateTempSubdirectory("mollm-build").FullName;
+        try
+        {
+            var dir = Directory.CreateDirectory(Path.Combine(root, "Caf\u00e9 (2) x")).FullName;
+            var project = Path.Combine(dir, "App.csproj");
+            File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+            File.WriteAllText(Path.Combine(dir, "\u00d1and\u00fa.cs"), "class Nandu { int B() => nope; }");
+            var dotnet = UpdateCheck.FromAbsolutePath("dotnet.exe", Environment.GetEnvironmentVariable("PATH"));
+            Assert.NotNull(dotnet);
+            var runner = new ProcessRunner();
+            await runner.RunInAsync(dotnet, ["restore", project, "--nologo", "-v", "q"], dir, new Dictionary<string, string>(), default);
+            var result = await ProjectBuild.RunAsync(project, runner, dotnet, default);
+            var error = Assert.Single(result!.Errors);
+            Assert.Equal("CS0103", error.Code);
+            Assert.True(File.Exists(error.File), error.File);
+        }
+        finally { Directory.Delete(root, true); }
     }
 }

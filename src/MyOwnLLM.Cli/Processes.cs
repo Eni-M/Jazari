@@ -20,15 +20,20 @@ public sealed class ProcessRunner : IProcessRunner
 {
     // Own folder, like StartDetached: the gateway's add-key must not read an appsettings.json from the folder jazari runs in.
     public Task<(int ExitCode, string Output)> RunAsync(string exe, string[] args, CancellationToken ct) =>
-        RunInAsync(exe, args, Path.GetDirectoryName(exe)!, new Dictionary<string, string>(), ct);
+        Run(exe, args, Path.GetDirectoryName(exe)!, new Dictionary<string, string>(), null, ct);
 
-    public async Task<(int ExitCode, string Output)> RunInAsync(string exe, string[] args, string workingDirectory, IReadOnlyDictionary<string, string> environment, CancellationToken ct)
+    // UTF-8: what dotnet writes when redirected. The console's code page would garble a path with an accent.
+    public Task<(int ExitCode, string Output)> RunInAsync(string exe, string[] args, string workingDirectory, IReadOnlyDictionary<string, string> environment, CancellationToken ct) =>
+        Run(exe, args, workingDirectory, environment, System.Text.Encoding.UTF8, ct);
+
+    static async Task<(int ExitCode, string Output)> Run(string exe, string[] args, string workingDirectory, IReadOnlyDictionary<string, string> environment, System.Text.Encoding? encoding, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(exe)
         {
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
             WorkingDirectory = workingDirectory,
         };
+        if (encoding is not null) psi.StandardOutputEncoding = encoding;
         foreach (var a in args) psi.ArgumentList.Add(a);
         foreach (var (name, value) in environment) psi.Environment[name] = value;
         try

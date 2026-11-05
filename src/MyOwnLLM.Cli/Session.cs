@@ -707,7 +707,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             else { ui.Metadata("The build failed, but not on a compiler error, so there's nothing to fix in the code:"); ShowEnd(before.Output); }
             return;
         }
-        var chosen = FixTarget.Editable([.. before.Errors.Where(e => InsideProject(Path.GetFullPath(e.File)))], project);
+        var chosen = FixTarget.Editable([.. before.Errors.Where(e => File.Exists(e.File) && InsideProject(Path.GetFullPath(e.File)))], project);
         if (chosen.Count == 0)
         {
             ui.Metadata("The errors are in generated or outside files, so Jazari won't change them:");
@@ -717,7 +717,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
         var path = Path.GetFullPath(chosen[0].File);
         var request = "Fix these compiler errors in the file above. Change only what they need, and don't remove code to hide an error.\n\n" +
-            string.Join("\n", chosen.Select(e => $"line {e.Line}: {e.Code} {e.Message}"));
+            string.Join("\n", chosen.Select(e => $"line {e.Line}: {e.Code} {FixTarget.MessageForModel(e)}"));
         var file = Path.GetRelativePath(project, path);
         if (!await ProposeEditAsync(path, file, request, await FixContextAsync(chosen, file, ct), true, false, ct)) return;
 
@@ -749,7 +749,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     /// Order, and the law book's page for the first error's code. Either can be missing; the edit is proposed regardless.</summary>
     async Task<string?> FixContextAsync(IReadOnlyList<BuildError> errors, string file, CancellationToken ct)
     {
-        var names = errors.SelectMany(e => QuotedName().Matches(e.Message)).Select(m => m.Groups[1].Value.Split('.')[^1]).Distinct().Take(MaxErrorNames).ToList();
+        var names = errors.SelectMany(e => QuotedName().Matches(FixTarget.MessageForModel(e))).Select(m => m.Groups[1].Value.Split('.')[^1]).Distinct().Take(MaxErrorNames).ToList();
         var parts = new List<string>();
         if (ProjectLookup.ForNames(project, names, $"--- {file} ---") is { } code) parts.Add(code.Text);
         try
