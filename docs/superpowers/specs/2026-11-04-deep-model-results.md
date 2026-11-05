@@ -57,6 +57,21 @@ The winner is the best pooled score among candidates within the time and RAM lim
 - **The deep pipeline scored below plain Qwen3.** The same file asked directly scored 41/45 at a 17 s median (`qwen3-think-off`), against 39/45 at 61 s through `/deep`. So the 400-token plan call and the extra steps cost about 45 s an answer and gained nothing on the questions. Try `/deep` as a plain call with the A1 check and one repair before trying a bigger model.
 - **The repo benchmark is small.** 27 tasks, of which 17 are tested. A real gain of one or two tasks can't show at this size. More EduCore methods with tests that notice a blanked method would help: most chosen methods' tests still passed with the method blanked.
 
+## Second round: /deep without the plan call (2026-11-05)
+
+After the first decision `/deep` lost its plan call, gained one fresh answer at temperature 0.8 when the repair still fails, and runs on the fast model when there's no smart one (`a1f406c`, `ab2c0f9`).
+
+| Run | Questions | Typical | Longest | Repo passed | Compiled | Closeness | Repo median (longest) |
+|---|---|---|---|---|---|---|---|
+| Fast lane, H-Tiny (`tiny-regress`) | 39/45 | 8.5 s | 40.5 s | 6/27 | 14 | 0.601 | 38 s (144 s) |
+| `/deep` on H-Tiny (`deep-tiny`) | 37/45 | 9.7 s | 41.3 s | 7/27 | 16 | 0.620 | 21 s (76 s) |
+| `/deep` on Qwen3, no plan (`deep-qwen3-noplan`) | not run | | | 7/27 | 13 | 0.586 | 79 s |
+
+- **`deep-tiny` against the fast lane, pooled:** dev 1 gained, 3 lost, p = 0.62; held-out 14/25 against 13/25. On the questions alone: 0 gained, 2 lost (`ienumerable-iqueryable`, `connection-string`), p = 0.50.
+- **By the rule it doesn't ship either:** no significant gain. It meets every time limit, and more of its repo answers compile (16 against 14), which is what the checks are for, but passing tests didn't move.
+- **Decision (Eni-M):** off. Without a smart model `/deep` says it isn't installed, as before; the plan's removal, the warmer second sample and the fallback for a smart model that won't load stay.
+- **Dropping the plan made Qwen3 32 s faster per repo task** (110 to 79 s) at the same 7/27.
+
 ## Follow-ups for Eni-M
 
 - Download Qwen3 4B Thinking 2507, or Granite 4.1 8B, to measure a second candidate.

@@ -127,6 +127,7 @@ public class EndpointTests : IDisposable
     {
         public List<Lane?> Asked { get; } = [];
         public int Holds { get; private set; }
+        public Task<bool> DeepAvailableAsync(CancellationToken ct) => Task.FromResult(true);
         public async Task<string?> EnsureAsync(Lane? lane, Func<string, Task>? stage, CancellationToken ct)
         {
             Asked.Add(lane);
@@ -177,10 +178,11 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task Deep_without_a_deep_model_still_answers_with_its_check_row()
+    public async Task Deep_without_a_deep_model_is_a_clear_error()
     {
-        var json = await Json(await _client.PostAsJsonAsync("/v1/chat/completions", DeepBody("hi", stream: false)));
-        Assert.Equal("not checked: no code", json.GetProperty("check").GetString());
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", DeepBody("hi", stream: false));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Contains("jazari update", (await Json(response)).GetProperty("error").GetString());
     }
 
     [Fact]
@@ -217,8 +219,12 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task Info_says_deep_is_there_with_or_without_a_smart_model() =>
-        Assert.True((await Json(await _client.GetAsync("/v1/info"))).GetProperty("deep_available").GetBoolean());
+    public async Task Info_says_whether_deep_is_there()
+    {
+        var (client, _) = WithLanes();
+        Assert.True((await Json(await client.GetAsync("/v1/info"))).GetProperty("deep_available").GetBoolean());
+        Assert.False((await Json(await _client.GetAsync("/v1/info"))).GetProperty("deep_available").GetBoolean());
+    }
 
     static async Task<JsonElement> FinalEvent(HttpResponseMessage response) =>
         JsonDocument.Parse((await response.Content.ReadAsStringAsync()).Split("\n").Where(l => l.StartsWith("data: {") && l.Contains("\"finish_reason\"")).Last()["data: ".Length..]).RootElement;

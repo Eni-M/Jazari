@@ -4,8 +4,13 @@ namespace MyOwnLLM.Gateway.Llama;
 
 public enum Lane { Fast, Deep }
 
+/// <summary>A /deep with no smart model installed. The message is for the user.</summary>
+public sealed class DeepModelUnavailableException(string why) : Exception(why);
+
 public interface ILanes
 {
+    Task<bool> DeepAvailableAsync(CancellationToken ct);
+
     /// <summary>
     /// Has the lane's model loaded and returns the name to send to it; null lane means whichever model is loaded, for work that
     /// doesn't care. Null result: a plain llama-server with one model, where no name is sent. A load runs to its end once
@@ -34,6 +39,15 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
     ITimer? _hold;
     bool _deepBroken; // the smart model failed to load: /deep uses the fast one until the gateway restarts
 
+    /// <summary>A quick look only: /v1/info says this, and a stuck model server mustn't make the gateway look down too.</summary>
+    public async Task<bool> DeepAvailableAsync(CancellationToken ct)
+    {
+        using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        quick.CancelAfter(TimeSpan.FromSeconds(2));
+        try { return await llama().ModelStatesAsync(quick.Token) is { } states && states.ContainsKey(DeepModel); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return false; }
+    }
+
     public async Task<string?> EnsureAsync(Lane? lane, Func<string, Task>? stage, CancellationToken ct)
     {
         if (lane is Lane.Fast) CancelHold();
@@ -43,9 +57,14 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
         if (loading is not null) await loading.WaitAsync(ct).ContinueWith(t => { if (t.IsCanceled) ct.ThrowIfCancellationRequested(); }, TaskScheduler.Default);
 
         var states = await llama().ModelStatesAsync(ct);
-        if (states is null || !states.ContainsKey(FastModel)) return null; // a plain llama-server: its one model answers every lane
-        // No smart model: /deep's checks and repair run on the fast model. A bigger model didn't beat it (2026-11-04-deep-model-results.md).
-        if (lane is Lane.Deep && (!states.ContainsKey(DeepModel) || _deepBroken)) lane = Lane.Fast;
+        if (states is null || !states.ContainsKey(FastModel))
+        {
+            if (lane is Lane.Deep) throw new DeepModelUnavailableException("The smart model isn't set up. Run jazari update.");
+            return null;
+        }
+        // /deep needs a smart model: on the fast one its checks didn't beat a plain answer (2026-11-04-deep-model-results.md).
+        if (lane is Lane.Deep && !states.ContainsKey(DeepModel)) throw new DeepModelUnavailableException("The smart model isn't installed. Run jazari update.");
+        if (lane is Lane.Deep && _deepBroken) lane = Lane.Fast;
 
         var name = lane switch
         {

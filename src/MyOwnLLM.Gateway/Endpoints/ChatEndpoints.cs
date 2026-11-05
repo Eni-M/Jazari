@@ -49,7 +49,7 @@ public static class ChatEndpoints
             ? Results.BadRequest(new { error = "question is required" })
             : Results.Json(new { available = File.Exists(o.LawBookFile), passages = book.Search(request.Question).Select(p => new { title = p.Title, url = p.Url, text = p.Text }) }));
         group.MapGet("/models", () => Results.Json(new { @object = "list", data = new[] { new { id = ModelId, @object = "model", created = 0, owned_by = "jazari" } } }));
-        group.MapGet("/info", (GatewayOptions o) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version, deep_available = true })); // /deep runs on the fast model when there's no smart one
+        group.MapGet("/info", async (GatewayOptions o, ILanes lanes, CancellationToken ct) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version, deep_available = await lanes.DeepAvailableAsync(ct) }));
         return group;
     }
 
@@ -273,6 +273,7 @@ public static class ChatEndpoints
     static int? StatusFor(Exception e) => e switch
     {
         LlamaUnavailableException => StatusCodes.Status503ServiceUnavailable,
+        DeepModelUnavailableException => StatusCodes.Status503ServiceUnavailable,
         LlamaErrorException { Status: 400 } => StatusCodes.Status413PayloadTooLarge, // our requests are well-formed; 400 means context overflow
         LlamaErrorException { Status: 503 } => StatusCodes.Status503ServiceUnavailable, // still loading the model
         LlamaErrorException => StatusCodes.Status502BadGateway,
