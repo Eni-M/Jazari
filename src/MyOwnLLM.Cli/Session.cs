@@ -25,7 +25,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     public static IEnumerable<string> CommandNames => Commands.Select(c => c.Command.Split(' ')[0]);
 
     /// <summary>Commands whose argument is a path, so Tab completes file and folder names after them.</summary>
-    public static readonly string[] PathCommands = ["/read", "/review", "/edit"];
+    public static readonly string[] PathCommands = ["/read", "/review", "/edit", "/fix"];
 
     readonly List<ChatTurn> _history = [];
     string? _lastQuestion;
@@ -138,6 +138,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/review": return new ProjectReview(gateway, ui, ReviewDir).RunAsync(Resolve(Argument(input) ?? project), ct);
             case "/edit": return Stoppable(() => EditAsync(input.Split(' ', 2) is [_, var rest] ? rest : null, ct), ct);
             case "/undo": Undo(); break;
+            case "/fix": return Stoppable(() => FixAsync(Argument(input), ct), ct);
             case "/docs": return DocsAsync(Argument(input), ct);
             case "/save": Save(Argument(input)); break;
             case "/clear": _warming?.Cancel(); _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ForgetSaved(); ui.Metadata("Conversation cleared."); break;
@@ -658,6 +659,9 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
     /// <summary>The errors an edit adds to the project (file, project root, before, after). Replaced in tests.</summary>
     public Func<string, string, string, string, CancellationToken, Task<IReadOnlyList<string>?>> ProjectErrors { get; init; } = ProjectCheck.NewErrorsAsync;
+    /// <summary>Builds a project for /fix. Replaced in tests.</summary>
+    public Func<string, CancellationToken, Task<BuildResult?>> Build { get; init; } = (projectFile, ct) =>
+        ProjectBuild.RunAsync(projectFile, new ProcessRunner(), UpdateCheck.FromAbsolutePath("dotnet.exe", Environment.GetEnvironmentVariable("PATH")), ct);
     /// <summary>Where the projects the user trusted are remembered.</summary>
     public string TrustFile { get; init; } = ProjectTrust.DefaultPath;
 
@@ -679,6 +683,70 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (!File.Exists(path)) { ui.Metadata($"Can't find {path}."); return; }
 
         await ProposeEditAsync(path, file, request, null, deep, deep, ct);
+    }
+
+    /// <summary>
+    /// /fix: plain code builds, reads the errors and picks the file; the model only writes the edit, and the rebuild says
+    /// whether it worked. One file per run, so every write has its own yes. ponytail: compile errors only. Running failing
+    /// tests runs the user's code, so that needs a sandbox first.
+    /// </summary>
+    async Task FixAsync(string? argument, CancellationToken ct)
+    {
+        var (projectFile, problem) = FixTarget.Find(project, argument);
+        if (projectFile is null) { ui.Metadata(problem!); return; }
+        if (!MayLoadProject(projectFile, "/fix builds the project, which runs its build scripts. Only say yes for code you trust. Build it?")) { ui.Metadata("Nothing was built."); return; }
+
+        ui.Metadata($"Building {Path.GetFileName(projectFile)}.");
+        if (await Build(projectFile, ct) is not { } before) { ui.Metadata(".NET SDK not found on PATH."); return; }
+        if (before.Succeeded) { ui.Metadata("The build passes. Nothing to fix."); return; }
+        if (before.Errors.Count == 0)
+        {
+            if (before.Output.Contains("NETSDK1004", StringComparison.Ordinal)) ui.Metadata("This project hasn't been restored. Run dotnet restore, then /fix again.");
+            else { ui.Metadata("The build failed, but not on a compiler error, so there's nothing to fix in the code:"); ShowEnd(before.Output); }
+            return;
+        }
+        var chosen = FixTarget.Editable([.. before.Errors.Where(e => InsideProject(Path.GetFullPath(e.File)))], project);
+        if (chosen.Count == 0)
+        {
+            ui.Metadata("The errors are in generated or outside files, so Jazari won't change them:");
+            foreach (var error in before.Errors.Take(FixTarget.MaxErrors)) ui.Metadata($"{error.File}({error.Line}): {error.Code} {error.Message}");
+            return;
+        }
+
+        var path = Path.GetFullPath(chosen[0].File);
+        var request = "Fix these compiler errors in the file above. Change only what they need, and don't remove code to hide an error.\n\n" +
+            string.Join("\n", chosen.Select(e => $"line {e.Line}: {e.Code} {e.Message}"));
+        if (!await ProposeEditAsync(path, Path.GetRelativePath(project, path), request, null, true, false, ct)) return;
+
+        BuildResult? after;
+        ui.Metadata("Building again.");
+        try { after = await Build(projectFile, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            ui.Metadata("Stopped before the build finished, so it's not known whether that worked. The change stays written; /undo puts it back.");
+            return;
+        }
+        if (after is null) { ui.Metadata(".NET SDK not found on PATH. The change stays written; /undo puts it back."); return; }
+        if (after.Succeeded) { ui.Metadata("Fixed: the build passes."); return; }
+        if (after.Errors.Count == 0)
+        {
+            ui.Metadata("The build failed, but not on a compiler error, so it's not known whether that worked. The change stays written; /undo puts it back:");
+            ShowEnd(after.Output);
+            return;
+        }
+        if (after.Errors.Count < before.Errors.Count && BuildErrors.New(before.Errors, after.Errors).Count == 0)
+        {
+            ui.Metadata($"{Errors(after.Errors.Count)} left. /fix again for the next one.");
+            return;
+        }
+        if (Confirm($"That didn't help: {Errors(after.Errors.Count)} now, {before.Errors.Count} before. Undo the change?")) Undo();
+    }
+
+    static string Errors(int count) => count == 1 ? "1 error" : $"{count} errors";
+
+    void ShowEnd(string output)
+    {
+        foreach (var line in output.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).TakeLast(15)) ui.Metadata(line);
     }
 
     /// <summary>Proposes a change to one file, checks it, shows it, and writes it on yes. True only when it was written.</summary>
