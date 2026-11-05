@@ -32,8 +32,6 @@ Inside a session, just ask. When a question names a file or a C# type, method or
 
 Reviews come from a small local model, so check each finding. It reads about 30 tokens/s: about 3 to 7 hours for a project with 350,000 tokens of real code.
 
-For .NET questions Jazari looks in Microsoft's own docs first (`dotnet/docs`, `AspNetCore.Docs` and `EntityFramework.Docs`). When a passage covers the question, the model gets it with the question and a `source` row under the answer names the page; when nothing covers it, nothing is sent. The docs' text is © Microsoft, CC BY 4.0, and their code is MIT: see [lawbook/NOTICE.md](lawbook/NOTICE.md).
-
 ```powershell
 jazari stop                    # shut the background servers down
 jazari doctor                  # what's wrong and what to do about it; changes nothing
