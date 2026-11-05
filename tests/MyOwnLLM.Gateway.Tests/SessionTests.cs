@@ -61,7 +61,9 @@ sealed class FakeGateway : IGatewayClient
     }
 
     public (bool Available, IReadOnlyList<DocPassage> Passages) Docs { get; set; } = (true, []);
-    public Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct) => Task.FromResult(Docs);
+    /// <summary>Instead of <see cref="Docs"/>, when each call matters.</summary>
+    public Func<(bool Available, IReadOnlyList<DocPassage> Passages)>? DocsCall { get; set; }
+    public Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct) => Task.FromResult(DocsCall?.Invoke() ?? Docs);
 }
 
 public class SessionTests

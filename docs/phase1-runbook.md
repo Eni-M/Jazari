@@ -34,7 +34,7 @@ In the session: `/help`, `/status`, `/model`, `/deep [question]` (the smarter mo
 
 Answers stream by default. `jazari ask "…" --no-stream` prints the answer when it's complete. Piped output (`jazari ask "…" > out.txt`) and `NO_COLOR=1` give plain text with no color codes.
 
-**In your IDE.** The gateway speaks the OpenAI chat API, so VS Code (BYOK custom endpoint), Continue, Rider and Visual Studio can use Jazari for chat: base URL `http://127.0.0.1:5080/v1`, API key your `JAZARI_KEY`, model `jazari`. Chat and edits work; agent modes need tool calling, which Jazari doesn't offer. Requests from web pages are refused (403), so a site can't reach it through your browser.
+**In your IDE.** The gateway speaks the OpenAI chat API, so VS Code (BYOK custom endpoint), Continue, Rider and Visual Studio can use Jazari for chat: base URL `http://127.0.0.1:5080/v1`, API key your `JAZARI_KEY`, model `jazari`. Chat and edits work; agent modes need tool calling, which Jazari doesn't offer. Requests from web pages are refused (403), so a site can't reach it through your browser. To give another chat model Jazari as tools, see `jazari mcp` in the [README](../README.md#use-jazari-from-vs-code).
 
 Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with the feedback log, and `llama-server.key`) and `%APPDATA%\Jazari\history`. Nothing leaves the laptop.
 

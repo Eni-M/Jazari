@@ -81,6 +81,24 @@ if (cli.Command == "doctor")
     return checks.All(c => c.Ok) ? 0 : 1;
 }
 
+// Before the first-run key below: an editor starts this with nobody watching, so it never makes or replaces a key.
+if (cli.Command == "mcp")
+{
+    // UTF-8 whatever the console's code page. Anything printed by accident goes to stderr, where it can't break the protocol.
+    var mcpInput = new StreamReader(Console.OpenStandardInput(), new System.Text.UTF8Encoding(false));
+    var mcpOutput = new StreamWriter(Console.OpenStandardOutput(), new System.Text.UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
+    Console.SetOut(Console.Error);
+    using var mcpHttp = new HttpClient { BaseAddress = settings.GatewayUrl, Timeout = TimeSpan.FromMinutes(30) };
+    if (settings.Key is not null) mcpHttp.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.Key);
+    var mcpGateway = new GatewayClient(mcpHttp);
+    var mcpLauncher = new ServerLauncher(runner, mcpGateway, LlamaReady, new Ui(Console.Error, theme, Columns), ServerLauncher.DefaultLogDir, Task.Delay,
+        llamaArgs: TunedArgs, fallbackArgs: SafeArgs, quiet: true, llamaListening: router.ListeningAsync,
+        llamaAlive: () => !router.FastFailed && config is not null && ServerLauncher.IsRunning(config.LlamaServer));
+    await new McpServer(mcpInput, mcpOutput, mcpGateway, directory, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyOwnLLM", "reviews"),
+        ct => settings.Key is null ? Task.FromResult(ConnectionState.NoKey) : mcpLauncher.EnsureRunningAsync(config, ct), version).RunAsync();
+    return 0;
+}
+
 // First run: create a key through the gateway and save it as JAZARI_KEY, so the user never has to.
 var provisioner = new KeyProvisioner(runner, KeyProvisioner.SaveToEnvironment);
 var key = await provisioner.EnsureKeyAsync(settings.Key, config, CancellationToken.None);

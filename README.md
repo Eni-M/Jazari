@@ -47,5 +47,34 @@ Answers can draw on the law book, excerpts of Microsoft's .NET docs searched off
 
 The first `jazari` creates your API key (saved as `JAZARI_KEY`) and starts the model server and gateway in the background. `jazari stop` shuts them down.
 
+## Use Jazari from VS Code
+
+`jazari mcp` offers Jazari to VS Code, or any other MCP client, as three tools. It talks over stdin and stdout, so no port opens.
+
+| Tool | What it does |
+|---|---|
+| `law_book_search` | Finds the .NET docs passages for a query, with their pages. No model runs. |
+| `jazari_ask` | One answer from Jazari, with no memory of earlier calls. Code the question names goes with it, as in `jazari ask`. |
+| `review_file` | The `/review` report for one file. It reads only inside the project, follows no links, and refuses secrets and what `.jazariignore` leaves out. |
+
+Run `jazari` once, so your key exists, and restart VS Code so it sees `JAZARI_KEY`. Then add `.vscode/mcp.json` to your project:
+
+```json
+{
+  "servers": {
+    "jazari": { "type": "stdio", "command": "jazari", "args": ["mcp"] }
+  }
+}
+```
+
+Start it with **MCP: List Servers**, and pick **Show Output** there if something's wrong. VS Code runs it in the workspace folder, which is the project the tools read. The tools show up in chat's agent mode, and the chat's model decides when to call them.
+
+**What leaves your PC.** Jazari stays local, but what its tools return goes to the model VS Code chats with, including answers about your code and lines quoted in reviews. VS Code's chat needs a model that can call tools, and Jazari's own endpoint can't. If you choose a cloud model, your code reaches it. To keep everything on the PC, choose another local model that can call tools.
+
+- The servers start at the first tool call that needs them, not when VS Code connects. `jazari stop` frees the memory until the next such call.
+- `jazari mcp` never creates or replaces a key: a key problem comes back as an error that says what to run.
+- A slow tool sends progress to clients that ask for it. Stopping one stops the work, and calling `review_file` again carries on from the parts already finished.
+- `jazari update` counts this server as an open Jazari window and offers to close it. Restart it from **MCP: List Servers** afterwards. For the installer and `uninstall-jazari.ps1`, close VS Code first.
+
 Full setup, commands and measured performance: [docs/phase1-runbook.md](docs/phase1-runbook.md).
 Design and plans: [docs/superpowers/](docs/superpowers/).

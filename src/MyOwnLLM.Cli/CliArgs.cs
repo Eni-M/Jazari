@@ -19,6 +19,7 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
           jazari stop                     stop the background servers to free memory
           jazari update                   update Jazari
           jazari doctor                   check the install, servers, key and logs, and say what to fix
+          jazari mcp                      serve the law book, answers and reviews to an editor, over stdin and stdout
           jazari --version
         options for ask, diff and status: --repo <path>   ask and diff: --no-stream   ask: --json (one JSON object, for scripts), --deep (the smarter, slower model)
         before any command: --plain       plain lines without colors or symbols, for screen readers (or JAZARI_PLAIN=1)
@@ -45,6 +46,8 @@ public sealed record CliArgs(string Command, string? Text, string? RepoPath, boo
                 return new("stop", null, null, true, null, null);
             case ["doctor"]:
                 return new("doctor", null, null, true, null, null);
+            case ["mcp"]:
+                return new("mcp", null, null, true, null, null);
             case ["review"]:
                 return new("review", null, null, true, null, null);
             case ["review", "--changed"]:
