@@ -8,21 +8,29 @@ public interface IProcessRunner
     /// <summary>Runs a program to completion and returns its exit code and standard output.</summary>
     Task<(int ExitCode, string Output)> RunAsync(string exe, string[] args, CancellationToken ct);
 
+    /// <summary>The same, from a chosen folder and with extra environment variables: a build finds global.json from its folder.</summary>
+    Task<(int ExitCode, string Output)> RunInAsync(string exe, string[] args, string workingDirectory, IReadOnlyDictionary<string, string> environment, CancellationToken ct) =>
+        throw new NotSupportedException();
+
     /// <summary>Starts a long-running program in the background (no window); it keeps running after jazari exits.</summary>
     void StartDetached(string exe, string[] args, string logFile);
 }
 
 public sealed class ProcessRunner : IProcessRunner
 {
-    public async Task<(int ExitCode, string Output)> RunAsync(string exe, string[] args, CancellationToken ct)
+    // Own folder, like StartDetached: the gateway's add-key must not read an appsettings.json from the folder jazari runs in.
+    public Task<(int ExitCode, string Output)> RunAsync(string exe, string[] args, CancellationToken ct) =>
+        RunInAsync(exe, args, Path.GetDirectoryName(exe)!, new Dictionary<string, string>(), ct);
+
+    public async Task<(int ExitCode, string Output)> RunInAsync(string exe, string[] args, string workingDirectory, IReadOnlyDictionary<string, string> environment, CancellationToken ct)
     {
-        // Own folder, like StartDetached: the gateway's add-key must not read an appsettings.json from the folder jazari runs in.
         var psi = new ProcessStartInfo(exe)
         {
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
-            WorkingDirectory = Path.GetDirectoryName(exe)!,
+            WorkingDirectory = workingDirectory,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
+        foreach (var (name, value) in environment) psi.Environment[name] = value;
         try
         {
             using var p = Process.Start(psi)!;
