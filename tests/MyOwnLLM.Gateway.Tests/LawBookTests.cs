@@ -177,6 +177,16 @@ public class LawBookTests : IDisposable
         Assert.All(found, p => Assert.Contains("#eviction", p.Url));
     }
 
+    [Fact] public void Inside_a_page_the_section_named_for_the_question_comes_first()
+    {
+        // The word matches favour a passage that repeats the words, over the section that's about them.
+        var found = Book([
+            ("Caching: Limits", "Caching register caching register caching register, as described under the other sections of this caching page.", "https://learn.microsoft.com/aspnet/core/caching#limits"),
+            ("Caching: Register the service", "Call AddHybridCache in Program.cs for caching.", "https://learn.microsoft.com/aspnet/core/caching#register"),
+        ]).Search("How do I register caching?");
+        Assert.Contains("#register", found[0].Url);
+    }
+
     [Fact] public void A_book_without_the_pages_table_means_no_passages()
     {
         var options = Options();
