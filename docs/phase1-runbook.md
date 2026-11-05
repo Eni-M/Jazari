@@ -36,7 +36,7 @@ Answers stream by default. `jazari ask "…" --no-stream` prints the answer when
 
 **In your IDE.** The gateway speaks the OpenAI chat API, so VS Code (BYOK custom endpoint), Continue, Rider and Visual Studio can use Jazari for chat: base URL `http://127.0.0.1:5080/v1`, API key your `JAZARI_KEY`, model `jazari`. Chat and edits work; agent modes need tool calling, which Jazari doesn't offer. Requests from web pages are refused (403), so a site can't reach it through your browser.
 
-Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with project notes and the feedback log, and `llama-server.key`) and `%APPDATA%\Jazari\history`. Nothing leaves the laptop.
+Data lives in `%LOCALAPPDATA%\MyOwnLLM\` (`keys.json`, `myownllm.db` with the feedback log, and `llama-server.key`) and `%APPDATA%\Jazari\history`. Nothing leaves the laptop.
 
 **The model server.** llama-server answers only the gateway: jazari starts it with the key in `llama-server.key`, which the gateway sends, and it refuses other web pages. After 15 minutes without a question it unloads the model and gives back its memory (about 8.7 GB); the next question loads it again, which takes a few seconds. `jazari stop` ends both servers at once.
 
@@ -46,7 +46,7 @@ Jazari can't change your terminal's font or background. For the intended look in
 
 ## Other PCs
 
-Clone the repo, run `.\scripts\install-jazari.ps1`, type `jazari`. Each PC runs its own model (2 GB download, ~5 GB RAM while running). Reaching another PC's gateway over the network isn't supported: keys are personal and the gateway listens on localhost only.
+Clone the repo, run `.\scripts\install-jazari.ps1`, type `jazari`. Each PC runs its own model (4.2 GB download; llama-server can reach about 8.7 GB of RAM with a long conversation, and gives it back after 15 idle minutes). Reaching another PC's gateway over the network isn't supported: keys are personal and the gateway listens on localhost only.
 
 ## PC tuning checklist (do these yourself)
 
@@ -62,13 +62,12 @@ Clone the repo, run `.\scripts\install-jazari.ps1`, type `jazari`. Each PC runs 
 |---|---|
 | RAM, llama-server + gateway | 4.72 GB + 0.07 GB (cap: 7 GB) |
 | Short C# question, cold | 8.0 s |
-| `jazari status` on EduCore | 31–69 s (target ≤ 120 s; longer when a background note update runs first) |
+| `jazari status` on EduCore | 31–69 s (target ≤ 120 s) |
 | 2-item list answer, streamed | 14.3 s |
 | Client gives up mid-answer | llama-server logs `cancel task`; next request answered in 0.7 s |
 | llama-server stopped | `ERROR` block: `model server not reachable at http://127.0.0.1:8080/` |
 
 ## Known limits
 
-- A question that arrives while the background state-note update is running waits for it (up to ~60 s).
-- Jazari knows the project through its state note and recent git history only; it doesn't search your code yet.
+- Jazari finds the project's code only when a question names a file or a C# type, method or property; it doesn't search by meaning. `/read` and `/diff` add more.
 - Answers can be generic or outdated (one used the old `ConfigureServices` style). Specialization is Phase 3.

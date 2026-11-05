@@ -84,7 +84,7 @@ def wait_for_gateway(gateway, key, seconds=60, port=GATEWAY_PORT):
 
 
 def gateway_chat(key, messages, max_tokens, port=GATEWAY_PORT, context=None, deep=False):
-    """What the CLI sends, without a project folder: no project note goes into the prompt."""
+    """What the CLI sends, without a project folder."""
     body = {"messages": messages, "max_tokens": max_tokens, "stream": False}
     if context:
         body["context"] = context

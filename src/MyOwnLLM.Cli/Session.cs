@@ -68,6 +68,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     const int EditAnswerTokens = 1000;
     string? _context;
     string? _contextLabel;
+    CancellationTokenSource? _warming;
     (string Path, byte[] Before, byte[] Written, string? AnswerId)? _undo;
     /// <summary>Runs git in the project and returns its exit code and output. Replaced in tests.</summary>
     public Func<string[], CancellationToken, Task<(int ExitCode, string Output)>> Git { get; init; } = RunGitAsync;
@@ -139,7 +140,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/undo": Undo(); break;
             case "/docs": return DocsAsync(Argument(input), ct);
             case "/save": Save(Argument(input)); break;
-            case "/clear": _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ForgetSaved(); ui.Metadata("Conversation cleared."); break;
+            case "/clear": _warming?.Cancel(); _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ForgetSaved(); ui.Metadata("Conversation cleared."); break;
             case "/deep": return DeepAsync(Argument(input), ct);
             case "/retry": return _lastQuestion is null ? Note("Nothing to retry.") : AskAsync(_lastQuestion, ct);
             case "/details": Details(); break;
@@ -183,6 +184,14 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         OffersDeep = false;
         if (EchoQuestions) ui.UserMessage(question);
         ui.Blank();
+        // The files the question names go with it, and the user sees which: an answer about code it never saw can't be trusted.
+        var lookup = ProjectLookup.For(project, question, _context);
+        if (lookup is not null)
+        {
+            var names = string.Join(", ", lookup.Files);
+            if (ui.Live) ui.Row("read", names, Tone.Secondary);
+            else ui.Metadata($"Read {names}");
+        }
 
         var thinking = ui.Thinking();
         void StopThinking() => thinking.StopAsync().GetAwaiter().GetResult();
@@ -207,7 +216,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var watch = Stopwatch.StartNew();
         try
         {
-            await foreach (var chunk in gateway.ChatAsync(sentHistory ?? _history, question, project, ct, _context, Conventions(), deep).WithCancellation(ct))
+            await foreach (var chunk in gateway.ChatAsync(sentHistory ?? _history, question, project, ct, _context, Conventions(), deep, lookup?.Text).WithCancellation(ct))
             {
                 if (chunk.Progress is { } progress) { thinking.Report(progress); continue; }
                 if (chunk.Stage is { } stage) { thinking.Stage(stage, chunk.StageTokens); continue; }
@@ -313,7 +322,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var watch = Stopwatch.StartNew();
         try
         {
-            await foreach (var chunk in gateway.ChatAsync([], question, project, ct, _context, Conventions(), deep).WithCancellation(ct))
+            await foreach (var chunk in gateway.ChatAsync([], question, project, ct, _context, Conventions(), deep, ProjectLookup.For(project, question, _context)?.Text).WithCancellation(ct))
             {
                 if (chunk.Error is not null) { error = chunk.Error; break; }
                 check = chunk.Check ?? check;
@@ -469,22 +478,23 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var (files, skipped) = ProjectFiles.Load(target);
         var context = new StringBuilder();
         var read = 0;
+        var didntFit = new List<ProjectFile>();
         foreach (var file in files)
         {
             var piece = $"--- {file.Path} ---\n{file.Text}\n";
-            if ((context.Length + piece.Length) / 4 > MaxReadTokens) break;
+            // One big file mustn't keep out every smaller one after it.
+            if ((context.Length + piece.Length) / 4 > MaxReadTokens) { didntFit.Add(file); continue; }
             context.Append(piece);
             read++;
         }
         if (read == 0) { ui.Metadata(files.Count == 0 ? "Nothing readable there." : $"{files[0].Path} is too big to read at once. Use /review for large files."); return; }
         // What didn't fit still shows its shape: types and member signatures, so the model knows what exists and where.
-        var (outline, outlined) = RepoMap.Outline(files.Skip(read), MaxReadTokens * 4 - context.Length - 60);
+        var (outline, outlined) = RepoMap.Outline(didntFit, MaxReadTokens * 4 - context.Length - 60);
         if (outline is not null) context.Append($"--- outline of {outlined} more file{(outlined == 1 ? "" : "s")}, signatures only ---\n{outline}");
         _context = context.ToString();
         _contextLabel = $"{read} file{(read == 1 ? "" : "s")} from {path}";
         _chip = File.Exists(target) ? Path.GetFileName(target) : $"{Path.GetFileName(target.TrimEnd('/', '\\'))}/ {ui.Theme.Glyph('·')} {read} file{(read == 1 ? "" : "s")}";
-        // Reading takes minutes on a CPU: start now, while the question is typed, and the answer comes from the prompt cache.
-        _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None, Conventions()).ContinueWith(t => _ = t.Exception, TaskScheduler.Default); // only a head start: failures don't matter
+        WarmInBackground();
         var left = files.Count - read;
         var extras = $"{(left > 0 ? $". {left} didn't fit, riskiest went first{(outlined > 0 ? $"; {outlined} of those go as an outline" : "")}; /review reads everything" : "")}{(skipped > 0 ? $". {skipped} skipped (generated, data or secrets)" : "")}";
         if (ui.Live) ui.Metadata($"{read} file{(read == 1 ? "" : "s")}, {PromptPanel.Tokens(_context.Length / 4)} tokens{extras}. They go with every question until /clear.", "read");
@@ -573,9 +583,21 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var files = diff.Split('\n').Count(l => l.StartsWith("diff --git "));
         _contextLabel = $"git diff {since ?? "HEAD"}, {files} file{(files == 1 ? "" : "s")}";
         _chip = $"git diff {ui.Theme.Glyph('·')} {files} file{(files == 1 ? "" : "s")}";
-        _ = gateway.WarmAsync(_history.ToList(), project, _context, CancellationToken.None, Conventions()).ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
+        WarmInBackground();
         ui.Metadata($"{(ui.Live ? "The" : "Read the")} changes in {files} file{(files == 1 ? "" : "s")}, about {_context.Length / 4} tokens" +
                     $"{(diff.Length > limit ? $"; only the first {MaxReadTokens} or so fit" : "")}. Ask about them, for example: review these changes.", ui.Live ? "read" : null);
+    }
+
+    /// <summary>
+    /// Reading takes minutes on a CPU: the model starts on the conversation and files now, while the question is typed, and
+    /// the answer comes from the prompt cache. A newer warm-up or /clear stops the older one, so a question never waits
+    /// behind reading it no longer needs. Only a head start: failures don't matter.
+    /// </summary>
+    void WarmInBackground()
+    {
+        _warming?.Cancel();
+        var warming = _warming = new CancellationTokenSource();
+        _ = gateway.WarmAsync(_history.ToList(), project, _context, warming.Token, Conventions()).ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
     }
 
     void ShowContext()
@@ -915,9 +937,9 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         Encoding.UTF8.GetBytes(Path.GetFullPath(project).TrimEnd('\\', '/').ToLowerInvariant()))) + ".json");
 
     /// <summary>
-    /// Carries on this project's last conversation, if there is one. The turns go back exactly as they were sent, and with
-    /// history the gateway keeps the note it began with (ConversationNotes), so the prompt starts the same and the cache
-    /// still fits. Files from /read and /diff stay behind: they may have changed since. A damaged file just starts fresh.
+    /// Carries on this project's last conversation, if there is one. The turns go back exactly as they were sent, so the
+    /// prompt starts the same and the cache still fits. Files from /read and /diff stay behind: they may have changed since.
+    /// A damaged file just starts fresh.
     /// </summary>
     public void Resume()
     {
@@ -929,6 +951,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         for (var i = 0; i < turns.Count; i++)
             if (turns[i]?.Content is null || turns[i]!.Role != (i % 2 == 0 ? "user" : "assistant")) return;
         _history.AddRange(turns!);
+        WarmInBackground(); // otherwise the first question reads the whole conversation again before it can answer
         var questions = _history.Count / 2;
         ui.Metadata($"Carrying on from your last conversation ({questions} question{(questions == 1 ? "" : "s")}). /clear starts over.");
     }

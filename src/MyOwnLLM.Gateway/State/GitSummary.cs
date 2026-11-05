@@ -8,26 +8,9 @@ public static class GitSummary
 {
     const int MaxChars = 2000;
 
-    /// <summary>
-    /// Whether the folder is inside a git repository, the only place a project note means anything. In a folder like the
-    /// home directory there's no project to describe: the model filled the note with invented tasks, then repeated them
-    /// as answers to every question. Only looks for the .git entry; nothing in it is read or run.
-    /// </summary>
-    public static bool IsRepo(string path)
-    {
-        try
-        {
-            for (var dir = new DirectoryInfo(path); dir is not null; dir = dir.Parent)
-                if (Path.Exists(Path.Combine(dir.FullName, ".git"))) return true;
-        }
-        catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException) { }
-        return false;
-    }
-
     public static async Task<string> GetAsync(string repoPath, CancellationToken ct)
     {
-        // This runs on its own after every conversation, in whatever folder the client names, which may be a clone of
-        // someone else's code: nothing from that repo's config may run a program (see Hardening).
+        // This runs in whatever folder the client names, which may be a clone of someone else's code: nothing from that repo's config may run a program (see Hardening).
         var hardening = await HardeningAsync(repoPath, ct);
         var log = await GitAsync(repoPath, ct, [.. hardening, "log", "--oneline", "-10"]);
         if (log is null) return "";

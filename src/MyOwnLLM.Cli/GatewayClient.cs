@@ -18,7 +18,8 @@ public sealed class GatewayException(string message, string? cause, int? status,
 public interface IGatewayClient
 {
     Task<GatewayInfo> InfoAsync(CancellationToken ct);
-    IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null, bool deep = false);
+    /// <param name="lookup">The project's code the question names (<see cref="ProjectLookup"/>); it goes with this question only.</param>
+    IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null, bool deep = false, string? lookup = null);
     /// <summary>One answer, not streamed and outside the conversation, forced into the shape of <paramref name="jsonSchema"/>.</summary>
     Task<Completion> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false);
     Task<(string Id, string Summary)> StatusAsync(string project, CancellationToken ct);
@@ -53,10 +54,10 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
             json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? ""));
     }
 
-    public async IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, [EnumeratorCancellation] CancellationToken ct, string? context = null, string? conventions = null, bool deep = false)
+    public async IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, [EnumeratorCancellation] CancellationToken ct, string? context = null, string? conventions = null, bool deep = false, string? lookup = null)
     {
         var messages = history.Select(t => new { role = t.Role, content = t.Content }).Append(new { role = "user", content = question });
-        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(new { messages, stream = true, context, conventions, deep = deep ? true : (bool?)null }) };
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(new { messages, stream = true, context, conventions, deep = deep ? true : (bool?)null, lookup }) };
         request.Headers.Add("X-Project-Path", Uri.EscapeDataString(project)); // header values must be ASCII, and folders can have accents
         using var response = await SendAsync(request, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));

@@ -478,6 +478,22 @@ public class ProjectToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Read_skips_a_big_file_and_still_reads_the_small_ones_after_it()
+    {
+        Add("auth.cs", new string('x', 30000)); // riskiest name, so it comes first, and alone it's over the limit
+        Add("a.cs", "class A;");
+        Add("b.cs", "class B;");
+        var session = Session();
+
+        await session.HandleAsync("/read .", CancellationToken.None);
+        await session.HandleAsync("what is this?", CancellationToken.None);
+
+        Assert.Contains("class A;", _gateway.LastContext);
+        Assert.Contains("class B;", _gateway.LastContext);
+        Assert.DoesNotContain(new string('x', 30000), _gateway.LastContext);
+    }
+
+    [Fact]
     public async Task Read_gives_the_files_that_didnt_fit_as_an_outline()
     {
         foreach (var i in Enumerable.Range(0, 3))

@@ -63,7 +63,7 @@ def _files(paths):
 
 def read_context(limit=8000):
     """About 2,000 tokens of real code, cut the way /read stops at a limit. Jazari's own code, so nothing private is involved."""
-    return _files(["src/MyOwnLLM.Gateway/Queue/RequestQueue.cs", "src/MyOwnLLM.Gateway/State/StateNoteUpdater.cs"])[:limit]
+    return _files(["src/MyOwnLLM.Gateway/Queue/RequestQueue.cs", "src/MyOwnLLM.Gateway/Llama/Lanes.cs"])[:limit]
 
 
 def _timed(call):

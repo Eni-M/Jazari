@@ -1,6 +1,5 @@
 using MyOwnLLM.Cli;
 using MyOwnLLM.Cli.Terminal;
-using MyOwnLLM.Gateway.State;
 
 namespace MyOwnLLM.Gateway.Tests;
 
@@ -55,6 +54,27 @@ public sealed class SavedConversationTests : IDisposable
     }
 
     [Fact]
+    public async Task Reopening_starts_reading_the_conversation_before_the_first_question()
+    {
+        await Open().AskAsync("one", CancellationToken.None);
+
+        Reopen();
+
+        Assert.Equal(2, Assert.Single(_gateway.WarmedTurns));
+    }
+
+    [Fact]
+    public async Task Clear_stops_the_reading_it_no_longer_needs()
+    {
+        await Open().AskAsync("one", CancellationToken.None);
+        var reopened = Reopen();
+
+        await reopened.HandleAsync("/clear", CancellationToken.None);
+
+        Assert.True(Assert.Single(_gateway.WarmTokens).IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task Clear_starts_over_for_good()
     {
         var session = Open();
@@ -83,24 +103,6 @@ public sealed class SavedConversationTests : IDisposable
 
         Assert.Empty(Reopen(@"C:\Two").History);
         Assert.Equal("about one", Reopen(@"c:\one\").History[0].Content);
-    }
-
-    [Fact]
-    public async Task The_same_note_stays_with_a_reopened_conversation_so_the_prompt_cache_holds()
-    {
-        var notes = new ConversationNotes();
-        await Open().AskAsync("one", CancellationToken.None);
-        notes.For(@"C:\Repo", newConversation: _gateway.Asked[0].History.Count == 0, "note when it began");
-
-        var reopened = Reopen();
-        await reopened.AskAsync("elaborate", CancellationToken.None);
-        var note = notes.For(@"C:\Repo", newConversation: _gateway.Asked[^1].History.Count == 0, "note updated since");
-        Assert.Equal("note when it began", note);
-
-        await reopened.HandleAsync("/clear", CancellationToken.None);
-        await reopened.AskAsync("fresh", CancellationToken.None);
-        note = notes.For(@"C:\Repo", newConversation: _gateway.Asked[^1].History.Count == 0, "note updated since");
-        Assert.Equal("note updated since", note);
     }
 
     [Theory]

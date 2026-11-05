@@ -43,6 +43,13 @@ public static partial class ProjectFiles
         return ([.. files.OrderByDescending(f => Risk(f.Path)).ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)], skipped);
     }
 
+    /// <summary>The readable files' paths under <paramref name="root"/>, relative to it, without reading them: what /read would consider.</summary>
+    public static IEnumerable<string> Paths(string root)
+    {
+        var ignored = IgnorePatterns(root);
+        return Walk(root).Select(p => Path.GetRelativePath(root, p).Replace('\\', '/')).Where(r => Wanted(r) && !IsIgnored(r, ignored));
+    }
+
     static IEnumerable<string> Walk(string folder)
     {
         var options = new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 }; // a folder we can't open is no reason to stop

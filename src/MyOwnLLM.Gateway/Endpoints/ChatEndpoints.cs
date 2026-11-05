@@ -17,7 +17,8 @@ namespace MyOwnLLM.Gateway.Endpoints;
 /// <param name="JsonSchema">Forces the answer into this JSON shape.</param>
 /// <param name="Conventions">The project's AGENTS.md. Apart from Context, so a project that has one still gets the law book.</param>
 /// <param name="Deep">Ask the smart model, with the compiler's check and one repair. /deep in the CLI.</param>
-public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream, string? Context = null, string? JsonSchema = null, string? Conventions = null, bool? Deep = null);
+/// <param name="Lookup">The project's code the question names, which the CLI found; with this question only.</param>
+public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream, string? Context = null, string? JsonSchema = null, string? Conventions = null, bool? Deep = null, string? Lookup = null);
 public sealed record InfillRequest(string Prefix, string Suffix, int? MaxTokens);
 public sealed record StatusRequest(string ProjectPath);
 public sealed record FeedbackRequest(string Id, bool Accepted);
@@ -28,7 +29,9 @@ public sealed class BadRequestException(string message) : Exception(message);
 
 public static class ChatEndpoints
 {
-    const int DefaultChatTokens = 512, MaxChatTokens = 1024, DefaultInfillTokens = 64, StatusTokens = 150;
+    // The model stops when it's done, so a higher cap costs nothing on a short answer; it only spares a code answer from being
+    // cut off and asked again with "go on", which re-reads the whole prompt.
+    const int DefaultChatTokens = 1024, MaxChatTokens = 2048, DefaultInfillTokens = 64, StatusTokens = 150;
     static readonly string Version = InteractionLog.Build.Split('+')[0]; // without the commit
     /// <summary>The name OpenAI-style clients (VS Code, Continue, Rider) list and send back; any name they send is accepted.</summary>
     const string ModelId = "jazari";
@@ -53,20 +56,12 @@ public static class ChatEndpoints
         return group;
     }
 
-    sealed record Services(ILlamaClient Llama, RequestQueue Queue, ProjectStateStore State, InteractionLog Log, HybridCache Cache, ModelLimits Limits, ConversationNotes Notes, LawBook LawBook, ILanes Lanes);
+    sealed record Services(ILlamaClient Llama, RequestQueue Queue, InteractionLog Log, HybridCache Cache, ModelLimits Limits, LawBook LawBook, ILanes Lanes);
 
     static Services Resolve(HttpContext http) => new(
         http.RequestServices.GetRequiredService<ILlamaClient>(), http.RequestServices.GetRequiredService<RequestQueue>(),
-        http.RequestServices.GetRequiredService<ProjectStateStore>(), http.RequestServices.GetRequiredService<InteractionLog>(),
-        http.RequestServices.GetRequiredService<HybridCache>(), http.RequestServices.GetRequiredService<ModelLimits>(),
-        http.RequestServices.GetRequiredService<ConversationNotes>(), http.RequestServices.GetRequiredService<LawBook>(), http.RequestServices.GetRequiredService<ILanes>());
-
-    static async Task<string?> NoteFor(Services s, string? project) =>
-        project is not null && GitSummary.IsRepo(project) ? await s.State.GetAsync(project) : null;
-
-    /// <summary>The note as the conversation began with it, so an update mid-conversation doesn't force a re-read (see <see cref="ConversationNotes"/>).</summary>
-    static async Task<string?> ConversationNoteFor(Services s, string? project, bool newConversation) =>
-        project is null ? null : s.Notes.For(project, newConversation, await NoteFor(s, project));
+        http.RequestServices.GetRequiredService<InteractionLog>(), http.RequestServices.GetRequiredService<HybridCache>(),
+        http.RequestServices.GetRequiredService<ModelLimits>(), http.RequestServices.GetRequiredService<LawBook>(), http.RequestServices.GetRequiredService<ILanes>());
 
     static Task Chat(HttpContext http, ChatRequest request) => Guard(http, async s =>
     {
@@ -78,12 +73,11 @@ public static class ChatEndpoints
         var maxTokens = Math.Clamp(request.MaxTokens ?? DefaultChatTokens, 1, MaxChatTokens);
         var question = request.Messages.LastOrDefault()?.Content ?? "";
         var history = request.Messages.SkipLast(1).ToList();
-        var note = await ConversationNoteFor(s, project, history.Count == 0);
         // ponytail: questions on /read files, and /edit and /commit (JSON answers), don't search yet: passages beside the
         // user's own code are untested, and earlier work showed a small model describes the wrong thing when given extra
         // material. Add them when a test set covers them.
-        var passages = request.Context is null && request.JsonSchema is null && !(history.Count > 0 && LawBook.IsFollowUp(question)) ? s.LawBook.Search(question) : [];
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, history, question, passages, request.Conventions), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages, out var usedPassages);
+        var passages = request.Context is null && request.Lookup is null && request.JsonSchema is null && !(history.Count > 0 && LawBook.IsFollowUp(question)) ? s.LawBook.Search(question) : [];
+        var prompt = PromptBuilder.Build(new PromptParts(request.Context, history, question, passages, request.Conventions, Lookup: request.Lookup), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages, out var usedPassages);
         var watch = Stopwatch.StartNew();
 
         string answer;
@@ -133,7 +127,7 @@ public static class ChatEndpoints
         {
             // Only whole answers are cached: one cut off at max_tokens (or JSON that doesn't parse) would otherwise come
             // back unchanged on every retry for an hour.
-            var key = CacheKey("chat", project, note, prompt, maxTokens, request.JsonSchema, lane);
+            var key = CacheKey("chat", project, prompt, maxTokens, request.JsonSchema, lane);
             var cached = await s.Cache.GetOrCreateAsync(key, _ => ValueTask.FromResult<string?>(null), ProbeOnly, cancellationToken: http.RequestAborted);
             var cutOff = false;
             string? model = null;
@@ -159,8 +153,6 @@ public static class ChatEndpoints
                 choices = new[] { new { index = 0, message = new ChatMessage("assistant", answer), finish_reason = cutOff ? "length" : "stop" } },
             }, SnakeCase, http.RequestAborted);
         }
-
-        if (project is not null) http.RequestServices.GetRequiredService<StateNoteUpdater>().Record(project, question, answer);
     });
 
     /// <summary>/deep: one queue item from loading the smart model to the checked answer, so nothing else asks the model in between.</summary>
@@ -169,9 +161,8 @@ public static class ChatEndpoints
         var project = ProjectPath(http);
         var question = request.Messages[^1].Content;
         var history = request.Messages.SkipLast(1).ToList();
-        var note = await ConversationNoteFor(s, project, history.Count == 0);
-        var passages = history.Count > 0 && LawBook.IsFollowUp(question) ? [] : s.LawBook.Search(question, DeepAnswer.PassageTokens);
-        var parts = new PromptParts(note, request.Context, history, question, passages, request.Conventions);
+        var passages = request.Lookup is not null || (history.Count > 0 && LawBook.IsFollowUp(question)) ? [] : s.LawBook.Search(question, DeepAnswer.PassageTokens);
+        var parts = new PromptParts(request.Context, history, question, passages, request.Conventions, Lookup: request.Lookup);
         var checker = http.RequestServices.GetRequiredService<SnippetChecker>();
         var streaming = request.Stream == true;
         Task Stage(string stage, int? tokens) => streaming ? WriteEventAsync(http, new { stage, tokens }, http.RequestAborted) : Task.CompletedTask;
@@ -196,7 +187,6 @@ public static class ChatEndpoints
             return;
         }
         var id = await s.Log.AddAsync(new Interaction(project, "deep", question, result.Text, watch.ElapsedMilliseconds, model));
-        if (project is not null) http.RequestServices.GetRequiredService<StateNoteUpdater>().Record(project, question, result.Text);
         var finish = result.CutOff ? "length" : "stop";
         if (!streaming)
         {
@@ -220,9 +210,7 @@ public static class ChatEndpoints
     {
         if (request.Messages is null || request.Messages.Any(m => m?.Content is null)) throw new BadRequestException("messages is required, each with its content");
         http.RequestServices.GetRequiredService<SnippetChecker>().Warm();
-        var project = ProjectPath(http);
-        var note = await ConversationNoteFor(s, project, request.Messages.Count == 0);
-        var prompt = PromptBuilder.Build(new PromptParts(note, request.Context, request.Messages, "", Conventions: request.Conventions), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
+        var prompt = PromptBuilder.Build(new PromptParts(request.Context, request.Messages, "", Conventions: request.Conventions), await s.Limits.ContextTokensAsync(http.RequestAborted), DefaultChatTokens);
         await s.Queue.EnqueueAsync(WorkKind.Chat, async t => await s.Llama.ChatAsync(prompt, 1, t, model: await s.Lanes.EnsureAsync(Lane.Fast, null, t)), http.RequestAborted);
         http.Response.StatusCode = StatusCodes.Status204NoContent;
     });
@@ -245,9 +233,8 @@ public static class ChatEndpoints
     static Task Status(HttpContext http, StatusRequest request) => Guard(http, async s =>
     {
         if (string.IsNullOrWhiteSpace(request.ProjectPath)) throw new BadRequestException("project_path is required");
-        var note = await NoteFor(s, request.ProjectPath);
         var git = await GitSummary.GetAsync(request.ProjectPath, http.RequestAborted);
-        var prompt = PromptBuilder.Build(new PromptParts(note ?? "(no notes yet)", git, [], StatusQuestion), await s.Limits.ContextTokensAsync(http.RequestAborted), StatusTokens);
+        var prompt = PromptBuilder.Build(new PromptParts(git.Length > 0 ? git : "(not a git repository)", [], StatusQuestion), await s.Limits.ContextTokensAsync(http.RequestAborted), StatusTokens);
         var watch = Stopwatch.StartNew();
         var summary = await s.Queue.EnqueueAsync(WorkKind.Chat, async t => await s.Llama.ChatAsync(prompt, StatusTokens, t, model: await s.Lanes.EnsureAsync(Lane.Fast, null, t)), http.RequestAborted);
         var id = await s.Log.AddAsync(new Interaction(request.ProjectPath, "status", StatusQuestion, summary, watch.ElapsedMilliseconds));

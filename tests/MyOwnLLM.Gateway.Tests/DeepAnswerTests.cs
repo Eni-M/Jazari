@@ -41,7 +41,7 @@ public class DeepAnswerTests
     readonly List<string> _stages = [];
 
     async Task<DeepResult> Run(ScriptedLlama llama, CancellationToken ct = default) =>
-        await DeepAnswer.RunAsync(llama, Checker, "deep", new PromptParts(null, null, [], "question"), 16384,
+        await DeepAnswer.RunAsync(llama, Checker, "deep", new PromptParts(null, [], "question"), 16384,
             (stage, _) => { if (_stages.LastOrDefault() != stage) _stages.Add(stage); return Task.CompletedTask; }, ct);
 
     [Fact]
@@ -140,7 +140,7 @@ public class DeepAnswerTests
     public async Task Reading_progress_comes_through_so_a_long_read_shows_how_far_it_is()
     {
         var seen = new List<PromptProgress>();
-        await DeepAnswer.RunAsync(new ScriptedLlama(Good), Checker, "deep", new PromptParts(null, null, [], "q"), 16384, (_, _) => Task.CompletedTask, CancellationToken.None,
+        await DeepAnswer.RunAsync(new ScriptedLlama(Good), Checker, "deep", new PromptParts(null, [], "q"), 16384, (_, _) => Task.CompletedTask, CancellationToken.None,
             p => { seen.Add(p); return Task.CompletedTask; });
         Assert.Equal(50, seen[0].Processed);
     }

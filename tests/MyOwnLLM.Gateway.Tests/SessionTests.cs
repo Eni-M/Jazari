@@ -18,16 +18,18 @@ sealed class FakeGateway : IGatewayClient
 
     public Task<GatewayInfo> InfoAsync(CancellationToken ct) => Info(ct);
 
-    public IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null, bool deep = false)
+    public IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null, bool deep = false, string? lookup = null)
     {
         Asked.Add((history.ToList(), question));
         LastDeep = deep;
+        LastLookup = lookup;
         LastContext = context;
         LastConventions = conventions;
         return Chat(history, question, ct);
     }
 
     public bool LastDeep { get; private set; }
+    public string? LastLookup { get; private set; }
     public bool LastCompleteDeep { get; private set; }
     public string? LastCompleteQuestion { get; private set; }
     public string? LastContext { get; private set; }
@@ -48,9 +50,13 @@ sealed class FakeGateway : IGatewayClient
     public Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct) { lock (Feedback) Feedback.Add((id, accepted)); return Task.FromResult(true); }
 
     public List<string?> Warmed { get; } = [];
+    public List<CancellationToken> WarmTokens { get; } = [];
+    public List<int> WarmedTurns { get; } = [];
     public Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct, string? conventions = null)
     {
         Warmed.Add(context);
+        WarmTokens.Add(ct);
+        WarmedTurns.Add(history.Count);
         return Task.CompletedTask;
     }
 
