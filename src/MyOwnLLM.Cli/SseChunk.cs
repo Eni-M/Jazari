@@ -29,7 +29,7 @@ public sealed record SseChunk(string? Content, string? Id, string? Error, ReadPr
         if (root.TryGetProperty("progress", out var p))
             return new(null, null, null, new(p.GetProperty("total").GetInt32(), p.GetProperty("cached").GetInt32(), p.GetProperty("processed").GetInt32()));
         if (root.TryGetProperty("stage", out var stage))
-            return new(null, null, null, Stage: stage.GetString(), StageTokens: root.TryGetProperty("tokens", out var tokens) && tokens.TryGetInt32(out var count) ? count : null);
+            return new(null, null, null, Stage: stage.GetString(), StageTokens: root.TryGetProperty("tokens", out var tokens) && tokens.ValueKind == JsonValueKind.Number && tokens.TryGetInt32(out var count) ? count : null);
         var id = root.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
         var choice = root.GetProperty("choices")[0];
         var content = choice.GetProperty("delta").TryGetProperty("content", out var c) ? c.GetString() : null;

@@ -189,6 +189,8 @@ public class ChangedCodeTests : IDisposable
         var diff = gitCalls.Single(a => a.Contains("diff"));
         Assert.Contains("--relative", diff);
         Assert.Contains("--no-ext-diff", diff);
+        Assert.Contains("--dst-prefix=b/", diff); // the user's diff.mnemonicPrefix can't move the paths
+        Assert.All(gitCalls.Where(a => a.Contains("diff") || a.Contains("ls-files")), a => Assert.Contains("core.quotePath=false", a));
         Assert.Contains("what changed since the last commit: 2 files, 2 parts", _output.ToString());
     }
 

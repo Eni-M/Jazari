@@ -255,7 +255,7 @@ public static class ChatEndpoints
     });
 
     static async Task<IResult> Feedback(FeedbackRequest request, InteractionLog log) =>
-        request.Id.StartsWith("ix-") && long.TryParse(request.Id[3..], out var id) && await log.SetFeedbackAsync(id, request.Accepted)
+        request.Id is { } raw && raw.StartsWith("ix-") && long.TryParse(raw[3..], out var id) && await log.SetFeedbackAsync(id, request.Accepted)
             ? Results.NoContent()
             : Results.NotFound();
 

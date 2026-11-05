@@ -8,12 +8,16 @@ namespace MyOwnLLM.Gateway.Auth;
 public sealed class ApiKeyStore(string keyFilePath)
 {
     sealed record KeyFile(List<string> Hashes);
+    /// <summary>The hashes as last read, with the file's write time and length then: every request checks a key, and the file
+    /// changes only on add-key, which always makes it longer.</summary>
+    sealed record Read(DateTime WrittenUtc, long Length, List<string> Hashes);
+    Read? _read;
 
     public string AddKey()
     {
         var key = "mollm_" + Base64Url(RandomNumberGenerator.GetBytes(32));
         List<string> hashes;
-        try { hashes = Load(); }
+        try { hashes = [.. Load()]; } // a copy: the cached list is shared with requests
         catch (Exception e) when (e is JsonException or FormatException)
         {
             // A damaged file holds no usable key: keep it aside for a look, and start again so the user isn't locked out.
@@ -41,10 +45,15 @@ public sealed class ApiKeyStore(string keyFilePath)
         }
     }
 
-    List<string> Load() =>
-        File.Exists(keyFilePath)
-            ? JsonSerializer.Deserialize<KeyFile>(File.ReadAllText(keyFilePath), JsonSerializerOptions.Web)?.Hashes ?? []
-            : [];
+    List<string> Load()
+    {
+        if (!File.Exists(keyFilePath)) return [];
+        var info = new FileInfo(keyFilePath);
+        if (_read is { } read && read.WrittenUtc == info.LastWriteTimeUtc && read.Length == info.Length) return read.Hashes;
+        var hashes = JsonSerializer.Deserialize<KeyFile>(File.ReadAllText(keyFilePath), JsonSerializerOptions.Web)?.Hashes ?? [];
+        _read = new(info.LastWriteTimeUtc, info.Length, hashes);
+        return hashes;
+    }
 
     static string Hash(string key) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
 

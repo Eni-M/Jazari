@@ -660,6 +660,16 @@ public class ProjectToolsTests : IDisposable
         Assert.Equal([("ix-1", false)], _gateway.Feedback); // the change shown, not the retry that was no better
     }
 
+    [Fact]
+    public void An_edit_keeps_each_untouched_lines_own_ending()
+    {
+        const string file = "a\r\nb\nint x = 1;\r\nc\nd\r\n";
+        var (text, _) = FileEdit.Apply(file, [new("int x = 1;", "int x = 2;\nint y = 3;")]);
+        Assert.Equal("a\r\nb\nint x = 2;\r\nint y = 3;\r\nc\nd\r\n", text);
+        Assert.Equal("a\r\nb\r\n", FileEdit.Apply("a\r\nc\r\n", [new("c", "b")]).Text); // all CRLF stays all CRLF
+        Assert.Equal("a\nb", FileEdit.Apply("a\nc", [new("c", "b")]).Text);
+    }
+
     [Theory]
     [InlineData("    int  limit =\t16;", "    int limit = 32;")]                 // spacing inside the line
     [InlineData("    int limit = 16;\n\n    int other = 1;", "    int limit = 32;\n    int other = 1;")] // a blank line the file doesn't have

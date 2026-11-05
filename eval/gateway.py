@@ -127,9 +127,17 @@ def stamp(llama, model):
             "llama_build": build.group(1) if build else None, "model_fingerprint": fingerprint}
 
 
+def kill_tree(p):
+    """Ends a process and everything it started: llama-server's router runs each model as a process of its own, which
+    outlives a router killed alone and keeps its gigabytes, slowing the next run."""
+    if p.poll() is None and os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+    if p.poll() is None:
+        p.kill()
+    p.wait()
+
+
 def stop(processes):
     for p in processes:
-        if p.poll() is None:
-            p.kill()
-        p.wait()
+        kill_tree(p)
     processes.clear()

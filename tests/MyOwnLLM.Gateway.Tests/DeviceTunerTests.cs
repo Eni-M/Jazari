@@ -41,6 +41,24 @@ public class DeviceTunerTests : IDisposable
         Assert.Equal(layers, DeviceTuner.LayersThatFit(freeMiB, modelMiB: 4035, contextTokens: 16384));
 
     [Fact]
+    public void The_layer_count_comes_from_the_models_header_or_defaults_to_h_tinys()
+    {
+        var gguf = Path.Combine(_dir, "m.gguf");
+        using (var w = new BinaryWriter(File.Create(gguf)))
+        {
+            void Key(string k) { w.Write((ulong)k.Length); w.Write(System.Text.Encoding.UTF8.GetBytes(k)); }
+            w.Write(0x46554747u); w.Write(3u); w.Write(0ul); w.Write(3ul);
+            Key("general.architecture"); w.Write(8u); w.Write(4ul); w.Write("test"u8.ToArray());
+            Key("test.list"); w.Write(9u); w.Write(4u); w.Write(2ul); w.Write(1u); w.Write(2u); // an array to skip
+            Key("test.block_count"); w.Write(4u); w.Write(36u);
+        }
+        Assert.Equal(36, DeviceTuner.LayersIn(gguf));
+        File.WriteAllText(Path.Combine(_dir, "not.gguf"), "hello");
+        Assert.Equal(40, DeviceTuner.LayersIn(Path.Combine(_dir, "not.gguf")));
+        Assert.Equal(40, DeviceTuner.LayersIn(Path.Combine(_dir, "missing.gguf")));
+    }
+
+    [Fact]
     public async Task A_small_gpu_is_measured_with_part_of_the_model()
     {
         var runner = new FakeRunner { Devices = "Available devices:\n  Vulkan0: NVIDIA GeForce MX150 (2048 MiB, 1900 MiB free)\n" };

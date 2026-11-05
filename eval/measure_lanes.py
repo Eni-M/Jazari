@@ -7,7 +7,7 @@ import argparse, json, os, statistics, subprocess, sys, tempfile, time, urllib.r
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from gateway import LLAMA_PORT, start_server
+from gateway import LLAMA_PORT, kill_tree, start_server
 from run_eval import chat, server_args, wait_until_ready
 
 LLAMA = os.path.join(HERE, "..", "spike", "bin", "llama-server.exe")
@@ -56,8 +56,7 @@ def first_token(model=None, headers=None):
 
 
 def stop(server):
-    server.kill()
-    server.wait()
+    kill_tree(server)
 
 
 def plain_swap(a, b):

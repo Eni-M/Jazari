@@ -97,7 +97,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             findings.AddRange(found);
         }
 
-        var report = Path.Combine(storeDir, $"{Path.GetFileName(Path.GetFullPath(root).TrimEnd('\\', '/'))}{(changed is null ? "" : "-changes")}-{DateTime.Now:yyyyMMdd-HHmm}.md");
+        var report = Path.Combine(storeDir, $"{Path.GetFileName(Path.GetFullPath(root).TrimEnd('\\', '/'))}{(changed is null ? "" : "-changes")}-{DateTime.Now:yyyyMMdd-HHmmss}.md");
         // The same finding twice (a part read again after a change elsewhere in it, a model repeating itself) is one finding.
         // A model quoting a line with a key on it would copy the key into the report: every quote is masked the same way.
         findings = [.. findings.Select(f => f with { Quote = StaticChecks.Masked(f.Quote) }).DistinctBy(f => (f.File, f.Line, Squeeze(f.Quote), f.Problem))];
@@ -134,7 +134,12 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
         var now = current.Select(Id).ToHashSet();
         var then = before.Select(Id).ToHashSet();
         var folder = File.Exists(root) ? Path.GetDirectoryName(Path.GetFullPath(root))! : root;
-        var gone = before.Where(f => !now.Contains(Id(f))).ToLookup(f => ProjectFiles.TryRead(Path.Combine(folder, f.File)) is not { } text || !Squeeze(StaticChecks.Masked(text)).Contains(Quoted(f.Quote), StringComparison.Ordinal));
+        // An unverified finding's file is whatever the model wrote: only a path inside the reviewed folder is opened, never an
+        // absolute or network one (\\server\share would send the user's Windows credentials there).
+        var top = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string? Text(string file) => Path.IsPathRooted(file) || Path.GetFullPath(Path.Combine(top, file)) is not { } full
+            || !full.StartsWith(top, StringComparison.OrdinalIgnoreCase) ? null : ProjectFiles.TryRead(full);
+        var gone = before.Where(f => !now.Contains(Id(f))).ToLookup(f => Text(f.File) is not { } text || !Squeeze(StaticChecks.Masked(text)).Contains(Quoted(f.Quote), StringComparison.Ordinal));
         var marked = current.Select(f => f with { New = !then.Contains(Id(f)) }).ToList();
 
         try { File.WriteAllText(stateFile, JsonSerializer.Serialize(marked.Concat(gone[false]).Select(f => f with { New = false }).ToList())); }

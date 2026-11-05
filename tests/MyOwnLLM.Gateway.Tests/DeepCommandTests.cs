@@ -207,7 +207,10 @@ public class DeepCommandTests : IDisposable
         var stage = SseChunk.Parse("""data: {"stage":"thinking","tokens":120}""")!;
         Assert.Equal("thinking", stage.Stage);
         Assert.Equal(120, stage.StageTokens);
-        var final = SseChunk.Parse("""data: {"id":"ix-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"check":"checked: code compiles","checks":[{"block":1,"state":"compiles","errors":[]}]}""")!;
+        var counted = SseChunk.Parse("""data: {"stage":"reading","tokens":null}""")!; // what the gateway sends for a stage without a count
+        Assert.Equal("reading", counted.Stage);
+        Assert.Null(counted.StageTokens);
+        var final =SseChunk.Parse("""data: {"id":"ix-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"check":"checked: code compiles","checks":[{"block":1,"state":"compiles","errors":[]}]}""")!;
         Assert.Equal("checked: code compiles", final.Check);
         Assert.Equal("compiles", final.Checks![0].State);
 

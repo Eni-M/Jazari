@@ -534,9 +534,11 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     /// <summary>/review --changed: only what changed since the last commit, tracked or new (see ChangedCode).</summary>
     async Task ReviewChangedAsync(CancellationToken ct)
     {
-        var (exit, diff) = await SafeGitAsync(["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--relative", "-U0", "HEAD"], ct);
+        // Paths as ChangedCode reads them, whatever the user's config says: names unquoted (core.quotePath writes Übersicht.cs
+        // in octal escapes) and the b/ prefix fixed (diff.mnemonicPrefix and diff.noprefix change it).
+        var (exit, diff) = await SafeGitAsync(["-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--relative", "-U0", "HEAD"], ct);
         if (exit != 0) { ui.Metadata(exit == -1 ? "git isn't installed, or isn't on PATH." : "This folder isn't a git repository, or git couldn't read it."); return; }
-        var (_, untracked) = await SafeGitAsync(["ls-files", "--others", "--exclude-standard"], ct);
+        var (_, untracked) = await SafeGitAsync(["-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard"], ct);
         var changed = ChangedCode.Parts(project, ChangedCode.Ranges(diff), untracked.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         await new ProjectReview(gateway, ui, ReviewDir).RunAsync(project, ct, changed);
     }

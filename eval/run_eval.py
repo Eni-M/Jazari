@@ -4,7 +4,7 @@ import argparse, json, os, re, shutil, statistics, sys, tempfile, time, urllib.e
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from score import score
-from gateway import (stamp, GATEWAY_DLL, GATEWAY_PORT, PortInUse, ServerDidNotStart, add_key, build_gateway, gateway_chat, gateway_env, launch,
+from gateway import (kill_tree, stamp, GATEWAY_DLL, GATEWAY_PORT, PortInUse, ServerDidNotStart, add_key, build_gateway, gateway_chat, gateway_env, launch,
                      search_law, start_server, stop, wait_for_gateway)
 
 PORT = 8099
@@ -295,8 +295,7 @@ def main():
             result.update(run_scenarios(chat, system))
     finally:
         stop(gateway)
-        server.kill()
-        server.wait()
+        kill_tree(server)
         if folder:
             shutil.rmtree(folder, ignore_errors=True)
     os.makedirs(os.path.join(HERE, "results"), exist_ok=True)

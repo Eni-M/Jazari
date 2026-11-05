@@ -66,7 +66,8 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         // Each GPU gets the whole model when it fits, else as many layers as fit: the T480's 2 GB MX150 reads prompts
         // about 38% faster with 24 of 40 layers, at the same answer speed.
         var modelMiB = (int)((_fileSize(config.Model) ?? 0) >> 20);
-        var usable = gpus.Select(g => (Gpu: g, Layers: LayersThatFit(g.FreeMiB, modelMiB, best.ContextTokens))).Where(g => g.Layers >= MinUsefulLayers).ToList();
+        var modelLayers = LayersIn(config.Model);
+        var usable = gpus.Select(g => (Gpu: g, Layers: LayersThatFit(g.FreeMiB, modelMiB, best.ContextTokens, modelLayers))).Where(g => g.Layers >= MinUsefulLayers).ToList();
 
         string[] steps = [$"cpu {threads} threads", "flash attention", .. usable.Select(g => (best with { Device = g.Gpu.Id, DeviceName = g.Gpu.Name }).ShortName()), "pick fastest"];
         var done = 0;
@@ -90,8 +91,8 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
         foreach (var (gpu, layers) in usable)
         {
             Step();
-            if (!ui.Live) ui.Metadata($"Measuring the GPU {gpu.Name}{(layers < ModelLayers ? $" with {layers} of {ModelLayers} layers" : "")}.");
-            var ngl = layers >= ModelLayers ? 99 : layers;
+            if (!ui.Live) ui.Metadata($"Measuring the GPU {gpu.Name}{(layers < modelLayers ? $" with {layers} of {modelLayers} layers" : "")}.");
+            var ngl = layers >= modelLayers ? 99 : layers;
             results.AddRange(await BenchAsync(bench, config.Model, best with { Device = gpu.Id, GpuLayers = ngl, DeviceName = gpu.Name },
                 ["-dev", gpu.Id, "-ngl", ngl.ToString(), "-t", bestThreads.ToString()], "0,1", ct));
         }
@@ -107,24 +108,65 @@ public sealed partial class DeviceTuner(IProcessRunner runner, Ui ui, Func<strin
     }
 
     public static string Describe(Tuning t) =>
-        (t.Device == "none" ? $"CPU, {t.Threads} threads" : t.GpuLayers < ModelLayers ? $"GPU {t.Device}, {t.GpuLayers} layers" : $"GPU {t.Device}")
+        (t.Device == "none" ? $"CPU, {t.Threads} threads" : t.GpuLayers < 99 ? $"GPU {t.Device}, {t.GpuLayers} layers" : $"GPU {t.Device}")
         + (t.FlashAttention ? ", flash attention" : "");
 
-    const int ModelLayers = 40; // Granite 4.0-H Tiny
+    const int DefaultLayers = 40; // Granite 4.0-H Tiny, when the model's own count can't be read
+
+    /// <summary>The model's layer count, from its GGUF header (the architecture's block_count); <see cref="DefaultLayers"/> when
+    /// the file can't be read that way. Only the header is read, and it stops at the count, before the tokenizer's long lists.</summary>
+    public static int LayersIn(string model)
+    {
+        try
+        {
+            using var r = new BinaryReader(File.OpenRead(model));
+            if (r.ReadUInt32() != 0x46554747) return DefaultLayers; // "GGUF"
+            r.ReadUInt32(); // version
+            r.ReadUInt64(); // tensors
+            var count = r.ReadUInt64();
+            for (ulong i = 0; i < count; i++)
+            {
+                var key = Encoding.UTF8.GetString(r.ReadBytes(checked((int)r.ReadUInt64())));
+                var type = r.ReadUInt32();
+                if (key.EndsWith(".block_count", StringComparison.Ordinal) && type is 4 or 5) return checked((int)r.ReadUInt32());
+                Skip(r, type);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OverflowException or ArgumentException) { }
+        return DefaultLayers;
+
+        static void Skip(BinaryReader r, uint type)
+        {
+            switch (type)
+            {
+                case 0 or 1 or 7: r.ReadByte(); break;
+                case 2 or 3: r.ReadUInt16(); break;
+                case 4 or 5 or 6: r.ReadUInt32(); break;
+                case 10 or 11 or 12: r.ReadUInt64(); break;
+                case 8: r.BaseStream.Seek(checked((long)r.ReadUInt64()), SeekOrigin.Current); break;
+                case 9:
+                    var element = r.ReadUInt32();
+                    for (ulong n = r.ReadUInt64(), j = 0; j < n; j++) Skip(r, element);
+                    break;
+                default: throw new IOException($"unknown GGUF value type {type}");
+            }
+        }
+    }
     const int MinUsefulLayers = 8; // fewer moves too little work to the GPU to pay for the copying
 
     /// <summary>
     /// How many of the model's layers fit in a GPU's free memory, each with its share of the context cache, after
     /// 400 MiB for llama.cpp's working buffers. All of them when the whole model fits.
     /// </summary>
-    public static int LayersThatFit(int freeMiB, int modelMiB, int contextTokens)
+    public static int LayersThatFit(int freeMiB, int modelMiB, int contextTokens, int modelLayers = DefaultLayers)
     {
         // About 8 KiB a token on Granite 4.0-H Tiny: only 4 of its 40 layers use attention (from its GGUF metadata, where the
         // same sum gives the 3B's measured 80 KiB).
+        // ponytail: 8 KiB a token is H-Tiny's (4 attention layers of 40); another architecture needs its own figure.
         var cacheMiB = contextTokens * 8 / 1024;
-        if (freeMiB >= modelMiB + cacheMiB + 512) return ModelLayers;
-        var perLayer = (double)(modelMiB + cacheMiB) / ModelLayers;
-        return Math.Clamp((int)((freeMiB - 400) / perLayer), 0, ModelLayers);
+        if (freeMiB >= modelMiB + cacheMiB + 512) return modelLayers;
+        var perLayer = (double)(modelMiB + cacheMiB) / modelLayers;
+        return Math.Clamp((int)((freeMiB - 400) / perLayer), 0, modelLayers);
     }
 
     /// <summary>

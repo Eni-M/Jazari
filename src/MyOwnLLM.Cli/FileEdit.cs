@@ -39,7 +39,6 @@ public static class FileEdit
     /// <param name="applied">Gets what actually changed, which the fallback can make differ from the model's text: that's what the user approves.</param>
     public static (string? Text, string? Problem) Apply(string original, IReadOnlyList<Replacement> edits, List<Replacement>? applied = null)
     {
-        var crlf = original.Contains("\r\n");
         var text = original.Replace("\r\n", "\n");
         foreach (var edit in edits)
         {
@@ -59,7 +58,24 @@ public static class FileEdit
             text = lineText;
             applied?.Add(change!);
         }
-        return (crlf ? text.Replace("\n", "\r\n") : text, null);
+        return (WithEndings(original, text), null);
+    }
+
+    /// <summary>
+    /// The edited text with the original's line ends back: lines before and after the change keep their own, so a file
+    /// mixing \r\n and \n changes only where the edit did; the changed lines take the file's usual one.
+    /// </summary>
+    static string WithEndings(string original, string edited)
+    {
+        var old = original.Split('\n'); // a line ending in \r\n keeps its \r here
+        var now = edited.Split('\n');
+        var (head, tail) = (0, 0);
+        while (head < old.Length && head < now.Length && old[head].TrimEnd('\r') == now[head]) head++;
+        while (tail < old.Length - head && tail < now.Length - head && old[^(tail + 1)].TrimEnd('\r') == now[^(tail + 1)]) tail++;
+        var usual = old.SkipLast(1).Count(l => l.EndsWith('\r')) * 2 > old.Length - 1 ? "\r" : "";
+        // The last piece has no line end after it, so it gets no \r of its own.
+        var middle = now[head..^tail].Select((l, i) => head + i == now.Length - 1 ? l : l + usual);
+        return string.Join('\n', old[..head].Concat(middle).Concat(old[^tail..]));
     }
 
     /// <summary>

@@ -12,7 +12,7 @@ import argparse, difflib, json, os, re, shutil, statistics, subprocess, sys, tem
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from gateway import (GATEWAY_DLL, GATEWAY_PORT, LLAMA_PORT, add_key, build_gateway, gateway_chat, gateway_env, launch, stamp, start_server, stop, wait_for_gateway)
+from gateway import (GATEWAY_DLL, kill_tree, GATEWAY_PORT, LLAMA_PORT, add_key, build_gateway, gateway_chat, gateway_env, launch, stamp, start_server, stop, wait_for_gateway)
 from run_eval import wait_until_ready
 from score import held_out
 
@@ -73,10 +73,7 @@ def run(args, cwd=None, timeout=COMMAND_TIMEOUT_S):
         out, _ = p.communicate(timeout=timeout)
         return p.returncode, out
     except subprocess.TimeoutExpired:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
-        else:
-            p.kill()
+        kill_tree(p)
         p.communicate()
         return -1, ""
 

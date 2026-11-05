@@ -51,7 +51,7 @@ public static partial class ProjectFiles
         foreach (var file in Directory.EnumerateFiles(folder, "*", options).Where(f => !IsLink(new FileInfo(f)))) yield return file;
         foreach (var sub in Directory.EnumerateDirectories(folder, "*", options))
         {
-            if (SkippedFolders.Contains(Path.GetFileName(sub)) || new DirectoryInfo(sub).Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+            if (SkippedFolders.Contains(Path.GetFileName(sub)) || IsLink(new DirectoryInfo(sub))) continue;
             foreach (var file in Walk(sub)) yield return file;
         }
     }
@@ -94,9 +94,9 @@ public static partial class ProjectFiles
         return CodeExtensions.Contains(Path.GetExtension(path)) && !Noise().IsMatch(name) && !IsSecret(path);
     }
 
-    internal static bool IsLink(FileInfo file)
+    internal static bool IsLink(FileSystemInfo item)
     {
-        try { return file.LinkTarget is not null; }
+        try { return item.LinkTarget is not null; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; } // can't tell: don't follow it
     }
 
