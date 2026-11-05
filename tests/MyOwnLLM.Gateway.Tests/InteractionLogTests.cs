@@ -59,4 +59,42 @@ public class InteractionLogTests : IDisposable
     {
         Assert.False(await _log.SetFeedbackAsync(9999, accepted: true));
     }
+
+    [Fact]
+    public async Task Each_row_says_which_model_build_and_law_book_made_it()
+    {
+        var book = Path.Combine(_dir, "law-book.db");
+        File.WriteAllText(book, "");
+        var log = new InteractionLog(_db, new GatewayOptions { LawBookFile = book });
+
+        var id = await log.AddAsync(Sample with { Model = "deep" });
+
+        using var connection = _db.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT model, build, law_book FROM interactions WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        using var r = cmd.ExecuteReader();
+        Assert.True(r.Read());
+        Assert.Equal("deep", r.GetString(0));
+        Assert.False(string.IsNullOrEmpty(r.GetString(1)));
+        Assert.Equal(File.GetLastWriteTimeUtc(book).ToString("O"), r.GetString(2));
+    }
+
+    [Fact]
+    public async Task A_file_from_before_the_version_columns_gets_them()
+    {
+        var old = Path.Combine(_dir, "old.db");
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={old}"))
+        {
+            connection.Open();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE interactions(id INTEGER PRIMARY KEY AUTOINCREMENT, created_utc TEXT NOT NULL, project TEXT, kind TEXT NOT NULL,
+                    prompt TEXT NOT NULL, answer TEXT NOT NULL, duration_ms INTEGER NOT NULL, accepted INTEGER NULL);
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        Assert.True(await new InteractionLog(new LocalDb(old)).AddAsync(Sample) > 0);
+    }
 }

@@ -87,7 +87,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
             try
             {
                 var context = string.Join('\n', units[i].Select(f => $"--- {f.Path} ---\n{f.Text}"));
-                found = Parse(await gateway.CompleteAsync(Instructions, context, Schema, AnswerTokens, ct), units[i]);
+                found = Parse((await gateway.CompleteAsync(Instructions, context, Schema, AnswerTokens, ct)).Text, units[i]);
             }
             catch (GatewayException e) { ui.Error("The review stopped.", e.Message, "Run it again to carry on."); return null; }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { ui.Metadata("Stopped. Run it again to carry on."); return null; }

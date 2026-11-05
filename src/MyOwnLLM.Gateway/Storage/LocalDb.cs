@@ -22,6 +22,15 @@ public sealed class LocalDb(string dbPath)
                     prompt TEXT NOT NULL, answer TEXT NOT NULL, duration_ms INTEGER NOT NULL, accepted INTEGER NULL);
                 """;
             cmd.ExecuteNonQuery();
+            // Added later: which model, gateway build and law book made an answer, so a miss can be traced. A file from
+            // before them gets them here.
+            foreach (var column in new[] { "model", "build", "law_book" })
+            {
+                cmd.CommandText = $"SELECT count(*) FROM pragma_table_info('interactions') WHERE name = '{column}'";
+                if ((long)cmd.ExecuteScalar()! > 0) continue;
+                cmd.CommandText = $"ALTER TABLE interactions ADD COLUMN {column} TEXT";
+                cmd.ExecuteNonQuery();
+            }
             _created = true;
         }
         return connection;

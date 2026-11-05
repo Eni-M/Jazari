@@ -20,7 +20,7 @@ public interface IGatewayClient
     Task<GatewayInfo> InfoAsync(CancellationToken ct);
     IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, CancellationToken ct, string? context = null, string? conventions = null, bool deep = false);
     /// <summary>One answer, not streamed and outside the conversation, forced into the shape of <paramref name="jsonSchema"/>.</summary>
-    Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false);
+    Task<Completion> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false);
     Task<(string Id, string Summary)> StatusAsync(string project, CancellationToken ct);
     Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct);
     /// <summary>Has the model read the conversation and context now, so the next question only adds itself.</summary>
@@ -28,6 +28,9 @@ public interface IGatewayClient
     /// <summary>The law book's passages for a question, and whether there is a law book at all.</summary>
     Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct);
 }
+
+/// <summary>An answer, and its id for feedback (ix-12).</summary>
+public sealed record Completion(string? Id, string Text);
 
 /// <summary>A passage of Microsoft's .NET docs, with the page it's from.</summary>
 public sealed record DocPassage(string Title, string Url, string Text);
@@ -41,12 +44,13 @@ public sealed class GatewayClient(HttpClient http) : IGatewayClient
         return Unexpected(() => new GatewayInfo(json.GetProperty("name").GetString() ?? "Jazari", json.GetProperty("model").GetString() ?? "?", json.GetProperty("version").GetString() ?? "?", json.TryGetProperty("deep_available", out var deep) && deep.ValueKind == JsonValueKind.True));
     }
 
-    public async Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false)
+    public async Task<Completion> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false)
     {
         var body = new { messages = new[] { new { role = "user", content = question } }, max_tokens = maxTokens, context, json_schema = jsonSchema, conventions, deep = deep ? true : (bool?)null };
         using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = JsonContent.Create(body) }, ct);
         var json = await ReadJson(response, ct);
-        return Unexpected(() => json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "");
+        return Unexpected(() => new Completion(json.TryGetProperty("id", out var id) ? id.GetString() : null,
+            json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? ""));
     }
 
     public async IAsyncEnumerable<SseChunk> ChatAsync(IReadOnlyList<ChatTurn> history, string question, string project, [EnumeratorCancellation] CancellationToken ct, string? context = null, string? conventions = null, bool deep = false)

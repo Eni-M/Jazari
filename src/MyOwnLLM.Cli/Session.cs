@@ -68,7 +68,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     const int EditAnswerTokens = 1000;
     string? _context;
     string? _contextLabel;
-    (string Path, byte[] Before, byte[] Written)? _undo;
+    (string Path, byte[] Before, byte[] Written, string? AnswerId)? _undo;
     /// <summary>Runs git in the project and returns its exit code and output. Replaced in tests.</summary>
     public Func<string[], CancellationToken, Task<(int ExitCode, string Output)>> Git { get; init; } = RunGitAsync;
     bool Live => ui.Theme.Mode != ColorMode.None;
@@ -611,7 +611,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             "body: why, only when the subject can't say it; empty otherwise.";
 
         if (await WithThinking(() => gateway.CompleteAsync(question, "", CommitSchema, 250, ct), ct) is not (true, var reply)) return;
-        if (CommitMessage(reply) is not { } message) { ui.Metadata("The model's answer couldn't be read. Try /commit again."); return; }
+        if (CommitMessage(reply.Text) is not { } message) { ui.Metadata("The model's answer couldn't be read. Try /commit again."); return; }
         ui.Line(message, Tone.Primary);
         try { SetClipboard(message); ui.Metadata("Copied. Paste it into git commit, or edit it first."); }
         catch (Exception e) when (e is not OperationCanceledException) { ui.Metadata("Couldn't copy it; select the text above instead."); }
@@ -660,11 +660,13 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
         var asked = FileEdit.Instructions + request;
         var watch = Stopwatch.StartNew();
+        string? answerId = null; // the answer the change came from, rated down when it's turned down or undone
         // Asks for the edits and applies them in memory. Null when stopped or the gateway failed (already reported).
         async Task<(string? Text, List<Replacement> Applied, string? Problem)?> ProposeAsync(string question)
         {
             if (await WithThinking(() => gateway.CompleteAsync(question, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct, Conventions(), deep), ct) is not (true, var reply)) return null;
-            if (FileEdit.Parse(reply) is not { } edits) return (null, [], "the model's answer couldn't be read");
+            answerId = reply.Id;
+            if (FileEdit.Parse(reply.Text) is not { } edits) return (null, [], "the model's answer couldn't be read");
             var applied = new List<Replacement>();
             var (newText, problem) = FileEdit.Apply(original, edits, applied);
             return (newText, applied, problem);
@@ -716,10 +718,10 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             ui.Error("This change breaks the C# syntax.", string.Join("; ", broken.Take(3)), "Say no, then /edit again with a clearer request.");
         if (projectErrors is { Count: > 0 })
             ui.Error("This change doesn't compile in the project.", string.Join("; ", projectErrors.Take(3)), "Say no, then /deep /edit again with a clearer request.");
-        if (!Confirm($"Apply this change to {file}?")) { ui.Metadata("Nothing changed."); return; }
+        if (!Confirm($"Apply this change to {file}?")) { RateDown(answerId); ui.Metadata("Nothing changed."); return; }
         var written = FileEdit.Encode(text, stored.Encoding);
         File.WriteAllBytes(path, written);
-        _undo = (path, stored.Bytes, written);
+        _undo = (path, stored.Bytes, written, answerId);
         _hint = "/undo puts it back";
         ui.Metadata("Changed. /undo puts it back.");
     }
@@ -728,9 +730,15 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     static int LineOf(string text, string piece) =>
         text.IndexOf(piece, StringComparison.Ordinal) is var at and >= 0 ? text.AsSpan(0, at).Count('\n') + 1 : 0;
 
+    /// <summary>A change turned down or undone is a likely miss, for eval/misses.py. Best effort: it never holds up the session.</summary>
+    void RateDown(string? answerId)
+    {
+        if (answerId is not null) _ = gateway.FeedbackAsync(answerId, false, CancellationToken.None).ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
+    }
+
     void Undo()
     {
-        if (_undo is not var (path, before, written)) { ui.Metadata("Nothing to undo."); return; }
+        if (_undo is not var (path, before, written, answerId)) { ui.Metadata("Nothing to undo."); return; }
         // Work done on the file since /edit would be lost: only undo while it still holds exactly what /edit wrote.
         if (!File.Exists(path) || !File.ReadAllBytes(path).AsSpan().SequenceEqual(written))
         {
@@ -739,6 +747,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             return;
         }
         File.WriteAllBytes(path, before);
+        RateDown(answerId);
         _undo = null;
         _hint = null;
         ui.Metadata($"Put back {path}.");

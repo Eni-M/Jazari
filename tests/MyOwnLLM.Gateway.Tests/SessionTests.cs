@@ -34,17 +34,18 @@ sealed class FakeGateway : IGatewayClient
     public string? LastConventions { get; private set; }
     public Func<string, string, Task<string>> Complete { get; set; } = (_, _) => Task.FromResult("""{"findings":[]}""");
     public int Completions { get; private set; }
-    public Task<string> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false)
+    public async Task<Completion> CompleteAsync(string question, string context, string jsonSchema, int maxTokens, CancellationToken ct, string? conventions = null, bool deep = false)
     {
         Completions++;
         LastConventions = conventions;
         LastCompleteDeep = deep;
         LastCompleteQuestion = question;
-        return Complete(question, context);
+        return new Completion($"ix-{Completions}", await Complete(question, context));
     }
 
     public Task<(string Id, string Summary)> StatusAsync(string project, CancellationToken ct) => Task.FromResult(("ix-9", "We are building the CLI."));
-    public Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct) => Task.FromResult(true);
+    public List<(string Id, bool Accepted)> Feedback { get; } = [];
+    public Task<bool> FeedbackAsync(string id, bool accepted, CancellationToken ct) { lock (Feedback) Feedback.Add((id, accepted)); return Task.FromResult(true); }
 
     public List<string?> Warmed { get; } = [];
     public Task WarmAsync(IReadOnlyList<ChatTurn> history, string project, string? context, CancellationToken ct, string? conventions = null)

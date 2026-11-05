@@ -533,9 +533,22 @@ public class ProjectToolsTests : IDisposable
         Assert.Contains("- int a;", _output.ToString());
         Assert.Contains("+ int b;", _output.ToString());
         Assert.Equal("line\r\nint b;\r\n", File.ReadAllText(path));
+        Assert.Empty(_gateway.Feedback);
 
         await session.HandleAsync("/undo", CancellationToken.None);
         Assert.Equal("line\r\nint a;\r\n", File.ReadAllText(path));
+        Assert.Equal([("ix-1", false)], _gateway.Feedback); // an undone change is a likely miss
+    }
+
+    [Fact]
+    public async Task A_change_turned_down_rates_its_answer_down()
+    {
+        Add("a.cs", "int a;");
+        _gateway.Complete = (_, _) => Task.FromResult(OneEdit);
+
+        await Session(_ => false).HandleAsync("/edit a.cs rename it", CancellationToken.None);
+
+        Assert.Equal([("ix-1", false)], _gateway.Feedback);
     }
 
     [Fact]

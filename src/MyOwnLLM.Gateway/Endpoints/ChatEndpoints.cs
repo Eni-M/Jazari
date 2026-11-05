@@ -93,12 +93,13 @@ public static class ChatEndpoints
             http.Response.ContentType = "text/event-stream";
             AnswerStats? stats = null;
             var cutOff = false;
+            string? model = null;
             try
             {
                 answer = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
                 {
                     var text = new StringBuilder();
-                    var model = await s.Lanes.EnsureAsync(Lane.Fast, stage => WriteEventAsync(http, new { stage, tokens = (int?)null }, ct), ct);
+                    model = await s.Lanes.EnsureAsync(Lane.Fast, stage => WriteEventAsync(http, new { stage, tokens = (int?)null }, ct), ct);
                     await foreach (var part in s.Llama.ChatStreamAsync(prompt, maxTokens, ct, model))
                     {
                         stats = part.Stats ?? stats;
@@ -119,7 +120,7 @@ public static class ChatEndpoints
                 await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
                 return;
             }
-            id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
+            id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds, model));
             var choices = new[] { new { index = 0, delta = new { }, finish_reason = cutOff ? "length" : "stop" } };
             // sources only when the law book's passages went in, so the CLI names the page the answer drew on.
             var final = new Dictionary<string, object?> { ["id"] = $"ix-{id}", ["choices"] = choices, ["timings"] = stats, ["dropped_turns"] = droppedMessages / 2 };
@@ -135,18 +136,20 @@ public static class ChatEndpoints
             var key = CacheKey("chat", project, note, prompt, maxTokens, request.JsonSchema, lane);
             var cached = await s.Cache.GetOrCreateAsync(key, _ => ValueTask.FromResult<string?>(null), ProbeOnly, cancellationToken: http.RequestAborted);
             var cutOff = false;
+            string? model = null;
             if (cached is null)
             {
                 (answer, cutOff) = await s.Queue.EnqueueAsync(WorkKind.Chat, async t =>
                 {
-                    var result = await s.Llama.ChatWithEndAsync(prompt, maxTokens, t, request.JsonSchema, await s.Lanes.EnsureAsync(lane, null, t));
+                    model = await s.Lanes.EnsureAsync(lane, null, t);
+                    var result = await s.Llama.ChatWithEndAsync(prompt, maxTokens, t, request.JsonSchema, model);
                     if (lane is Lane.Deep) s.Lanes.HoldDeep();
                     return result;
                 }, http.RequestAborted);
                 if (!cutOff && (request.JsonSchema is null || IsJson(answer))) await s.Cache.SetAsync(key, answer, CacheFor, cancellationToken: http.RequestAborted);
             }
             else answer = cached;
-            id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds));
+            id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds, model));
             await http.Response.WriteAsJsonAsync(new
             {
                 id = $"ix-{id}",
@@ -173,11 +176,12 @@ public static class ChatEndpoints
         if (streaming) http.Response.ContentType = "text/event-stream";
         var watch = Stopwatch.StartNew();
         DeepResult result;
+        string? model = null;
         try
         {
             result = await s.Queue.EnqueueAsync(WorkKind.Chat, async ct =>
             {
-                var model = await s.Lanes.EnsureAsync(Lane.Deep, stage => Stage(stage, null), ct);
+                model = await s.Lanes.EnsureAsync(Lane.Deep, stage => Stage(stage, null), ct);
                 Task Reading(PromptProgress p) => streaming ? WriteEventAsync(http, new { progress = new { total = p.Total, cached = p.Cached, processed = p.Processed } }, ct) : Task.CompletedTask;
                 try { return await DeepAnswer.RunAsync(s.Llama, checker, model, parts, await s.Limits.ContextTokensAsync(ct), Stage, ct, Reading); }
                 finally { s.Lanes.HoldDeep(); }
@@ -189,7 +193,7 @@ public static class ChatEndpoints
             await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
             return;
         }
-        var id = await s.Log.AddAsync(new Interaction(project, "deep", question, result.Text, watch.ElapsedMilliseconds));
+        var id = await s.Log.AddAsync(new Interaction(project, "deep", question, result.Text, watch.ElapsedMilliseconds, model));
         if (project is not null) http.RequestServices.GetRequiredService<StateNoteUpdater>().Record(project, question, result.Text);
         var finish = result.CutOff ? "length" : "stop";
         if (!streaming)
