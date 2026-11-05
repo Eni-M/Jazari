@@ -16,7 +16,7 @@ namespace MyOwnLLM.Gateway.Endpoints;
 /// <param name="Context">Code the client read for this question; goes before the conversation so it stays in the prompt cache.</param>
 /// <param name="JsonSchema">Forces the answer into this JSON shape.</param>
 /// <param name="Conventions">The project's AGENTS.md. Apart from Context, so a project that has one still gets the law book.</param>
-/// <param name="Deep">Ask the smart model, with a plan, the compiler's check and one repair. /deep in the CLI.</param>
+/// <param name="Deep">Ask the smart model, with the compiler's check and one repair. /deep in the CLI.</param>
 public sealed record ChatRequest(List<ChatMessage> Messages, int? MaxTokens, bool? Stream, string? Context = null, string? JsonSchema = null, string? Conventions = null, bool? Deep = null);
 public sealed record InfillRequest(string Prefix, string Suffix, int? MaxTokens);
 public sealed record StatusRequest(string ProjectPath);
@@ -29,7 +29,7 @@ public sealed class BadRequestException(string message) : Exception(message);
 public static class ChatEndpoints
 {
     const int DefaultChatTokens = 512, MaxChatTokens = 1024, DefaultInfillTokens = 64, StatusTokens = 150;
-    static readonly string Version = typeof(ChatEndpoints).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false) is [System.Reflection.AssemblyInformationalVersionAttribute v, ..] ? v.InformationalVersion.Split('+')[0] : "0.0.0";
+    static readonly string Version = InteractionLog.Build.Split('+')[0]; // without the commit
     /// <summary>The name OpenAI-style clients (VS Code, Continue, Rider) list and send back; any name they send is accepted.</summary>
     const string ModelId = "jazari";
     static readonly TimeSpan CheckBudget = TimeSpan.FromSeconds(2);
@@ -49,7 +49,7 @@ public static class ChatEndpoints
             ? Results.BadRequest(new { error = "question is required" })
             : Results.Json(new { available = File.Exists(o.LawBookFile), passages = book.Search(request.Question).Select(p => new { title = p.Title, url = p.Url, text = p.Text }) }));
         group.MapGet("/models", () => Results.Json(new { @object = "list", data = new[] { new { id = ModelId, @object = "model", created = 0, owned_by = "jazari" } } }));
-        group.MapGet("/info", async (GatewayOptions o, ILanes lanes, CancellationToken ct) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version, deep_available = await lanes.DeepAvailableAsync(ct) }));
+        group.MapGet("/info", (GatewayOptions o) => Results.Json(new { name = "Jazari", model = o.ModelName, version = Version, deep_available = true })); // /deep runs on the fast model when there's no smart one
         return group;
     }
 
@@ -149,7 +149,9 @@ public static class ChatEndpoints
                 if (!cutOff && (request.JsonSchema is null || IsJson(answer))) await s.Cache.SetAsync(key, answer, CacheFor, cancellationToken: http.RequestAborted);
             }
             else answer = cached;
-            id = await s.Log.AddAsync(new Interaction(project, "chat", question, answer, watch.ElapsedMilliseconds, model));
+            // "json": /edit, /review and /commit, whose questions start with the same long instructions, so eval/misses.py
+            // mustn't read two of them as one question asked again.
+            id = await s.Log.AddAsync(new Interaction(project, request.JsonSchema is null ? "chat" : "json", question, answer, watch.ElapsedMilliseconds, model));
             await http.Response.WriteAsJsonAsync(new
             {
                 id = $"ix-{id}",
@@ -271,7 +273,6 @@ public static class ChatEndpoints
     static int? StatusFor(Exception e) => e switch
     {
         LlamaUnavailableException => StatusCodes.Status503ServiceUnavailable,
-        DeepModelUnavailableException => StatusCodes.Status503ServiceUnavailable,
         LlamaErrorException { Status: 400 } => StatusCodes.Status413PayloadTooLarge, // our requests are well-formed; 400 means context overflow
         LlamaErrorException { Status: 503 } => StatusCodes.Status503ServiceUnavailable, // still loading the model
         LlamaErrorException => StatusCodes.Status502BadGateway,

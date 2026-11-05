@@ -32,10 +32,10 @@ public sealed class LlamaClient(HttpClient http, string? keyFile = null) : ILlam
         return (choice.GetProperty("message").GetProperty("content").GetString() ?? "", cutOff);
     }
 
-    public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct, string? model = null)
+    public async IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, [EnumeratorCancellation] CancellationToken ct, string? model = null, double? temperature = null)
     {
         // return_progress: llama-server reports how far it has read the prompt, which takes minutes on a CPU.
-        var body = new { Model = model, Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = true, Temperature = CodeTemperature, TopK, TopP, MinP, ReturnProgress = true };
+        var body = new { Model = model, Messages = messages, MaxTokens = maxTokens, CachePrompt = true, Stream = true, Temperature = temperature ?? CodeTemperature, TopK, TopP, MinP, ReturnProgress = true };
         using var response = await SendAsync("/v1/chat/completions", body, stream: true, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
         while (await reader.ReadLineAsync(ct) is { } line)

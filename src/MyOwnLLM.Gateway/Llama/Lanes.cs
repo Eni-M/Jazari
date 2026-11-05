@@ -4,13 +4,8 @@ namespace MyOwnLLM.Gateway.Llama;
 
 public enum Lane { Fast, Deep }
 
-/// <summary>A /deep the smart model can't answer: none is installed, or it wouldn't load. The message is for the user.</summary>
-public sealed class DeepModelUnavailableException(string why) : Exception(why);
-
 public interface ILanes
 {
-    Task<bool> DeepAvailableAsync(CancellationToken ct);
-
     /// <summary>
     /// Has the lane's model loaded and returns the name to send to it; null lane means whichever model is loaded, for work that
     /// doesn't care. Null result: a plain llama-server with one model, where no name is sent. A load runs to its end once
@@ -37,15 +32,7 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
     readonly object _gate = new();
     Task? _loading;
     ITimer? _hold;
-
-    /// <summary>A quick look only: /v1/info says this, and a stuck model server mustn't make the gateway look down too.</summary>
-    public async Task<bool> DeepAvailableAsync(CancellationToken ct)
-    {
-        using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        quick.CancelAfter(TimeSpan.FromSeconds(2));
-        try { return await llama().ModelStatesAsync(quick.Token) is { } states && states.ContainsKey(DeepModel); }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return false; }
-    }
+    bool _deepBroken; // the smart model failed to load: /deep uses the fast one until the gateway restarts
 
     public async Task<string?> EnsureAsync(Lane? lane, Func<string, Task>? stage, CancellationToken ct)
     {
@@ -56,12 +43,9 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
         if (loading is not null) await loading.WaitAsync(ct).ContinueWith(t => { if (t.IsCanceled) ct.ThrowIfCancellationRequested(); }, TaskScheduler.Default);
 
         var states = await llama().ModelStatesAsync(ct);
-        if (states is null || !states.ContainsKey(FastModel))
-        {
-            if (lane is Lane.Deep) throw new DeepModelUnavailableException("The smart model isn't set up. Run jazari update.");
-            return null;
-        }
-        if (lane is Lane.Deep && !states.ContainsKey(DeepModel)) throw new DeepModelUnavailableException("The smart model isn't installed. Run jazari update.");
+        if (states is null || !states.ContainsKey(FastModel)) return null; // a plain llama-server: its one model answers every lane
+        // No smart model: /deep's checks and repair run on the fast model. A bigger model didn't beat it (2026-11-04-deep-model-results.md).
+        if (lane is Lane.Deep && (!states.ContainsKey(DeepModel) || _deepBroken)) lane = Lane.Fast;
 
         var name = lane switch
         {
@@ -75,19 +59,20 @@ public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProv
         var load = Task.Run(() => LoadAsync(name), CancellationToken.None);
         lock (_gate) _loading = load;
         _ = load.ContinueWith(_ => { lock (_gate) if (_loading == load) _loading = null; }, TaskScheduler.Default);
-        await load.WaitAsync(ct);
-        return name;
+        return await load.WaitAsync(ct);
     }
 
-    async Task LoadAsync(string name)
+    /// <summary>The model that ended up loaded: the fast one when the smart one wouldn't load, so /deep still answers, with its checks.</summary>
+    async Task<string> LoadAsync(string name)
     {
         try { await WaitForLoadAsync(name); }
-        catch (Exception e) when (name == DeepModel)
+        catch (Exception) when (name == DeepModel)
         {
-            // The smart model wouldn't load: bring the fast one back, so plain questions carry on.
-            try { await WaitForLoadAsync(FastModel); } catch (Exception) { }
-            throw new DeepModelUnavailableException($"The smart model didn't load ({e.Message}). Plain questions still work.");
+            _deepBroken = true;
+            await WaitForLoadAsync(FastModel);
+            return FastModel;
         }
+        return name;
     }
 
     async Task WaitForLoadAsync(string name)

@@ -33,7 +33,7 @@ public sealed class FakeRouter : ILlamaClient
     }
 
     public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null, string? model = null) => Task.FromResult("answer");
-    public IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? model = null) => throw new NotSupportedException();
+    public IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? model = null, double? temperature = null) => throw new NotSupportedException();
     public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct, string? model = null) => Task.FromResult("");
     public Task<int?> ContextTokensAsync(CancellationToken ct) => Task.FromResult<int?>(16384);
 }
@@ -129,15 +129,16 @@ public class LanesTests
     }
 
     [Fact]
-    public async Task A_failed_deep_load_throws_a_clear_message_and_fast_comes_back()
+    public async Task A_failed_deep_load_answers_on_the_fast_model_and_isnt_tried_again()
     {
         _router.WontLoad.Add("deep");
 
-        var error = await Assert.ThrowsAsync<DeepModelUnavailableException>(() => _lanes.EnsureAsync(Lane.Deep, null, CancellationToken.None));
-
-        Assert.Contains("Plain questions still work", error.Message);
+        Assert.Equal("fast", await _lanes.EnsureAsync(Lane.Deep, null, CancellationToken.None));
         Assert.Equal(ModelState.Loaded, _router.States["fast"]);
-        Assert.Equal("fast", await _lanes.EnsureAsync(Lane.Fast, null, CancellationToken.None));
+        var loads = _router.Loads.Count;
+
+        Assert.Equal("fast", await _lanes.EnsureAsync(Lane.Deep, null, CancellationToken.None));
+        Assert.Equal(loads, _router.Loads.Count);
     }
 
     [Fact]
@@ -157,22 +158,6 @@ public class LanesTests
 
         Assert.Equal("fast", await _lanes.EnsureAsync(Lane.Fast, null, CancellationToken.None));
         Assert.Empty(_router.Loads);
-    }
-
-    [Fact]
-    public async Task A_stuck_model_server_makes_deep_unavailable_rather_than_hanging()
-    {
-        var stuck = new Lanes(() => new StuckLlama(), _queue, _time);
-        Assert.False(await stuck.DeepAvailableAsync(CancellationToken.None));
-    }
-
-    sealed class StuckLlama : ILlamaClient
-    {
-        public async Task<IReadOnlyDictionary<string, ModelState>?> ModelStatesAsync(CancellationToken ct) { await Task.Delay(Timeout.Infinite, ct); return null; }
-        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null, string? model = null) => throw new NotSupportedException();
-        public IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? model = null) => throw new NotSupportedException();
-        public Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct, string? model = null) => throw new NotSupportedException();
-        public Task<int?> ContextTokensAsync(CancellationToken ct) => throw new NotSupportedException();
     }
 
     [Fact]
@@ -204,23 +189,21 @@ public class LanesTests
     }
 
     [Fact]
-    public async Task Without_a_deep_model_deep_is_unavailable_and_says_how_to_get_one()
+    public async Task Without_a_deep_model_deep_uses_the_fast_one_without_a_load()
     {
         _router.States = new() { ["fast"] = ModelState.Loaded };
 
-        Assert.False(await _lanes.DeepAvailableAsync(CancellationToken.None));
-        var error = await Assert.ThrowsAsync<DeepModelUnavailableException>(() => _lanes.EnsureAsync(Lane.Deep, null, CancellationToken.None));
-        Assert.Contains("jazari update", error.Message);
+        Assert.Equal("fast", await _lanes.EnsureAsync(Lane.Deep, null, CancellationToken.None));
+        Assert.Empty(_router.Loads);
     }
 
     [Fact]
-    public async Task A_plain_llama_server_sends_no_model_name_and_has_no_deep()
+    public async Task A_plain_llama_server_sends_no_model_name_for_either_lane()
     {
         var plain = new Lanes(() => new FakeLlama(), _queue, _time);
 
         Assert.Null(await plain.EnsureAsync(Lane.Fast, null, CancellationToken.None));
-        Assert.False(await plain.DeepAvailableAsync(CancellationToken.None));
-        await Assert.ThrowsAsync<DeepModelUnavailableException>(() => plain.EnsureAsync(Lane.Deep, null, CancellationToken.None));
+        Assert.Null(await plain.EnsureAsync(Lane.Deep, null, CancellationToken.None));
     }
 
     static async Task Until(Func<bool> condition)

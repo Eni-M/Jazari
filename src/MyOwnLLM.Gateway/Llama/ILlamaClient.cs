@@ -20,7 +20,7 @@ public interface ILlamaClient
     /// <summary>Like <see cref="ChatAsync"/>, also saying whether the answer stopped at <paramref name="maxTokens"/>.</summary>
     async Task<(string Text, bool CutOff)> ChatWithEndAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? jsonSchema = null, string? model = null) =>
         (await ChatAsync(messages, maxTokens, ct, jsonSchema, model), false);
-    IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? model = null);
+    IAsyncEnumerable<StreamPart> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, int maxTokens, CancellationToken ct, string? model = null, double? temperature = null);
     Task<string> InfillAsync(string prefix, string suffix, int maxTokens, CancellationToken ct, string? model = null);
     /// <summary>The context size llama-server was started with, or null when it can't say.</summary>
     Task<int?> ContextTokensAsync(CancellationToken ct);

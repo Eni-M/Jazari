@@ -42,6 +42,7 @@ public sealed class SnippetChecker(string? dotnetRoot = null)
     readonly Lazy<IReadOnlyList<MetadataReference>> _references = new(() => LoadReferences(dotnetRoot ?? DotnetRoot()));
     SyntaxTree? _usings;
     readonly object _loadGate = new();
+    bool _loaded;
 
     /// <summary>A global using for every namespace in the packs. Answers leave usings out, and StringBuilder or IOptionsSnapshot
     /// without one isn't a made-up API. An extension method still has to exist on its type, wherever it's from.</summary>
@@ -57,7 +58,12 @@ public sealed class SnippetChecker(string? dotnetRoot = null)
     /// <summary>Reads the reference packs, a second or two the first time. Time limits are for checks, not for this.</summary>
     public void Load()
     {
-        lock (_loadGate) if (_references.Value.Count > 0) Compile("int warm = 0;", CancellationToken.None);
+        lock (_loadGate)
+        {
+            if (_loaded || _references.Value.Count == 0) return;
+            Compile("int warm = 0;", CancellationToken.None);
+            _loaded = true;
+        }
     }
 
     public IReadOnlyList<BlockCheck> Check(string answer, CancellationToken ct)

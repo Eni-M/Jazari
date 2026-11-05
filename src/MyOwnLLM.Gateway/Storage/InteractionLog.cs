@@ -7,9 +7,9 @@ public sealed record Interaction(string? Project, string Kind, string Prompt, st
 /// eval/misses.py lists the likely misses from it.</summary>
 public sealed class InteractionLog(LocalDb db, GatewayOptions? options = null)
 {
-    /// <summary>The gateway's version and commit.</summary>
-    static readonly string Build = typeof(InteractionLog).Assembly
-        .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false) is [System.Reflection.AssemblyInformationalVersionAttribute v, ..] ? v.InformationalVersion : "unknown";
+    /// <summary>The gateway's version and commit (0.2.0+abc123); /v1/info shows the version alone.</summary>
+    public static readonly string Build = typeof(InteractionLog).Assembly
+        .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false) is [System.Reflection.AssemblyInformationalVersionAttribute v, ..] ? v.InformationalVersion : "0.0.0";
 
     /// <summary>When the law book was written, which tells one build of it from another; null without one.</summary>
     string? LawBook() => options is { } o && File.Exists(o.LawBookFile) ? File.GetLastWriteTimeUtc(o.LawBookFile).ToString("O") : null;
