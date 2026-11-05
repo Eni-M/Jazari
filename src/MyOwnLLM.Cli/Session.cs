@@ -662,11 +662,11 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     public string TrustFile { get; init; } = ProjectTrust.DefaultPath;
 
     /// <summary>Whether this project's build scripts may run: asked once for them as they are now, and no means the same question next time.</summary>
-    bool MayLoadProject(string projectFile)
+    bool MayLoadProject(string projectFile, string question = "Checking this edit loads the project, which runs its build scripts. Only say yes for code you trust. Load it?")
     {
         var trust = new ProjectTrust(TrustFile);
         if (trust.IsTrusted(projectFile, project)) return true;
-        if (!Confirm("Checking this edit loads the project, which runs its build scripts. Only say yes for code you trust. Load it?")) return false;
+        if (!Confirm(question)) return false;
         trust.Trust(projectFile, project);
         return true;
     }
@@ -678,17 +678,26 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (!InsideProject(path)) { ui.Metadata("Jazari only edits files inside this project."); return; }
         if (!File.Exists(path)) { ui.Metadata($"Can't find {path}."); return; }
 
-        if (FileEdit.Read(path) is not { } stored) { ui.Metadata("That file isn't UTF-8 or UTF-16 text, so Jazari can't edit it without damaging it."); return; }
+        await ProposeEditAsync(path, file, request, null, deep, deep, ct);
+    }
+
+    /// <summary>Proposes a change to one file, checks it, shows it, and writes it on yes. True only when it was written.</summary>
+    /// <param name="extraContext">What the model may read beside the file, as data like the file itself.</param>
+    /// <param name="checkProject">Also compile the change in the whole project, which loads the project.</param>
+    public async Task<bool> ProposeEditAsync(string path, string file, string request, string? extraContext, bool checkProject, bool deep, CancellationToken ct)
+    {
+        if (FileEdit.Read(path) is not { } stored) { ui.Metadata("That file isn't UTF-8 or UTF-16 text, so Jazari can't edit it without damaging it."); return false; }
         var original = stored.Text;
-        if (original.Length / 4 > MaxReadTokens) { ui.Metadata("That file is too big to edit in one go."); return; }
+        if (original.Length / 4 > MaxReadTokens) { ui.Metadata("That file is too big to edit in one go."); return false; }
 
         var asked = FileEdit.Instructions + request;
+        var context = $"--- {file} ---\n{original}" + (extraContext is null ? "" : "\n\n" + extraContext);
         var watch = Stopwatch.StartNew();
         string? lastId = null, answerId; // the answer each proposal came from; answerId is the one shown, rated down when it's turned down or undone
         // Asks for the edits and applies them in memory. Null when stopped or the gateway failed (already reported).
         async Task<(string? Text, List<Replacement> Applied, string? Problem)?> ProposeAsync(string question)
         {
-            if (await WithThinking(() => gateway.CompleteAsync(question, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct, Conventions(), deep), ct) is not (true, var reply)) return null;
+            if (await WithThinking(() => gateway.CompleteAsync(question, context, FileEdit.Schema, EditAnswerTokens, ct, Conventions(), deep), ct) is not (true, var reply)) return null;
             lastId = reply.Id;
             if (FileEdit.Parse(reply.Text) is not { } edits) return (null, [], "the model's answer couldn't be read");
             var applied = new List<Replacement>();
@@ -696,9 +705,9 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             return (newText, applied, problem);
         }
 
-        if (await ProposeAsync(asked) is not var (text, applied, problem)) return;
+        if (await ProposeAsync(asked) is not var (text, applied, problem)) return false;
         answerId = lastId;
-        if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return; }
+        if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return false; }
         var broken = FileEdit.NewSyntaxErrors(path, original, text);
         if (broken.Count > 0)
         {
@@ -706,14 +715,14 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             // a few points at 1.5-3B (reports/Lessons from similar local assistants.md), and each costs a whole answer.
             ui.Metadata($"That change breaks the C# syntax ({broken[0]}). Asking once more, with the errors.");
             if (await ProposeAsync($"{asked}\n\nYour previous edits broke the C# syntax: {string.Join("; ", broken.Take(3))}. Give the edits again so the file still parses.")
-                is not var (retried, retriedApplied, _)) return;
+                is not var (retried, retriedApplied, _)) return false;
             if (retried is not null && FileEdit.NewSyntaxErrors(path, original, retried) is var still && still.Count < broken.Count)
                 (text, applied, broken, answerId) = (retried, retriedApplied, still, lastId);
         }
 
-        // Only /deep, and only if the syntax check above didn't already use the one retry.
+        // Only /deep and /fix, and only if the syntax check above didn't already use the one retry.
         IReadOnlyList<string>? projectErrors = null;
-        if (deep && broken.Count == 0 && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && ProjectCheck.FindProject(path, project) is { } projectFile && MayLoadProject(projectFile))
+        if (checkProject && broken.Count == 0 && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && ProjectCheck.FindProject(path, project) is { } projectFile && MayLoadProject(projectFile))
         {
             ui.Metadata("Checking the project. Loading it can take a minute.");
             projectErrors = await ProjectErrors(path, project, original, text, ct);
@@ -721,7 +730,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             {
                 ui.Metadata($"That change doesn't compile in the project ({projectErrors[0]}). Asking once more, with the errors.");
                 if (await ProposeAsync($"{asked}\n\nYour previous edits don't compile: {string.Join("; ", projectErrors.Take(3))}. Give the edits again so they do.")
-                    is not var (again, againApplied, _)) return;
+                    is not var (again, againApplied, _)) return false;
                 if (again is not null && FileEdit.NewSyntaxErrors(path, original, again).Count == 0
                     && await ProjectErrors(path, project, original, again, ct) is { } after && after.Count < projectErrors.Count)
                     (text, applied, projectErrors, answerId) = (again, againApplied, after, lastId);
@@ -743,12 +752,13 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             ui.Error("This change breaks the C# syntax.", string.Join("; ", broken.Take(3)), "Say no, then /edit again with a clearer request.");
         if (projectErrors is { Count: > 0 })
             ui.Error("This change doesn't compile in the project.", string.Join("; ", projectErrors.Take(3)), "Say no, then /deep /edit again with a clearer request.");
-        if (!Confirm($"Apply this change to {file}?")) { RateDown(answerId); ui.Metadata("Nothing changed."); return; }
+        if (!Confirm($"Apply this change to {file}?")) { RateDown(answerId); ui.Metadata("Nothing changed."); return false; }
         var written = FileEdit.Encode(text, stored.Encoding);
         File.WriteAllBytes(path, written);
         _undo = (path, stored.Bytes, written, answerId);
         _hint = "/undo puts it back";
         ui.Metadata("Changed. /undo puts it back.");
+        return true;
     }
 
     /// <summary>The line a piece of text starts on, from 1; 0 when it isn't there.</summary>
