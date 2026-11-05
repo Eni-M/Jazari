@@ -213,4 +213,63 @@ public class FixTests : IDisposable
         Assert.Contains("5 minutes", Text);
         Assert.Contains("/undo puts it back", Text);
     }
+
+    void InRepository() => Directory.CreateDirectory(Path.Combine(_dir, ".git"));
+    BuildError Names(string name) => new(A, 1, "CS1061", $"'{name}' does not contain a definition for 'Totl'");
+
+    [Fact] public async Task The_code_an_error_names_goes_with_the_request()
+    {
+        InRepository();
+        File.WriteAllText(Path.Combine(_dir, "Order.cs"), "class Order { public int Total => 1; }");
+        Then(Failing(Names("Order")));
+        Then(Passing);
+        await NewSession().HandleAsync("/fix", default);
+        Assert.Contains("class Order", _lastContext);
+    }
+
+    [Fact] public async Task A_full_name_in_an_error_finds_its_type()
+    {
+        InRepository();
+        File.WriteAllText(Path.Combine(_dir, "Order.cs"), "namespace Shop; class Order { }");
+        Then(Failing(Names("Shop.Order")));
+        Then(Passing);
+        await NewSession().HandleAsync("/fix", default);
+        Assert.Contains("class Order", _lastContext);
+    }
+
+    [Fact] public async Task The_docs_page_for_the_error_goes_with_the_request()
+    {
+        _gateway.Docs = (true, [new DocPassage("CS0103", "https://learn.microsoft.com/x", "This error means the name is unknown.")]);
+        Then(Failing(Error()));
+        Then(Passing);
+        await NewSession().HandleAsync("/fix", default);
+        Assert.Contains("This error means the name is unknown.", _lastContext);
+    }
+
+    [Fact] public async Task No_law_book_still_works()
+    {
+        _gateway.Docs = (false, []);
+        Then(Failing(Error()));
+        Then(Passing);
+        await NewSession().HandleAsync("/fix", default);
+        Assert.Contains("=> 2", File.ReadAllText(A));
+    }
+
+    [Fact] public async Task A_docs_failure_still_works()
+    {
+        _gateway.DocsFailure = new HttpRequestException("gateway down");
+        Then(Failing(Error()));
+        Then(Passing);
+        await NewSession().HandleAsync("/fix", default);
+        Assert.Contains("=> 2", File.ReadAllText(A));
+    }
+
+    [Fact] public async Task Lookup_never_repeats_the_file_being_fixed()
+    {
+        InRepository();
+        Then(Failing(Names("A")));
+        Then(Passing);
+        await NewSession().HandleAsync("/fix", default);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(_lastContext!, "--- A.cs ---"));
+    }
 }

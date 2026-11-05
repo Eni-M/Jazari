@@ -61,7 +61,9 @@ sealed class FakeGateway : IGatewayClient
     }
 
     public (bool Available, IReadOnlyList<DocPassage> Passages) Docs { get; set; } = (true, []);
-    public Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct) => Task.FromResult(Docs);
+    public Exception? DocsFailure { get; set; }
+    public Task<(bool Available, IReadOnlyList<DocPassage> Passages)> DocsAsync(string question, CancellationToken ct) =>
+        DocsFailure is not null ? Task.FromException<(bool, IReadOnlyList<DocPassage>)>(DocsFailure) : Task.FromResult(Docs);
 }
 
 public class SessionTests

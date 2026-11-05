@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using MyOwnLLM.Cli.Terminal;
 
 namespace MyOwnLLM.Cli;
@@ -716,7 +717,8 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         var path = Path.GetFullPath(chosen[0].File);
         var request = "Fix these compiler errors in the file above. Change only what they need, and don't remove code to hide an error.\n\n" +
             string.Join("\n", chosen.Select(e => $"line {e.Line}: {e.Code} {e.Message}"));
-        if (!await ProposeEditAsync(path, Path.GetRelativePath(project, path), request, null, true, false, ct)) return;
+        var file = Path.GetRelativePath(project, path);
+        if (!await ProposeEditAsync(path, file, request, await FixContextAsync(chosen, file, ct), true, false, ct)) return;
 
         BuildResult? after;
         ui.Metadata("Building again.");
@@ -741,6 +743,25 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         }
         if (Confirm($"That didn't help: {Errors(after.Errors.Count)} now, {before.Errors.Count} before. Undo the change?")) Undo();
     }
+
+    /// <summary>What the file alone doesn't show: the code the errors name, since CS1061 on Order can't be fixed without reading
+    /// Order, and the law book's page for the first error's code. Either can be missing; the edit is proposed regardless.</summary>
+    async Task<string?> FixContextAsync(IReadOnlyList<BuildError> errors, string file, CancellationToken ct)
+    {
+        var names = errors.SelectMany(e => QuotedName().Matches(e.Message)).Select(m => m.Groups[1].Value.Split('.')[^1]).Distinct().Take(MaxErrorNames).ToList();
+        var parts = new List<string>();
+        if (ProjectLookup.ForNames(project, names, $"--- {file} ---") is { } code) parts.Add(code.Text);
+        try
+        {
+            var (_, passages) = await gateway.DocsAsync(errors[0].Code, ct);
+            parts.AddRange(passages.Select(p => $"--- .NET docs: {p.Title} ---\n{p.Text}"));
+        }
+        catch (Exception e) when (e is not OperationCanceledException) { } // the docs are a help: the errors alone can still be fixed
+        return parts.Count == 0 ? null : string.Join("\n\n", parts);
+    }
+
+    const int MaxErrorNames = 5; // each one walks the project's C# files
+    [GeneratedRegex(@"'([A-Za-z_][\w.]*)'")] private static partial Regex QuotedName();
 
     static string Errors(int count) => count == 1 ? "1 error" : $"{count} errors";
 
