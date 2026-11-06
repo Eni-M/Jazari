@@ -44,7 +44,7 @@ C# in plain answers is compiled too, without running it or slowing the answer. I
 
 Answers can draw on the law book, excerpts of Microsoft's .NET docs searched offline: the answer then names the page in a `source` row, and `/docs` shows the passage itself. `jazari update` installs it once the manifest names it (`lawBookUrl`, `lawBookSha256`); until then Jazari answers without it. Sources and licences (text CC BY 4.0, code MIT): [lawbook/NOTICE.md](lawbook/NOTICE.md).
 
-`jazari --plain` (or `JAZARI_PLAIN=1`) gives plain lines for screen readers. IDEs can use Jazari for chat as an OpenAI-compatible endpoint: see the runbook.
+`jazari --plain` (or `JAZARI_PLAIN=1`) gives plain lines for screen readers. IDEs can use Jazari for chat as an OpenAI-compatible endpoint.
 
 The first `jazari` creates your API key (saved as `JAZARI_KEY`) and starts the model server and gateway in the background. `jazari stop` shuts them down.
 
@@ -77,8 +77,6 @@ Start it with **MCP: List Servers**, and pick **Show Output** there if something
 - A slow tool sends progress to clients that ask for it. Stopping one stops the work, and calling `review_file` again carries on from the parts already finished.
 - `jazari update` counts this server as an open Jazari window and offers to close it. Restart it from **MCP: List Servers** afterwards. For the installer and `uninstall-jazari.ps1`, close VS Code first.
 
-Full setup, commands and measured performance: [docs/phase1-runbook.md](docs/phase1-runbook.md).
-Design and plans: [docs/superpowers/](docs/superpowers/).
 
 ## Licence
 

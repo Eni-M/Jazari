@@ -1004,7 +1004,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (e.Status is null) _reachable = false;
         var next = e.Status switch
         {
-            null => "Is the gateway running? See docs/phase1-runbook.md, then /retry.",
+            null => "Is the gateway running? Run `jazari doctor`, then /retry.",
             401 => "Open jazari again: it replaces a key the gateway rejects. If that doesn't help, run jazari update.",
             _ => "/retry",
         };
