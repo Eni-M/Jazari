@@ -717,7 +717,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
         var path = Path.GetFullPath(chosen[0].File);
         var request = "Fix these compiler errors in the file above. Change only what they need, and don't remove code to hide an error.\n\n" +
-            string.Join("\n", chosen.Select(e => $"line {e.Line}: {e.Code} {FixTarget.MessageForModel(e)}"));
+            string.Join("\n", chosen.Select(e => $"line {e.Line}: {e.Code} {(FixTarget.OnlyNamesCode(e) ? e.Message : "(its message is with the files)")}"));
         var file = Path.GetRelativePath(project, path);
         if (!await ProposeEditAsync(path, file, request, await FixContextAsync(chosen, file, ct), true, false, ct)) return;
 
@@ -749,8 +749,10 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     /// Order, and the law book's page for the first error's code. Either can be missing; the edit is proposed regardless.</summary>
     async Task<string?> FixContextAsync(IReadOnlyList<BuildError> errors, string file, CancellationToken ct)
     {
-        var names = errors.SelectMany(e => QuotedName().Matches(FixTarget.MessageForModel(e))).Select(m => m.Groups[1].Value.Split('.')[^1]).Distinct().Take(MaxErrorNames).ToList();
+        var names = errors.Where(FixTarget.OnlyNamesCode).SelectMany(e => QuotedName().Matches(e.Message)).Select(m => m.Groups[1].Value.Split('.')[^1]).Distinct().Take(MaxErrorNames).ToList();
         var parts = new List<string>();
+        if (errors.Where(e => !FixTarget.OnlyNamesCode(e)).ToList() is { Count: > 0 } open)
+            parts.Add("--- compiler messages ---\n" + string.Join("\n", open.Select(e => $"line {e.Line}: {e.Code} {e.Message}")));
         if (ProjectLookup.ForNames(project, names, $"--- {file} ---") is { } code) parts.Add(code.Text);
         try
         {

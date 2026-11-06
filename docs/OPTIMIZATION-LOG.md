@@ -321,6 +321,8 @@ Measured by `eval/fix_bench.py` on 12 seeded errors in a small project, Granite 
 
 Median 36 s, and none left with more errors. That only just passes. Every fix was read: none deleted code to hide an error, though `string?` for CS8618 and `"5"` for CS0029 are the easy way out, so the build passing doesn't mean the change is what the user wanted. A failed CS1503 also changed an unrelated line, which the undo question covers. Twelve seeds in one small project say little about real code. The failed edits point at the next thing to try, a second try when the search text doesn't apply; new seeds would have to judge that, not these.
 
+A security review flagged compiler messages in the request: some carry the project's own text, such as an `[Obsolete]` reason (CS0619) or a generator's exception (CS8785). Moving every message into the part marked as data fixed 3 of 12 and left 2 worse, so that didn't ship. Instead the request keeps messages whose template only names code (an allow-list in `FixTarget.OnlyNamesCode`, which holds all 12 seeds' codes, so the measured prompts are unchanged), and every other message goes only with the data.
+
 ## The law book's test set gate and its search (2026-11-05)
 
 **The book still doesn't ship.** It went through the 45-question gate three times against 38/45 without it (`tiny-base`), and never rose above that, which the spec requires:
