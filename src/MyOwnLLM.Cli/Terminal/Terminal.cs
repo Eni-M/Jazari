@@ -8,6 +8,9 @@ public interface ITerminal
     /// <summary>Columns and rows of the window.</summary>
     (int Width, int Height) Size { get; }
 
+    /// <summary>The buffer row at the window's top, where a console is a window onto a longer buffer (conhost); 0 elsewhere. A taller window that shows rows above its old top has this go down in value.</summary>
+    int Top => 0;
+
     /// <summary>One frame, written in one piece.</summary>
     void Write(string text);
 
@@ -30,6 +33,15 @@ public sealed class SystemTerminal : ITerminal
         {
             try { return (Math.Max(Console.WindowWidth, 2), Math.Max(Console.WindowHeight, 2)); }
             catch (IOException) { return (80, 24); }
+        }
+    }
+
+    public int Top
+    {
+        get
+        {
+            try { return OperatingSystem.IsWindows() ? Console.WindowTop : 0; }
+            catch (Exception e) when (e is IOException or PlatformNotSupportedException) { return 0; }
         }
     }
 

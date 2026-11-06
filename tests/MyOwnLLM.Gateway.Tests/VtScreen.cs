@@ -59,8 +59,19 @@ public sealed class VtScreen
     /// Resizes like Windows Terminal: a row whose text (not its background) reaches past the new width wraps onto extra
     /// rows, and rows that no longer fit push the top of the screen into the scrollback, keeping the cursor's row.
     /// </summary>
-    public void Resize(int width, int height)
+    public void Resize(int width, int height, bool revealScrollback = false)
     {
+        if (revealScrollback && height > Height)
+        {
+            // Like conhost with the top edge dragged up: the window shows the rows above it, which move the screen down.
+            var count = Math.Min(height - Height, Scrollback.Count);
+            var shown = Scrollback.TakeLast(count).Select(t => Enumerable.Range(0, Width).Select(i => i < t.Length ? new Cell(t[i].ToString(), null, null, false, false) : Cell.Blank).ToArray());
+            Scrollback.RemoveRange(Scrollback.Count - count, count);
+            _rows = [.. shown, .. _rows];
+            _wrapped = new bool[_rows.Length];
+            Row += count;
+            Height += count;
+        }
         var rows = new List<Cell[]>();
         var cursor = 0;
         Cell[] Fit(IEnumerable<Cell> cells) => cells.Take(width).Concat(Enumerable.Repeat(Cell.Blank, width)).Take(width).ToArray();
@@ -285,7 +296,9 @@ public sealed class FakeTerminal(int width, int height) : ITerminal
         }
     }
 
-    public void Resize(int width, int height) { lock (_gate) Vt.Resize(width, height); }
+    public void Resize(int width, int height, bool revealScrollback = false) { lock (_gate) Vt.Resize(width, height, revealScrollback); }
+
+    public int Top { get { lock (_gate) return Vt.Scrollback.Count; } }
 
     public bool KeyAvailable { get { lock (_gate) return _keys.Count > 0; } }
     public ConsoleKeyInfo ReadKey() { lock (_gate) return _keys.Dequeue(); }

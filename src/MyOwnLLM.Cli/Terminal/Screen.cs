@@ -69,7 +69,7 @@ public sealed class Screen : IBlockSink
     // Session mode: what each window row shows, and the first conversation row on screen (block and row in it).
     string[] _shown = [];
     const int PanelMargin = 1;
-    int _width, _height, _area;
+    int _width, _height, _area, _top;
     int _anchorBlock, _anchorRow;
     (int Row, int Column)? _caret;
     bool _started, _stopping;
@@ -178,6 +178,7 @@ public sealed class Screen : IBlockSink
             _started = true;
             _terminal.Write("\e]0;Jazari\a\e[0m\e[H\e[2J\e[3J");
             (_width, _height) = _terminal.Size;
+            _top = _terminal.Top;
             _layoutColumns = _width - 1;
             _shown = Blank(_height);
         }
@@ -313,6 +314,16 @@ public sealed class Screen : IBlockSink
         if (block < _blocks.Count) row = Math.Min(row, Lines(_blocks[block], columns).Count);
     }
 
+    void Retreat(ref int block, ref int row, int count, int columns)
+    {
+        while (count > 0)
+        {
+            if (row > 0) { var step = Math.Min(row, count); row -= step; count -= step; }
+            else if (block > 0) row = Lines(_blocks[--block], columns).Count;
+            else break;
+        }
+    }
+
     bool Resizing => _paced && _clock.ElapsedMilliseconds - _lastResize < SettleMilliseconds;
 
     static string Go(int row, int column = 0) => $"\e[{row + 1};{column + 1}H";
@@ -368,6 +379,7 @@ public sealed class Screen : IBlockSink
         output.Append("\e[?2026l");
         _terminal.Write(output.ToString());
         (_caret, _signals) = (caret, "");
+        _top = _terminal.Top;
     }
 
     void Put(StringBuilder frame, int row, string encoded)
@@ -396,6 +408,14 @@ public sealed class Screen : IBlockSink
         if (_height > 0 && height < _height)
         {
             Advance(ref _anchorBlock, ref _anchorRow, _height - height, layout);
+            _anchorAt = (_anchorBlock, _anchorRow, layout);
+        }
+        // A console that is a window onto a longer buffer (conhost) shows the rows above when the window grows upward.
+        // The clear below wipes them, so they're drawn again from the conversation instead of leaving a hole in the scrollback.
+        var revealed = Math.Clamp(_top - _terminal.Top, 0, Math.Max(height - _height, 0));
+        if (revealed > 0)
+        {
+            Retreat(ref _anchorBlock, ref _anchorRow, revealed, layout);
             _anchorAt = (_anchorBlock, _anchorRow, layout);
         }
         frame.Append("\e[0m\e[H\e[J");

@@ -169,6 +169,20 @@ public class ScreenTests
     }
 
     [Fact]
+    public void A_window_that_grows_upward_redraws_the_rows_it_shows_instead_of_blanking_them()
+    {
+        var (screen, terminal, _) = Start();
+        for (var i = 1; i <= 30; i++) Say(screen, $"row {i}");
+
+        terminal.Resize(60, 20, revealScrollback: true); // conhost, top edge dragged up
+        screen.RenderNow();
+        for (var i = 31; i <= 40; i++) Say(screen, $"row {i}");
+
+        Assert.Equal(Enumerable.Range(1, 40).Select(i => $"row {i}"), Conversation(terminal));
+        Assert.Equal("edge", terminal.Vt.Text(terminal.Vt.Height - 4));
+    }
+
+    [Fact]
     public void A_shorter_then_taller_window_shows_no_row_twice_and_loses_none()
     {
         var (screen, terminal, _) = Start(height: 20);
