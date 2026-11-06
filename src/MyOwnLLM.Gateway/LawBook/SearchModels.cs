@@ -15,12 +15,12 @@ public interface ISearchModels
 }
 
 /// <summary>
-/// bge-small-en-v1.5 for vectors and ms-marco-MiniLM-L6-v2 for reranking, both int8 ONNX on the CPU, read through the same
+/// bge-small-en-v1.5 for vectors and ms-marco-MiniLM-L12-v2 for reranking, both int8 ONNX on the CPU, read through the same
 /// WordPiece vocabulary. Each in its own folder under <see cref="GatewayOptions.SearchModelsDir"/>, as in spike/models.
 /// </summary>
 public sealed class OnnxSearchModels : ISearchModels, IDisposable
 {
-    public const string EmbedderFolder = "bge-small-en-v1.5", RerankerFolder = "ms-marco-MiniLM-L6-v2";
+    public const string EmbedderFolder = "bge-small-en-v1.5", RerankerFolder = "ms-marco-MiniLM-L12-v2";
     const string EmbedderFile = "model_quantized.onnx", RerankerFile = "model_quint8_avx2.onnx";
     public const int MaxTokens = 256; // passages are at most 1,000 characters, about 250 tokens: no need for the models' 512
     const string QuestionPrefix = "Represent this sentence for searching relevant passages: "; // bge v1.5's prefix for queries

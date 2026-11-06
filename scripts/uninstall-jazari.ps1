@@ -4,7 +4,7 @@
 #
 # It removes what install-jazari.ps1 put there: the install folder's own files, the jazari command (and its PATH entry
 # for a custom folder) and %APPDATA%\Jazari. It asks before deleting the model, a long download to get back, and before
-# deleting your data in %LOCALAPPDATA%\MyOwnLLM (reviews, logs, keys, the law book). Your clone is never touched.
+# deleting your data in %LOCALAPPDATA%\MyOwnLLM (reviews, logs, keys, the law book and its search models). Your clone is never touched.
 # Not `jazari uninstall`: the command can't remove itself while it runs.
 
 $ErrorActionPreference = "Stop"
@@ -77,7 +77,7 @@ if (Test-Path $installDir) {
 if (Test-Path (Split-Path $configPath)) { Remove-Item -Recurse -Force (Split-Path $configPath) }
 
 if (Test-Path $dataDir) {
-    if (Ask "Delete your Jazari data too (reviews, logs, keys and the law book in $dataDir)?") { Remove-Item -Recurse -Force $dataDir }
+    if (Ask "Delete your Jazari data too (reviews, logs, keys, the law book and its search models in $dataDir)?") { Remove-Item -Recurse -Force $dataDir }
     else { Write-Host "Kept your data in $dataDir" }
 }
 

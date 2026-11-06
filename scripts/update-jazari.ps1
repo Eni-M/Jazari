@@ -73,10 +73,12 @@ function Test-Llama($folder) {
     $version -match "\bbuild $($manifest.llamaRelease.TrimStart('b'))\b"
 }
 
-# The law book (lawbook/build.py): Microsoft's .NET docs the gateway searches. Optional, so it's installed only once the
-# manifest names it (lawBookUrl and lawBookSha256), and where the gateway looks for it by default.
+# The law book (lawbook/build.py, then embed-law-book): Microsoft's .NET docs the gateway searches. Optional, so it's
+# installed only once the manifest pins it (lawBookSha256), and where the gateway looks for it by default. A book built in
+# the clone Jazari was installed from is copied if it matches, which saves the 100 MB download from lawBookUrl (a release
+# of the public Eni-M/jazari-law-book: this repository is private, and its assets would need a login).
 function Repair-LawBook {
-    if (-not $manifest.lawBookUrl) { return }
+    if (-not $manifest.lawBookSha256) { return }
     $book = Join-Path $env:LOCALAPPDATA "MyOwnLLM\law-book.db"
     $download = "$book.download"
     $verified = { param($file) (Test-Path $file) -and (Get-FileHash -Algorithm SHA256 $file).Hash -eq $manifest.lawBookSha256 }
@@ -85,9 +87,34 @@ function Repair-LawBook {
         Say-Ok "law book"; return
     }
     New-Item -ItemType Directory -Force (Split-Path $book) | Out-Null
-    Get-Verified $manifest.lawBookUrl $download $verified
+    $built = if ($config.home) { Join-Path $config.home "lawbook\out\law-book.db" }
+    if ($built -and (& $verified $built)) { Copy-Item -Force $built $download }
+    elseif ($manifest.lawBookUrl) { Get-Verified $manifest.lawBookUrl $download $verified }
+    else { throw "no book matching the manifest in $built; build it there with lawbook/build.py and embed-law-book" }
     Move-Item -Force $download $book # the gateway opens it only per search, so it's never held open
     Say-Repaired "law book"
+}
+
+# The law book search's two small models, from Hugging Face at pinned revisions: bge-small-en-v1.5 (the vectors; the book's
+# were written with it) and ms-marco-MiniLM-L12-v2 (the reranker). Optional: without them the gateway searches by words alone.
+function Repair-SearchModels {
+    if (-not $manifest.searchModels) { return }
+    $dir = Join-Path $env:LOCALAPPDATA "MyOwnLLM\search-models"
+    $repaired = $false
+    foreach ($part in $manifest.searchModels) {
+        $file = Join-Path $dir $part.path
+        $download = "$file.download"
+        $verified = { param($f) (Test-Path $f) -and (Get-FileHash -Algorithm SHA256 $f).Hash -eq $part.sha256 }
+        if (& $verified $file) {
+            if (Test-Path $download) { Remove-Item -Force $download }
+            continue
+        }
+        New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+        Get-Verified $part.url $download $verified
+        Move-Item -Force $download $file
+        $repaired = $true
+    }
+    if ($repaired) { Say-Repaired "search models" } else { Say-Ok "search models" }
 }
 
 # The smart model /deep uses. Optional, like the law book: installed only once the manifest names it, and Jazari works without it.
@@ -248,6 +275,7 @@ try { Repair-Model } catch { Say-Error "model" $_ }
 try { Repair-Llama } catch { Say-Error "llama.cpp" $_ }
 # Jazari answers without the law book, so a failed download only warns: it's no reason to call the whole update failed.
 try { Repair-LawBook } catch { Write-Host "! law book not installed ($_); Jazari answers without it, and the next update tries again" }
+try { Repair-SearchModels } catch { Write-Host "! search models not installed ($_); the law book is searched by words alone, and the next update tries again" }
 try { Repair-DeepModel } catch { Write-Host "! smart model not installed ($_); /deep stays off, and the next update tries again" }
 try { Repair-Builds } catch { Say-Error "gateway and app" $_ }
 

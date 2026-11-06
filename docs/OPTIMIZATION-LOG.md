@@ -401,3 +401,24 @@ Wrong here means not the one page the question was written from. Read by hand, 5
 A search costs one question vector and 20 reranker pairs: about 3 s per question in `try_dev.py`, most of it starting `dotnet` and loading the models and vectors, which the gateway does once.
 
 Not yet measured: answers with the model (`run_eval.py --law-questions --search-models C:\MyOwnLLM\spike\models`).
+
+### Round 3: a stronger reranker, the page's own ranking, typos (2026-11-06)
+
+Where round 2 still missed: in 21 of its 25 misses (dev and held out) the right page was among the 20 reranked candidates, mostly 2nd or 3rd, and MiniLM-L6 put another passage first; 2 held-out typos ("serialze", "enabel") were refused before anything searched. Three changes, built together, then tuned on dev:
+
+- **ms-marco-MiniLM-L12-v2** (int8, 34 MB) instead of L6: twice the layers, the same vocabulary.
+- **The page's own ranking:** the page ranked first by its title, description and address (round 1's page search) adds 2 to its passages' scores, the second 1, and so on (2 / (1 + rank)). Ranking by headings and API names, and how many of the candidates a page has, added nothing on dev, so they're left out. The cutoff moved to 4, MiniLM-L12's scores running higher: it refuses every dev trap.
+- **Typos** (`Spelling.cs`): a word of six letters or more that the book doesn't have becomes the book's most common word one edit away with the same first letter (fts5vocab, read once per book). Across every dev, held-out and trap question it changes only the two typos; no trap's made-up word has such a neighbour.
+
+| | Right page | Nothing | Wrong | API in the passage | Traps refused | must_contain |
+|---|---|---|---|---|---|---|
+| Dev, round 2 | 34/47 | 7 | 6 | 7/17 | 15/15 | 14/20 |
+| Dev, round 3 | 39/47 | 7 | 1 | 8/17 | 15/15 | 15/20 |
+| Held out, round 2 | 20/34 | 3 | 11 | 12/34 | 6/6 | |
+| Held out, round 3 | 22/34 | 5 | 7 | 15/34 | 6/6 | |
+
+The dev gate passes for the first time (right ≥ 25, wrong ≤ 3, traps ≥ 14). Of held out's 7 wrong pages, 3 answer the question (Problem details on the web API overview, environment variables in ASP.NET Core's configuration page, minimal API validation); "see the SQL EF Core sends" still gets the efficient-updating page. Held out was run once, after the dev tuning.
+
+A streamed answer now shows "Searching the docs" while the book is searched, then "Thinking": the first search after start loads the models and the book's vectors, a few seconds that looked frozen.
+
+**Shipping.** The book is a release of the public [Eni-M/jazari-law-book](https://github.com/Eni-M/jazari-law-book) (this repository is private, so its assets would need a login), credited to Microsoft's docs under CC BY 4.0. The manifest pins its SHA-256 and the two models' four files at Hugging Face revisions; `jazari update` installs the models into `%LOCALAPPDATA%\MyOwnLLM\search-models` and copies the book from the clone's `lawbook\out` when it matches, else downloads it.

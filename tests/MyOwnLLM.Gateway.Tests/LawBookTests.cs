@@ -326,6 +326,24 @@ public class LawBookTests : IDisposable
         Assert.Empty(book.Search("What is a compiler error?"));
     }
 
+    [Fact] public void A_typo_is_corrected_from_the_books_words()
+    {
+        var found = Book([("Serialization > Serialize to XML", "Serialize an object to XML with XmlSerializer.", "https://learn.microsoft.com/dotnet/standard/serialization/xml")])
+            .Search("How do I serialze an object to XML?");
+        Assert.Contains("XmlSerializer", Assert.Single(found).Text);
+    }
+
+    [Fact] public void Spelling_takes_one_edit_with_the_same_first_letter()
+    {
+        var words = new Dictionary<string, long> { ["serial"] = 100, ["enabl"] = 50, ["corout"] = 500, ["flash"] = 5 };
+        Assert.Equal("serialize", Spelling.Closest(words, "serialze"));
+        Assert.Equal("enable", Spelling.Closest(words, "enabel"));
+        Assert.Null(Spelling.Closest(words, "goroutine")); // c, not g
+        Assert.Null(Spelling.Closest(words, "laravel"));
+        Assert.Equal(1, Spelling.Distance("enabel", "enable"));
+        Assert.Equal(2, Spelling.Distance("abc", "cba"));
+    }
+
     [Fact] public void A_made_up_name_split_into_real_words_is_still_not_covered() =>
         Assert.Empty(Book([("Saving data", "Call SaveChangesAsync to save everything you changed.", "https://learn.microsoft.com/ef/core/saving/basic")],
             chunkNames: new Dictionary<int, string> { [0] = "save changes async everything" }).Search("How do I call SaveEverythingAsync?"));
@@ -374,7 +392,7 @@ public class LawBookTests : IDisposable
             ("Channels > Bounded", "Use Channel.CreateBounded for a bounded queue of work.", "https://learn.microsoft.com/dotnet/core/extensions/channels#bounded"),
             ("Logging > Messages", "Pass messages to the log between calls.", "https://learn.microsoft.com/dotnet/core/extensions/logging#messages"),
             ("Roles", "Producer and consumer are roles in a system.", "https://learn.microsoft.com/dotnet/standard/roles"),
-        ], Models(p => p.Contains("Channel.CreateBounded") ? 3 : -1, Topic)).Search("How do I pass messages between a producer and a consumer?");
+        ], Models(p => p.Contains("Channel.CreateBounded") ? LawBook.Cutoff + 1 : -1, Topic)).Search("How do I pass messages between a producer and a consumer?");
         Assert.NotEmpty(found);
         Assert.Contains("Channel.CreateBounded", found[0].Text);
     }

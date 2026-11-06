@@ -33,9 +33,13 @@ public sealed partial class LawBook
 {
     const int MaxTerms = 32, PagesTried = 3, PagesRanked = 10, PassagesRead = 40, MaxPassages = 2, MaxTokens = 300;
     const int ByWords = 30, ByNames = 10, ByMeaning = 30, Reranked = 20;
-    /// <summary>The reranker's score a passage needs to be sent, after <see cref="Demoted"/>. ms-marco scores are logits; on the
-    /// dev set every trap's best passage scored below 2.3, and 0 let 3 of 15 traps through.</summary>
-    public const float Cutoff = 2.5f;
+    /// <summary>The reranker's score a passage needs to be sent, with its page's weight and less <see cref="Demoted"/>. ms-marco
+    /// scores are logits; 0 let 3 of 15 dev traps through. Set with MiniLM-L12 and PageWeight on the dev set: 4 refuses every
+    /// trap and sends 39 right pages and 1 wrong of 47.</summary>
+    public const float Cutoff = 4f;
+    /// <summary>What a page ranked first by its title, description and address adds to its passages' scores. Without it, the
+    /// right page was among the reranked candidates in 21 of 25 misses but another passage scored higher.</summary>
+    const float PageWeight = 2f;
 
     /// <summary>Pages that read like an answer but aren't the reference for it: the architecture e-books, the EF tutorials and the
     /// tutorials, and Blazor's pages for a question that doesn't say Blazor. They often outscored the page itself; this much less
@@ -95,6 +99,9 @@ public sealed partial class LawBook
 
     readonly string _connection;
 
+    /// <summary>Whether there's a book to search.</summary>
+    public bool Available => File.Exists(options.LawBookFile);
+
     /// <param name="maxTokens">How much passage text may come back. /deep allows more.</param>
     public IReadOnlyList<Passage> Search(string question, int maxTokens = MaxTokens)
     {
@@ -146,7 +153,8 @@ public sealed partial class LawBook
 
     static IReadOnlyList<Passage> Search(SqliteConnection db, string question, int maxTokens, (ISearchModels Models, VectorIndex Index)? ranked)
     {
-        // 1. Terms, each with the long form the docs spell its abbreviation out as.
+        // 1. Terms, typos corrected from the book's words, each with the long form the docs spell its abbreviation out as.
+        question = Spelling.Correct(db, question);
         var terms = Terms(question);
         if (terms.Count == 0) return [];
         var concepts = Concepts(db, terms);
@@ -188,7 +196,11 @@ public sealed partial class LawBook
                 .Where(p => named.All(n => n.IsMatch(p.Title + "\n" + p.Text))).ToList();
             if (candidates.Count == 0) return [];
             var scores = models.Rerank(question, [.. candidates.Select(p => p.Title + "\n" + p.Text)]);
-            for (var i = 0; i < scores.Length; i++) scores[i] -= Demoted(candidates[i].Url, question);
+            // The reranker reads one passage at a time; the page's title, description and address say what the whole page is
+            // about. The page ranked first by them adds PageWeight, the second half of it, and so on.
+            var about = Query(db, $"SELECT url FROM pages WHERE pages MATCH $q {allowed} ORDER BY bm25(pages, 1.0, 1.0, 3.0) LIMIT {PagesRanked}", any, r => r.GetString(0));
+            for (var i = 0; i < scores.Length; i++)
+                scores[i] += (about.IndexOf(candidates[i].Url.Split('#')[0]) is var rank and >= 0 ? PageWeight / (1 + rank) : 0) - Demoted(candidates[i].Url, question);
             var order = Enumerable.Range(0, candidates.Count).Where(i => scores[i] >= Cutoff).OrderByDescending(i => scores[i]).ToList();
             if (order.Count == 0) return [];
             // The best, then the next best of the same page: two pages joined together read to the model as one text.
