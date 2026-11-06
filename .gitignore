@@ -17,6 +17,7 @@ eval/results/recall/
 # Private: names from Eni-M's own repos, and code written for them (eval/repo_bench.py)
 eval/repo/tasks.local.json
 eval/results/repo/
+eval/results/fix/
 
 # The law book is built, not committed (lawbook/build.py)
 lawbook/out/

@@ -29,10 +29,13 @@ public static partial class UpdateCheck
     }
 
     /// <summary>git.exe from absolute PATH entries only; "." and relative entries (current-folder lookups) are skipped.</summary>
-    public static string? FindGit(string? path) =>
+    public static string? FindGit(string? path) => FromAbsolutePath("git.exe", path);
+
+    /// <summary>A program from absolute PATH entries only, so one planted in the folder Jazari runs in is never picked up.</summary>
+    public static string? FromAbsolutePath(string exe, string? path) =>
         (path ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(Path.IsPathFullyQualified)
-            .Select(dir => Path.Combine(dir, "git.exe"))
+            .Select(dir => Path.Combine(dir, exe))
             .FirstOrDefault(File.Exists);
 
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.IgnoreCase)] private static partial Regex Commit();

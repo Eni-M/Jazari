@@ -1,0 +1,14 @@
+[
+  {"id": "typo-local", "file": "Order.cs", "search": "return total * percent", "replace": "return totl * percent", "code": "CS0103"},
+  {"id": "typo-member", "file": "Billing.cs", "search": "return order.Total();", "replace": "return order.Totl();", "code": "CS1061"},
+  {"id": "missing-using", "file": "Order.cs", "search": "using System.Collections.Generic;\n", "replace": "", "code": "CS0246"},
+  {"id": "wrong-type", "file": "Billing.cs", "search": "public string Name { get; } = \"\";", "replace": "public string Name { get; } = 5;", "code": "CS0029"},
+  {"id": "no-return", "file": "Order.cs", "search": "public int Count() { return Prices.Count; }", "replace": "public int Count() { var n = Prices.Count; }", "code": "CS0161"},
+  {"id": "wrong-argument", "file": "Billing.cs", "search": "return Format(order.Customer, order.Count());", "replace": "return Format(order.Count(), order.Count());", "code": "CS1503"},
+  {"id": "missing-argument", "file": "Billing.cs", "search": "return Format(order.Customer, order.Count());", "replace": "return Format(order.Customer);", "code": "CS7036"},
+  {"id": "missing-member", "file": "Store.cs", "search": "    public void Save(Order order) => _orders.Add(order);\n", "replace": "", "code": "CS0535"},
+  {"id": "non-nullable", "file": "Order.cs", "search": "public string Customer { get; set; } = \"\";", "replace": "public string Customer { get; set; }", "code": "CS8618"},
+  {"id": "semicolon", "file": "Billing.cs", "search": "{ _store = store; }", "replace": "{ _store = store }", "code": "CS1002"},
+  {"id": "needs-cast", "file": "Billing.cs", "search": "return (int)order.Total();", "replace": "return order.Total();", "code": "CS0266"},
+  {"id": "not-awaited", "file": "Billing.cs", "search": "await SendAsync();", "replace": "SendAsync();", "code": "CS4014"}
+]

@@ -74,6 +74,18 @@ public class ProcessRunnerTests : IDisposable
         Assert.Equal(Path.GetDirectoryName(comspec)!.TrimEnd('\\'), output.Trim().TrimEnd('\\'), ignoreCase: true);
     }
 
+    [Fact]
+    public async Task RunInAsync_runs_in_the_folder_it_was_given_with_its_variables()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var (_, output) = await new ProcessRunner().RunInAsync(Environment.GetEnvironmentVariable("ComSpec")!, ["/c", "cd && echo %JAZARI_TEST%"], _dir,
+            new Dictionary<string, string> { ["JAZARI_TEST"] = "set" }, CancellationToken.None);
+
+        Assert.Contains(_dir, output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("set", output);
+    }
+
     static async Task<string> ReadShared(string path)
     {
         if (!File.Exists(path)) return "";
