@@ -320,3 +320,42 @@ Measured by `eval/fix_bench.py` on 12 seeded errors in a small project, Granite 
 | Written, no better, undo offered, 2 | CS1503, CS0535 |
 
 Median 36 s, and none left with more errors. That only just passes. Every fix was read: none deleted code to hide an error, though `string?` for CS8618 and `"5"` for CS0029 are the easy way out, so the build passing doesn't mean the change is what the user wanted. A failed CS1503 also changed an unrelated line, which the undo question covers. Twelve seeds in one small project say little about real code. The failed edits point at the next thing to try, a second try when the search text doesn't apply; new seeds would have to judge that, not these.
+
+## The law book's test set gate and its search (2026-11-05)
+
+**The book still doesn't ship.** It went through the 45-question gate three times against 38/45 without it (`tiny-base`), and never rose above that, which the spec requires:
+
+| Run | Search | Score | Gained, lost | Questions given a passage |
+|---|---|---|---|---|
+| `tiny-law` | Passages ranked directly | 35/45 | 3, 6 | 32 |
+| `tiny-law2` | Page first | 38/45 | 2, 2 | 18 |
+| `tiny-law3` | Page first, section named for the question first | 36/45 | 2, 4 | 18 |
+
+These can't be told from noise (McNemar p = 0.51, 1.00, 0.69). Two of the four questions `tiny-law3` lost got no passage, and the same setup without a book has scored 37, 38 and 39, so a swing of 2 means little. The test set has been seen now, so its result is no longer clean. It's also a poor test of the book: the model already knows 38 of the 45, so the book can gain at most 7 and lose 38.
+
+**The idea is sound, and finding the passage is the limit.** On 17 questions about APIs a small model may not know, checked by a word the question doesn't hold (`HARD`, in `lawbook/dev_questions.json`'s page questions):
+
+| Given | Right |
+|---|---|
+| No passage | 4 |
+| The old search's passages | 5 |
+| Today's search's passages | 7 |
+| The right passage, chosen by hand | 15 |
+
+Compared on 47 practice questions, right, nothing and wrong page:
+
+| Search | Right | Nothing | Wrong | Passage holds the API (of 17) | Traps refused (of 15) |
+|---|---|---|---|---|---|
+| Passages ranked directly (old) | 25 | 9 | 13 | 3 | 15 |
+| **Page first, half its words, section by heading (shipped in the code)** | **28** | **18** | **1** | **6** | **15** |
+| Words weighed by rarity, filler dropped | 30 | 14 | 3 | 7 | 15 |
+| Today's, then meaning when it finds nothing (pages, `potion-code-16M-v2`, cosine 0.55, names must be in the passage) | 31 | 14 | 2 | 6 | 15 |
+| Today's, then meaning (passages, 0.55) | 34 | 8 | 5 | 7 | 15 |
+
+Sending nothing is safe and a wrong page isn't, so a wrong page counts double. Search by meaning found real answers word search can't (`ExecuteUpdate` for "update many rows"), but cost a wrong page for most it gained, didn't help the hard questions, and would add a 33 MB model, a tokenizer in C# and up to 54 MB of vectors. Its score didn't separate answers from traps either: right pages scored 0.48-0.75 and traps 0.38-0.55. It isn't in. Choosing the section by meaning made the hard questions worse (5, against 6), and sending 4 passages instead of 2 didn't help them. What would help most is finding the exact passage holding the API, and neither approach does.
+
+**Other things this found.** The book holds noise (about 7% code analysis rules, 6% breaking changes, 7% compiler errors and diagnostics), and `SKIPPED_FOLDERS` misses `compatibility`. Dropping those pages didn't change the numbers once the search went page first, and the error pages are useful, so they stay. Link lists such as See also were sent as answers, and are gone from the book.
+
+**The wording around a passage changed, with no measured gain.** It now says the page is a source to check and the answer is the model's own, as Eni-M asked. On 13 hard questions all three wordings tried got 7. On 10 easy questions with an unrelated passage, the old wording got 10 and the new 9, and that miss was the check not matching "overridden". The small model already ignored those unrelated passages.
+
+The rebuilt book's SHA-256 is `615a8fd2641abf3510d946a286cbf20fe9c15d94ab043c3a5c15f5604c474fec`. An older book finds nothing, since it has no `pages` table.
