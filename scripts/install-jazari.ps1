@@ -80,15 +80,7 @@ if ((Test-Path (Join-Path $localLlama "llama-server.exe")) -and -not (Test-Path 
     Copy-Item -Recurse $localLlama $llama
 }
 
-# Once the law book ships (the manifest names it), a copy built in this clone saves the download if it matches.
-$localBook = Join-Path $root "lawbook\out\law-book.db"
-$book = Join-Path $env:LOCALAPPDATA "MyOwnLLM\law-book.db"
-if ($manifest.lawBookUrl -and (Test-Path $localBook) -and -not (Test-Path $book) -and
-    (Get-FileHash -Algorithm SHA256 $localBook).Hash -eq $manifest.lawBookSha256) {
-    Write-Host "Copying the law book from this clone"
-    New-Item -ItemType Directory -Force (Split-Path $book) | Out-Null
-    Copy-Item $localBook $book
-}
+# The law book: the updater below copies it from this clone's lawbook\out when it matches the manifest (Repair-LawBook).
 
 # 3. config; the previous values stay until the updater has built their replacements
 New-Item -ItemType Directory -Force (Split-Path $configPath) | Out-Null

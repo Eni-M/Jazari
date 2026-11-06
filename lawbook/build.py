@@ -2,8 +2,9 @@
 
     py -I lawbook/build.py --out lawbook/out/law-book.db [--work <folder for the clones>]
 
-Each chunk is one piece of a page section, at most 1,000 characters, with the page and section as its title and the
-learn.microsoft.com address it came from. Code the docs pull from sample files is inlined, so a passage shows the code
+Each chunk is one piece of a page section, at most 1,000 characters, with its section path (`Page > Section`) as its title
+and the learn.microsoft.com address it came from. Beside them: each page's headings and API names (page_terms), each chunk's
+API names as words (chunk_names) and the abbreviations the docs spell out (aliases). Code the docs pull from sample files is inlined, so a passage shows the code
 it talks about. Only the latest version's text is kept where a page covers several. Standard library only.
 """
 import argparse, json, os, re, sqlite3, subprocess, sys, tempfile, textwrap
@@ -257,19 +258,21 @@ def slug(heading):
 
 
 def sections(title, body):
-    """(heading title, anchor, text) per heading. A heading inside code isn't one."""
-    out, heading, anchor, buf, in_code = [], title, "", [], False
+    """(section path, anchor, text) per heading: `Page > Section > Subsection`, so a passage says where it sits. A heading
+    inside code isn't one."""
+    out, heading, anchor, buf, in_code, path = [], title, "", [], False, []
     for line in body.split("\n"):
         if FENCE.match(line):
             in_code = not in_code
         m = None if in_code else _HEADING.match(line)
         if m:
             out.append((heading, anchor, "\n".join(buf).strip()))
-            text = re.sub(r"[*`_]", "", m.group(2)).strip()
-            if len(m.group(1)) == 1:
-                heading, anchor = title, ""
+            text, level = re.sub(r"[*`_]", "", m.group(2)).strip(), len(m.group(1))
+            if level == 1:
+                path, heading, anchor = [], title, ""
             else:
-                heading, anchor = f"{title}: {text}", slug(text)
+                path = [(l, t) for l, t in path if l < level] + [(level, text)]
+                heading, anchor = " > ".join([title] + [t for _, t in path]), slug(text)
             buf = []
         else:
             buf.append(line)
@@ -337,6 +340,58 @@ def pack(text):
 def chunks(title, body):
     """(heading title, text) pieces of at most 1,000 characters, split at headings, with code fences kept whole."""
     return [(heading, piece) for heading, _, text in sections(title, body) for piece in pack(text)]
+
+
+# --- words a question uses for what the docs name differently ------------------------------------------------------
+
+_IDENT = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+_HUMP = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
+_ABBR = re.compile(r"((?:[A-Za-z]\w*[ -]){0,6}[A-Za-z]\w*) \(([A-Z][A-Za-z]{1,9})\)")
+
+
+def _is_api(name):
+    if "." in name:
+        return all(len(part) > 1 for part in name.split("."))
+    return bool(re.search(r"[a-z][A-Z]|[A-Z]{2}[a-z]", name))
+
+
+def api_names(text):
+    """API names in a text, once each, in order: an inner capital (AddKeyedSingleton, IFormFile) or dots (Results.NotFound)."""
+    return list(dict.fromkeys(n for n in _IDENT.findall(text) if _is_api(n)))
+
+
+def name_words(names):
+    """The words API names are made of, once each: ExecuteUpdate is "execute update", so plain words in a question find it.
+    The search's tokenizer reads ExecuteUpdate as one word, executeupdate, which no question holds."""
+    words = (w.lower() for n in names for part in n.split(".") for w in _HUMP.findall(part))
+    return list(dict.fromkeys(w for w in words if len(w) > 1))
+
+
+def abbreviations(text):
+    """(abbreviation, long form) for each "HTTP Strict Transport Security (HSTS)" the text spells out: the fewest last words
+    whose initials, or the initials of their humps (OpenTelemetry (OTel)), are the abbreviation's capitals."""
+    found = []
+    for m in _ABBR.finditer(text):
+        words, abbr = re.split(r"[ -]", m.group(1)), m.group(2)
+        capitals = "".join(c for c in abbr if c.isupper())
+        if len(capitals) < 2:
+            continue
+        for n in range(1, len(words) + 1):
+            tail = words[-n:]
+            if capitals in ("".join(w[0].upper() for w in tail), "".join(h[0].upper() for w in tail for h in _HUMP.findall(w))):
+                found.append((abbr.lower(), " ".join(tail).lower()))
+                break
+    return found
+
+
+def page_terms(title, headings, texts, url):
+    """(headings, names, url): a page's table of contents, with the words of the API names in it, and every API name the page
+    uses. What a page covers is often in its sections and code, not in its title and description."""
+    heading_words = name_words(api_names("\n".join([title] + headings)))
+    # Names whole, one word each: the search splits Console.Write at the dot, and "write" then made any page with a
+    # Console.Write in its code look like it was about what a question wants to write. So only the parts that are names.
+    parts = (p for n in api_names("\n".join([title] + headings + texts)) for p in n.split(".") if _is_api(p))
+    return (" | ".join(headings + ([" ".join(heading_words)] if heading_words else [])), " ".join(dict.fromkeys(parts)), url)
 
 
 def learn_url(repo, path, anchor):
@@ -420,27 +475,47 @@ def build(out, work):
     db = sqlite3.connect(out)
     db.execute('CREATE VIRTUAL TABLE chunks USING fts5(title, text, url UNINDEXED, tokenize="porter unicode61")')
     db.execute('CREATE VIRTUAL TABLE pages USING fts5(title, description, slug, url UNINDEXED, tokenize="porter unicode61")')
-    total, seen = 0, set()
+    # Beside the tables above, not in them: a column added to chunks or pages changes how rare every word looks there.
+    db.execute('CREATE VIRTUAL TABLE page_terms USING fts5(headings, names, url UNINDEXED, tokenize="porter unicode61")')
+    db.execute('CREATE VIRTUAL TABLE chunk_names USING fts5(names, tokenize="porter unicode61")')  # rowid = the chunk's
+    db.execute("CREATE TABLE aliases(alias TEXT PRIMARY KEY, expansion TEXT NOT NULL)")
+    total, seen, spelled = 0, set(), {}
     for source in sources:
         root = fetch(source, work)
         count = page_count = 0
         for md_path in pages(source, root):
             rows = list(first_of_each(page_chunks(source, root, md_path), seen))
-            db.executemany("INSERT INTO chunks(title, text, url) VALUES (?, ?, ?)", rows)
+            for heading, text, url in rows:
+                rowid = db.execute("INSERT INTO chunks(title, text, url) VALUES (?, ?, ?)", (heading, text, url)).lastrowid
+                db.execute("INSERT INTO chunk_names(rowid, names) VALUES (?, ?)", (rowid, " ".join(name_words(api_names(text)))))
+                for abbr, long_form in abbreviations(text):
+                    forms = spelled.setdefault(abbr, {})
+                    forms[long_form] = forms.get(long_form, 0) + 1
             if rows:
                 with open(md_path, encoding="utf8", errors="replace") as f:
                     rel = os.path.relpath(md_path, root).replace(os.sep, "/")
-                    db.execute("INSERT INTO pages(title, description, slug, url) VALUES (?, ?, ?, ?)", page_row(f.read(), learn_url(source["repo"], rel, "")))
+                    row = page_row(f.read(), learn_url(source["repo"], rel, ""))
+                db.execute("INSERT INTO pages(title, description, slug, url) VALUES (?, ?, ?, ?)", row)
+                prefix = row[0] + " > "
+                headings = list(dict.fromkeys(s for h, _, _ in rows if h.startswith(prefix) for s in h[len(prefix):].split(" > ")))
+                db.execute("INSERT INTO page_terms(headings, names, url) VALUES (?, ?, ?)", page_terms(row[0], headings, [t for _, t, _ in rows], row[3]))
             count += len(rows); page_count += 1
         print(f"{source['repo']}@{source['commit'][:10]}: {page_count} pages, {count} chunks", flush=True)
         total += count
+    # Each abbreviation means what the docs spell it out as most often.
+    db.executemany("INSERT INTO aliases(alias, expansion) VALUES (?, ?)", [(a, max(f, key=f.get)) for a, f in spelled.items()])
+    print(f"{len(spelled)} abbreviations", flush=True)
     db.execute("INSERT INTO chunks(chunks) VALUES ('optimize')")
     db.execute("INSERT INTO pages(pages) VALUES ('optimize')")
+    db.execute("INSERT INTO page_terms(page_terms) VALUES ('optimize')")
+    db.execute("INSERT INTO chunk_names(chunk_names) VALUES ('optimize')")
     db.commit()
     db.execute("VACUUM")
     db.close()
     size = os.path.getsize(out)
     print(f"{total} chunks, {size / 1e6:.1f} MB -> {out}")
+    print("Next, the vectors (tens of minutes): dotnet src/MyOwnLLM.Gateway/bin/Debug/net10.0/MyOwnLLM.Gateway.dll embed-law-book "
+          f"--Gateway:LawBookFile={os.path.abspath(out)} --Gateway:SearchModelsDir=spike/models")
     return total, size
 
 

@@ -2,7 +2,7 @@ import os, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import build
-from build import chunks, clean, first_of_each, inline_snippets, keep_latest_version, learn_url, strip_front_matter
+from build import abbreviations, api_names, chunks, clean, first_of_each, inline_snippets, keep_latest_version, learn_url, name_words, page_terms, strip_front_matter
 
 
 class FrontMatterTests(unittest.TestCase):
@@ -133,7 +133,7 @@ class ChunkTests(unittest.TestCase):
         pieces = chunks("Records", "## Value equality\n" + "para\n\n" * 400 + "```csharp\ncode\n```")
         self.assertTrue(all(len(t) <= 1000 for _, t in pieces))
         self.assertTrue(all(t.count("```") % 2 == 0 for _, t in pieces))
-        self.assertEqual(pieces[0][0], "Records: Value equality")
+        self.assertEqual(pieces[0][0], "Records > Value equality")
 
     def test_a_long_code_fence_is_cut_and_each_part_closed(self):
         pieces = chunks("T", "```csharp\n" + "var line = 1234567890;\n" * 200 + "```")
@@ -144,13 +144,38 @@ class ChunkTests(unittest.TestCase):
 
     def test_a_heading_inside_code_is_not_a_heading(self):
         pieces = chunks("T", "## Real\ntext\n```bash\n# comment\n```")
-        self.assertEqual([h for h, _ in pieces], ["T: Real"])
+        self.assertEqual([h for h, _ in pieces], ["T > Real"])
 
     def test_text_before_any_heading_uses_the_page_title(self):
         self.assertEqual(chunks("Records", "Intro text.")[0], ("Records", "Intro text."))
 
     def test_a_heading_with_nothing_under_it_makes_no_chunk(self):
-        self.assertEqual(chunks("T", "# T\n## Empty\n## Full\ntext"), [("T: Full", "text")])
+        self.assertEqual(chunks("T", "# T\n## Empty\n## Full\ntext"), [("T > Full", "text")])
+
+    def test_a_passage_title_is_its_section_path(self):
+        titles = [h for h, _ in chunks("Records", "## Equality\na\n### Positional\nb\n## Other\nc")]
+        self.assertEqual(titles, ["Records > Equality", "Records > Equality > Positional", "Records > Other"])
+
+
+class NameTests(unittest.TestCase):
+    def test_api_names_have_an_inner_capital_or_a_dot(self):
+        self.assertEqual(api_names("Call AddKeyedSingleton, then Results.NotFound; Hello and ASP stay out. AddKeyedSingleton again."),
+                         ["AddKeyedSingleton", "Results.NotFound"])
+
+    def test_name_words_split_humps_and_dots(self):
+        self.assertEqual(name_words(["IExceptionHandler", "Results.NotFound", "XMLHttpRequest"]),
+                         ["exception", "handler", "results", "not", "found", "xml", "http", "request"])
+
+    def test_abbreviations_the_docs_define(self):
+        self.assertEqual(abbreviations("Use HTTP Strict Transport Security (HSTS), ahead-of-time (AOT) and OpenTelemetry (OTel), but not the thing (WRONG)."),
+                         [("hsts", "http strict transport security"), ("aot", "ahead of time"), ("otel", "opentelemetry")])
+
+    def test_page_terms_hold_headings_and_api_names(self):
+        self.assertEqual(page_terms("ExecuteUpdate and ExecuteDelete", ["Basic usage"], ["ctx.Blogs.ExecuteUpdate(x)"], "u"),
+                         ("Basic usage | execute update delete", "ExecuteUpdate ExecuteDelete", "u"))
+
+    def test_page_names_keep_only_the_parts_that_are_names(self):
+        self.assertEqual(page_terms("T", [], ["Console.WriteLine(numbers.Length)"], "u")[1], "WriteLine")
 
 
 class RepeatTests(unittest.TestCase):

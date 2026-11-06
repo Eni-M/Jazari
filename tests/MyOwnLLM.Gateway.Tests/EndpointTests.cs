@@ -524,6 +524,29 @@ public class EndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task A_streamed_answer_says_it_searches_the_docs_then_thinks()
+    {
+        WriteLawBook();
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[] { new { role = "user", content = CoveredQuestion } }, stream = true });
+        var stages = (await response.Content.ReadAsStringAsync()).Split("\n").Where(l => l.Contains("\"stage\""))
+            .Select(l => JsonDocument.Parse(l["data: ".Length..]).RootElement.GetProperty("stage").GetString()).ToList();
+        Assert.Equal(["searching the docs", "thinking"], stages.Take(2));
+        Assert.Contains("Results.NotFound()", Assert.Single(_llama.Calls).Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task Too_large_a_question_after_the_search_ends_the_stream_with_the_error()
+    {
+        WriteLawBook();
+        _llama.ContextTokens = 512;
+        var response = await _client.PostAsJsonAsync("/v1/chat/completions", new { messages = new[] { new { role = "user", content = CoveredQuestion + new string('x', 8000) } }, stream = true });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"error\"", body);
+        Assert.EndsWith("data: [DONE]\n\n", body);
+        Assert.Empty(_llama.Calls);
+    }
+
+    [Fact]
     public async Task A_short_follow_up_isnt_searched_on_its_own_words()
     {
         WriteLawBook();

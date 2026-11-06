@@ -18,4 +18,9 @@ public sealed class GatewayOptions
     /// Missing means Jazari answers without it.</summary>
     public string LawBookFile { get => _lawBookFile ?? Path.Combine(DataDir, "law-book.db"); set => _lawBookFile = value; }
     string? _lawBookFile;
+
+    /// <summary>The law book search's two small models, each in its own folder as in spike/models: bge-small-en-v1.5 (vectors)
+    /// and ms-marco-MiniLM-L12-v2 (reranker). Missing means the word search alone.</summary>
+    public string SearchModelsDir { get => _searchModelsDir ?? Path.Combine(DataDir, "search-models"); set => _searchModelsDir = value; }
+    string? _searchModelsDir;
 }

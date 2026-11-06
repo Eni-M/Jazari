@@ -3,7 +3,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import argparse, json, tempfile
 from compare import by_category, mcnemar_p, pair_report, paired, table
-from run_eval import PortInUse, conversation, plain_through_gateway, with_passages, csharp_int, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, save_failure, server_args, start_server, system_prompt
+from run_eval import PortInUse, law_questions, conversation, plain_through_gateway, with_passages, csharp_int, csharp_string, edit_scenario, read_context, read_scenario, review_scenario, run_questions, save_failure, server_args, start_server, system_prompt
 
 PROMPT_BUILDER = os.path.join(HERE, "..", "src", "MyOwnLLM.Gateway", "Prompt", "PromptBuilder.cs")
 Q1 = {"id": "a", "category": "api", "question": "boom", "must_have": [["x"]], "must_not": []}
@@ -274,6 +274,15 @@ class PairedTests(unittest.TestCase):
         self.assertIn("the runs also differ in: llama_build 11982 vs 12069", pair_report(base, cand))
         self.assertNotIn("differ in", pair_report(base, {**cand, "llama_build": "11982"}))
         self.assertNotIn("differ in", pair_report(_run("old", {"a": True}), cand))  # an unstamped run can't be compared
+
+
+class LawQuestionTests(unittest.TestCase):
+    def test_law_questions_are_the_api_questions(self):
+        qs = law_questions()
+        self.assertEqual(sum(q["category"] == "law-dev" for q in qs), 17)
+        self.assertEqual(sum(q["category"] == "law-held-out" for q in qs), 34)
+        self.assertEqual(len({q["id"] for q in qs}), len(qs))
+        self.assertTrue(all(len(q["must_have"]) == 1 and len(q["must_have"][0]) == 1 and q["must_not"] == [] for q in qs))
 
 
 if __name__ == "__main__":

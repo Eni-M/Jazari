@@ -76,15 +76,17 @@ public static class ChatEndpoints
         // ponytail: questions on /read files, and /edit and /commit (JSON answers), don't search yet: passages beside the
         // user's own code are untested, and earlier work showed a small model describes the wrong thing when given extra
         // material. Add them when a test set covers them.
-        var passages = request.Context is null && request.Lookup is null && request.JsonSchema is null && !(history.Count > 0 && LawBook.IsFollowUp(question)) ? s.LawBook.Search(question) : [];
-        var prompt = PromptBuilder.Build(new PromptParts(request.Context, history, question, passages, request.Conventions, Lookup: request.Lookup), await s.Limits.ContextTokensAsync(http.RequestAborted), maxTokens, out var droppedMessages, out var usedPassages);
+        var searches = request.Context is null && request.Lookup is null && request.JsonSchema is null && !(history.Count > 0 && LawBook.IsFollowUp(question));
+        var contextTokens = await s.Limits.ContextTokensAsync(http.RequestAborted);
+        var passages = searches ? await SearchAsync(http, s, question, request.Stream == true) : [];
+        var prompt = PromptBuilder.Build(new PromptParts(request.Context, history, question, passages, request.Conventions, Lookup: request.Lookup), contextTokens, maxTokens, out var droppedMessages, out var usedPassages);
         var watch = Stopwatch.StartNew();
 
         string answer;
         long id;
         if (request.Stream == true)
         {
-            http.Response.ContentType = "text/event-stream";
+            if (!http.Response.HasStarted) http.Response.ContentType = "text/event-stream"; // a search already opened the stream
             AnswerStats? stats = null;
             var cutOff = false;
             string? model = null;
@@ -161,12 +163,12 @@ public static class ChatEndpoints
         var project = ProjectPath(http);
         var question = request.Messages[^1].Content;
         var history = request.Messages.SkipLast(1).ToList();
-        var passages = request.Lookup is not null || (history.Count > 0 && LawBook.IsFollowUp(question)) ? [] : s.LawBook.Search(question, DeepAnswer.PassageTokens);
+        var passages = request.Lookup is not null || (history.Count > 0 && LawBook.IsFollowUp(question)) ? [] : await SearchAsync(http, s, question, request.Stream == true, DeepAnswer.PassageTokens);
         var parts = new PromptParts(request.Context, history, question, passages, request.Conventions, Lookup: request.Lookup);
         var checker = http.RequestServices.GetRequiredService<SnippetChecker>();
         var streaming = request.Stream == true;
         Task Stage(string stage, int? tokens) => streaming ? WriteEventAsync(http, new { stage, tokens }, http.RequestAborted) : Task.CompletedTask;
-        if (streaming) http.Response.ContentType = "text/event-stream";
+        if (streaming && !http.Response.HasStarted) http.Response.ContentType = "text/event-stream";
         var watch = Stopwatch.StartNew();
         DeepResult result;
         string? model = null;
@@ -255,6 +257,12 @@ public static class ChatEndpoints
             http.Response.StatusCode = status;
             await http.Response.WriteAsJsonAsync(new { error = e.Message });
         }
+        catch (Exception e) when (http.Response.HasStarted && http.Response.ContentType == "text/event-stream" && StatusFor(e) is not null)
+        {
+            // A stream already open (it said "searching the docs"): too late for a status code, so the error goes in-band.
+            await WriteEventAsync(http, new { error = e.Message }, http.RequestAborted);
+            await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
+        }
     }
 
     static int? StatusFor(Exception e) => e switch
@@ -286,6 +294,21 @@ public static class ChatEndpoints
             return checks.Any(c => c.State != CheckState.NotChecked) ? checks.Select(c => new { block = c.Block, state = c.State.ToString().ToLowerInvariant(), errors = c.Errors, why = c.Why }).ToList() : null;
         }
         catch (Exception e) when (!http.RequestAborted.IsCancellationRequested && e is not OutOfMemoryException) { return null; }
+    }
+
+    /// <summary>The law book's passages for a question. A streamed answer shows "Searching the docs" meanwhile, then "Thinking"
+    /// again: the first search loads the search models and the book's vectors, a few seconds that looked frozen.</summary>
+    static async Task<IReadOnlyList<Passage>> SearchAsync(HttpContext http, Services s, string question, bool streaming, int? maxTokens = null)
+    {
+        streaming &= s.LawBook.Available; // no book, nothing to wait for
+        if (streaming)
+        {
+            http.Response.ContentType = "text/event-stream";
+            await WriteEventAsync(http, new { stage = "searching the docs", tokens = (int?)null }, http.RequestAborted);
+        }
+        var passages = maxTokens is { } max ? s.LawBook.Search(question, max) : s.LawBook.Search(question);
+        if (streaming) await WriteEventAsync(http, new { stage = "thinking", tokens = (int?)null }, http.RequestAborted);
+        return passages;
     }
 
     static async Task WriteEventAsync(HttpContext http, object payload, CancellationToken ct)

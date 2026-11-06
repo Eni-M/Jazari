@@ -168,6 +168,18 @@ def run_questions(questions, ask):
     return answers
 
 
+def law_questions(lawbook=os.path.join(REPO, "lawbook")):
+    """The law book's API questions as test questions: right when the answer names the API. law-dev are the 17 hard dev
+    questions, law-held-out the held-out set, kept apart so a change tuned on the first must also win on the second."""
+    out = []
+    for name, category in (("dev_questions.json", "law-dev"), ("heldout_questions.json", "law-held-out")):
+        with open(os.path.join(lawbook, name), encoding="utf-8") as f:
+            pages = [q for q in json.load(f)["pages"] if q.get("api")]
+        out += [{"id": f"{category}-{i}", "category": category, "question": q["question"], "must_have": [[q["api"]]], "must_not": []}
+                for i, q in enumerate(pages, 1)]
+    return out
+
+
 def plain_through_gateway(gateway_ask):
     """A question as the CLI sends it: the user's words alone. The gateway adds the system prompt, and the law book's passage."""
     return lambda q: gateway_ask([{"role": "user", "content": q["question"]}])
@@ -235,6 +247,10 @@ def main():
     parser.add_argument("--deep", action="store_true", help="ask through a temporary gateway with deep on; needs --router-preset")
     parser.add_argument("--scenarios", action="store_true", help="also time /read, /edit, /review and a conversation")
     parser.add_argument("--limit", type=int, help="only the first N questions, for a quick check")
+    parser.add_argument("--search-models", default=os.path.join(REPO, "spike", "models"),
+                        help="the folder with the law book search's two models; 'none' searches by words alone")
+    parser.add_argument("--law-questions", action="store_true", help="ask the law book's API questions (lawbook/dev_questions.json "
+                        "and heldout_questions.json) instead of questions.json, scored by whether the answer names the API")
     parser.add_argument("--llama", default=os.path.join(os.environ.get("LOCALAPPDATA", ""), "Jazari", "llama", "llama-server.exe"))
     parser.add_argument("--law-book", help="send the plain questions through a temporary gateway (port 5099, its own data folder) "
                         "that searches this law book file; the scenarios stay as they are")
@@ -257,8 +273,11 @@ def main():
         except ServerDidNotStart as e:
             sys.exit(str(e))
 
-    with open(os.path.join(HERE, "questions.json"), encoding="utf-8") as f:
-        questions = json.load(f)[: a.limit]
+    if a.law_questions:
+        questions = law_questions()[: a.limit]
+    else:
+        with open(os.path.join(HERE, "questions.json"), encoding="utf-8") as f:
+            questions = json.load(f)[: a.limit]
     system = system_prompt()
 
     try:
@@ -271,7 +290,7 @@ def main():
             ask = lambda q: chat([{"role": "system", "content": system}, {"role": "user", "content": q["question"]}], model=a.model_name)
             if a.law_book or a.deep:
                 folder = tempfile.mkdtemp(prefix="jazari-eval-")
-                env = gateway_env(folder, PORT, GATEWAY_PORT, a.law_book)
+                env = gateway_env(folder, PORT, GATEWAY_PORT, a.law_book, None if a.search_models == 'none' else a.search_models)
                 key = add_key(env, folder)
                 gateway.append(launch(["dotnet", GATEWAY_DLL], GATEWAY_PORT, env=env, cwd=folder))
                 ask = plain_through_gateway(lambda messages: gateway_chat(key, messages, MAX_TOKENS, deep=a.deep))
@@ -289,6 +308,7 @@ def main():
         times = [x["seconds"] for x in answers]
         result = {"label": a.label, "model": os.path.basename(a.model), "threads": a.threads, "device": a.device, "gpu_layers": a.gpu_layers, "temperature": TEMPERATURE, **stamp(a.llama, a.model),
                   "law_book": os.path.abspath(a.law_book) if a.law_book else None,
+                  "search_models": None if not a.law_book or a.search_models == "none" else os.path.abspath(a.search_models),
                   "score": sum(x["passed"] for x in answers), "total": len(answers), "plain_p50_s": statistics.median(times), "plain_max_s": max(times),
                   "read_first_s": None, "followup_s": None, "edit_ok": None, "review_ok": None, "review_found": None, "review_false_alarms": None, "answers": answers}
         if a.scenarios:
@@ -302,6 +322,10 @@ def main():
     with open(os.path.join(HERE, "results", f"{a.label}.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
     print(f'{a.label}: {result["score"]}/{result["total"]}, median {result["plain_p50_s"]} s, longest {result["plain_max_s"]} s')
+    if a.law_questions:
+        for category in dict.fromkeys(x["category"] for x in answers):
+            mine = [x for x in answers if x["category"] == category]
+            print(f'  {category}: {sum(x["passed"] for x in mine)}/{len(mine)}')
     if a.law_book:
         used = [x for x in answers if x.get("passages")]
         print(f'{len(used)} questions were given a passage; {sum(not x["passed"] for x in used)} of them still failed: '
