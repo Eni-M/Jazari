@@ -37,10 +37,19 @@ public static class FixTarget
             [.. editable.Where(e => string.Equals(e.File, editable[0].File, StringComparison.OrdinalIgnoreCase)).Take(MaxErrors)];
     }
 
-    /// <summary>What the model is told of an error. A #error or #warning holds whatever the project wrote, and the request isn't
-    /// the part of the prompt marked as data, so the text stays out. Other messages only quote code names.</summary>
-    public static string MessageForModel(BuildError error) =>
-        error.Code is "CS1029" or "CS1030" ? "a #error or #warning directive in the code" : error.Message;
+    /// <summary>
+    /// Errors whose message only fills in names of code: types, members, parameters, keywords. Those go in the request as they are,
+    /// which on the benchmark fixed 7 of 12 where moving every message into the data fixed 3. Any other message can carry the
+    /// project's own text (an [Obsolete] reason in CS0619, an #error in CS1029, a generator's exception in CS8785), so it goes
+    /// only with the files, which the prompt marks as data.
+    /// </summary>
+    public static bool OnlyNamesCode(BuildError error) => NamesOnly.Contains(error.Code);
+
+    static readonly HashSet<string> NamesOnly =
+    [
+        "CS0029", "CS0030", "CS0103", "CS0117", "CS0120", "CS0161", "CS0165", "CS0234", "CS0246", "CS0266", "CS0535", "CS0236",
+        "CS1002", "CS1003", "CS1026", "CS1061", "CS1501", "CS1503", "CS1513", "CS1525", "CS4014", "CS7036", "CS8618",
+    ];
 
     static bool IsBuildOutput(string folder) => folder.Equals("obj", StringComparison.OrdinalIgnoreCase) || folder.Equals("bin", StringComparison.OrdinalIgnoreCase);
 
