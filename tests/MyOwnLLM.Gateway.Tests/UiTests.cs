@@ -27,9 +27,9 @@ public class UiTests
     {
         var (ui, output) = Plain();
 
-        ui.Rows([("Model", "Granite 4.1 3B · local"), ("Directory", "~/EduCore")]);
+        ui.Rows([("Model", "Granite 4.1 3B · local"), ("Directory", "~/MyProject")]);
 
-        Assert.Equal(["Model       Granite 4.1 3B · local", "Directory   ~/EduCore"], Lines(output));
+        Assert.Equal(["Model       Granite 4.1 3B · local", "Directory   ~/MyProject"], Lines(output));
     }
 
     [Fact]

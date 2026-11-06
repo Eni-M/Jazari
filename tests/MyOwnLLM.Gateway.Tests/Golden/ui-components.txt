@@ -5,7 +5,7 @@ this test gives it to use.
 a line
 MODELS
 Model                 Granite 4.1 3B · local
-Directory             ~/EduCore
+Directory             ~/MyProject
 A very long key name  value
 ERROR
 Can't reach the gateway.

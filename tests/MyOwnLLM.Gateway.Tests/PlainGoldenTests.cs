@@ -39,7 +39,7 @@ public class PlainGoldenTests
         ui.Row("why", "A long explanation that has to wrap because it is wider than the eighty columns this test gives it to use.");
         ui.Line("a line");
         ui.Label("models");
-        ui.Rows([("Model", "Granite 4.1 3B · local"), ("Directory", "~/EduCore"), ("A very long key name", "value")]);
+        ui.Rows([("Model", "Granite 4.1 3B · local"), ("Directory", "~/MyProject"), ("A very long key name", "value")]);
         ui.Error("Can't reach the gateway.", "Nothing answered.", "jazari update");
         ui.UserMessage("what is dependency injection?\nand a second line");
         ui.Metadata("2 files, 2.1k tokens.");

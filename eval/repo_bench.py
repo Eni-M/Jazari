@@ -1,6 +1,6 @@
 """The repo benchmark: blank out a method in one of Eni-M's own repos, ask Jazari to write it, then build and run its tests.
 
-    py -I eval/repo_bench.py select --repo C:/path --name educore --tests EduCore.Tests --limit 20   # adds tasks to tasks.local.json
+    py -I eval/repo_bench.py select --repo C:/path --name myproject --tests MyProject.Tests --limit 20   # adds tasks to tasks.local.json
     py -I eval/repo_bench.py select --repo C:/path --name wareflow --limit 10                         # no tests: scored on the build
     py -I eval/repo_bench.py validate --keep 20                                                              # drops tasks whose tests can't tell
     py -I eval/repo_bench.py run --label tiny-regress --model spike/models/x.gguf --llama spike/bin/llama-server.exe [--deep]

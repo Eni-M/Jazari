@@ -12,7 +12,7 @@ public class WelcomeTests
     {
         var output = new StringWriter();
         Welcome.Render(new Ui(output, new Theme(ColorMode.None, unicode: true), width), "0.2.0", "Granite 4.1 3B",
-            directory ?? Path.Combine(Home, "EduCore"), state, runningOn);
+            directory ?? Path.Combine(Home, "MyProject"), state, runningOn);
         return output.ToString().Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
     }
 
@@ -25,7 +25,7 @@ public class WelcomeTests
             "",
             "Model       Granite 4.1 3B · local",
             "Running on  " + IrisXe,
-            "Directory   ~/EduCore",
+            "Directory   ~/MyProject",
             "Connection  Available",
             "",
             "/help for commands · Tab completes · Ctrl+C stops an answer",
