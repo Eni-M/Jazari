@@ -79,3 +79,7 @@ Start it with **MCP: List Servers**, and pick **Show Output** there if something
 
 Full setup, commands and measured performance: [docs/phase1-runbook.md](docs/phase1-runbook.md).
 Design and plans: [docs/superpowers/](docs/superpowers/).
+
+## Licence
+
+Jazari is MIT-licensed: [LICENSE](LICENSE). The models and tools it downloads (Granite, llama.cpp, the search models) keep their own licences, and the law book's sources are listed in [lawbook/NOTICE.md](lawbook/NOTICE.md).

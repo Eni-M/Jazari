@@ -424,3 +424,19 @@ The dev gate passes for the first time (right ≥ 25, wrong ≤ 3, traps ≥ 14)
 A streamed answer now shows "Searching the docs" while the book is searched, then "Thinking": the first search after start loads the models and the book's vectors, a few seconds that looked frozen.
 
 **Shipping.** The book is a release of the public [Eni-M/jazari-law-book](https://github.com/Eni-M/jazari-law-book) (this repository is private, so its assets would need a login), credited to Microsoft's docs under CC BY 4.0. The manifest pins its SHA-256 and the two models' four files at Hugging Face revisions; `jazari update` installs the models into `%LOCALAPPDATA%\MyOwnLLM\search-models` and copies the book from the clone's `lawbook\out` when it matches, else downloads it.
+
+### Answers with the model: no book against the round 3 search (2026-11-06)
+
+`run_eval.py --law-questions`, granite-4.0-h-tiny on the CPU, the 17 hard dev questions and the 34 held-out ones; an answer passes when it names the question's API and nothing it rules out.
+
+| | No book | Book, round 3 search |
+|---|---|---|
+| Dev (hard) | 5/17 | 8/17 |
+| Held out, plain wording | 7/22 | 12/22 |
+| Held out, names the API | 4/4 | 4/4 |
+| Held out, abbreviation | 4/5 | 5/5 |
+| Held out, typo | 2/3 | 3/3 |
+| **Total** | **22/51** | **32/51** |
+| Median answer | 29.3 s | 26.8 s |
+
+13 questions gained, 3 lost. `Task.WaitAll` for "run several tasks and wait for all" is right; the check wants `WhenAll`. The two real losses: "a column's initial value from the database" got the generated-values page's computed-columns section, and the model wrote `HasComputedColumnSql` instead of `HasDefaultValueSql`; "the System.Text.Json source generator" got a passage on options that never says `[JsonSerializable]`. 44 of 51 questions were given a passage and 15 of those still failed: the right page but not the right section, or a passage the model didn't use. "Names the API" passes without the book because the question holds the name the check looks for.

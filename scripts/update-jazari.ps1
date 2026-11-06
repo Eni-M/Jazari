@@ -76,7 +76,7 @@ function Test-Llama($folder) {
 # The law book (lawbook/build.py, then embed-law-book): Microsoft's .NET docs the gateway searches. Optional, so it's
 # installed only once the manifest pins it (lawBookSha256), and where the gateway looks for it by default. A book built in
 # the clone Jazari was installed from is copied if it matches, which saves the 100 MB download from lawBookUrl (a release
-# of the public Eni-M/jazari-law-book: this repository is private, and its assets would need a login).
+# of the public Eni-M/jazari-law-book).
 function Repair-LawBook {
     if (-not $manifest.lawBookSha256) { return }
     $book = Join-Path $env:LOCALAPPDATA "MyOwnLLM\law-book.db"
