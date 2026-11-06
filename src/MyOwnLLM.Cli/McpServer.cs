@@ -219,6 +219,9 @@ public sealed class McpServer(TextReader input, TextWriter output, IGatewayClien
         var outside = $"review_file only reads files inside the project, {root}.";
         // Before anything touches the disk: asking about \\server\share would send the user's Windows credentials there.
         if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar)) return outside;
+        // GetFullPath has already turned 8.3 short names (SECRET~1.CS) into the real ones the rules below expect. A colon is
+        // left: no file name has one, but notes.pem:hidden.cs is a hidden data stream of notes.pem that ends in .cs.
+        if (relative.Contains(':')) return $"review_file won't review {relative}: it names a hidden data stream, not a file.";
         if (Directory.Exists(full)) return "review_file reads one file; jazari review in a terminal reviews a folder.";
         var current = root;
         foreach (var part in relative.Split(Path.DirectorySeparatorChar))

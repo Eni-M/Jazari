@@ -495,6 +495,78 @@ public class McpServerTests : IAsyncLifetime
         Assert.Equal(0, _gateway.Completions);
     }
 
+    [System.Runtime.InteropServices.DllImport("kernel32", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int GetShortPathNameW(string path, StringBuilder shortPath, int size);
+
+    /// <summary>The path below the project with each part as its 8.3 short name, or null where the volume keeps none.</summary>
+    string? ShortNames(string relative)
+    {
+        var (longPath, result) = (_project, new List<string>());
+        foreach (var part in relative.Split('/'))
+        {
+            longPath = Path.Combine(longPath, part);
+            var buffer = new StringBuilder(1024);
+            if (GetShortPathNameW(longPath, buffer, buffer.Capacity) == 0) return null;
+            result.Add(Path.GetFileName(buffer.ToString()));
+        }
+        var shortened = string.Join('/', result);
+        return shortened.Equals(relative, StringComparison.OrdinalIgnoreCase) || !File.Exists(Path.Combine(_project, shortened)) ? null : shortened;
+    }
+
+    // Path.GetFullPath turns short names back into the real ones on Windows, which is what keeps these refused: a change that
+    // checked the path as sent would let SSH~1 past the secret-folder rule and PRIVAT~1 past .jazariignore.
+    [Theory]
+    [InlineData(".ssh/config.json")] // SSH~1\CONFIG~1.JSO: the folder rule never sees .ssh
+    [InlineData("secrets.local.cs")] // SECRET~1.CS: not a secret's name, and still code
+    public async Task Review_refuses_a_secret_named_by_its_short_name(string file)
+    {
+        Write(file, "PASSWORD=hunter2\n");
+        if (!OperatingSystem.IsWindows() || ShortNames(file) is not { } shortened) return; // this volume has no short names
+
+        var (text, isError) = await Call("review_file", new { path = shortened });
+
+        Assert.True(isError);
+        Assert.DoesNotContain("hunter2", text);
+        Assert.Equal(0, _gateway.Completions);
+    }
+
+    [Fact]
+    public async Task Review_refuses_an_ignored_folder_named_by_its_short_name()
+    {
+        Write(".jazariignore", "private stuff/\n");
+        Write("private stuff/Notes.cs", "class Notes { }\n");
+        if (!OperatingSystem.IsWindows() || ShortNames("private stuff/Notes.cs") is not { } shortened) return;
+
+        var (_, isError) = await Call("review_file", new { path = shortened });
+
+        Assert.True(isError);
+        Assert.Equal(0, _gateway.Completions);
+    }
+
+    [Fact]
+    public async Task Review_refuses_a_hidden_data_stream_of_a_file()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var file = Write("notes.pem", "key\n");
+        File.WriteAllText(file + ":hidden.cs", "PASSWORD=hunter2\n");
+
+        var (text, isError) = await Call("review_file", new { path = "notes.pem:hidden.cs" });
+
+        Assert.True(isError);
+        Assert.DoesNotContain("hunter2", text);
+        Assert.Equal(0, _gateway.Completions);
+    }
+
+    [Fact]
+    public async Task Review_finds_a_hidden_file_and_a_name_in_another_case()
+    {
+        var file = Write("Hidden.cs", "class Hidden { }\n");
+        File.SetAttributes(file, FileAttributes.Hidden);
+
+        Assert.False((await Call("review_file", new { path = "hidden.CS" })).IsError);
+        Assert.Equal(1, _gateway.Completions);
+    }
+
     [Fact]
     public async Task Review_refuses_a_file_the_jazariignore_leaves_out()
     {
