@@ -9,7 +9,7 @@ public sealed record DeepResult(string Text, string CheckRow, bool CutOff, Answe
 
 /// <summary>
 /// /deep: the answer, the compiler's opinion, and one repair of a block that doesn't compile. The evidence says
-/// more than one round doesn't pay at this model size (docs/superpowers/specs/2026-11-04-deep-mode-design.md). The text is
+/// more than one round doesn't pay at this model size. The text is
 /// held until it's checked, because what's on screen can't be taken back after a repair; stages say what's going on meanwhile.
 /// </summary>
 public static class DeepAnswer

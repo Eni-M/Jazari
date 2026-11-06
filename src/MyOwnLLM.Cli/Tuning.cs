@@ -22,7 +22,7 @@ public sealed partial record Tuning(
 
     /// <summary>
     /// llama-server's spacing between checkpoints at b11982, written out: later builds keep 8192 as the default but may
-    /// not, and every measurement here was made with it. Change it only with a recall/ run (docs/HANDOFF-task-6.md).
+    /// not, and every measurement here was made with it. Change it only with a recall/ run.
     /// </summary>
     public const int CheckpointMinStep = 8192;
 

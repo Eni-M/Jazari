@@ -29,7 +29,7 @@ public sealed partial class ProjectReview(IGatewayClient gateway, Ui ui, string 
 
     /// <summary>
     /// The quote comes first, so the problem is written about a real line. The fix is optional: asking for fixes makes
-    /// reviewers misjudge correct code more often (see reports/Jazari CLI and model enhancements.md, section 2).
+    /// reviewers misjudge correct code more often.
     /// </summary>
     const string Schema = """
         {"type":"object","required":["findings"],"properties":{"findings":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,

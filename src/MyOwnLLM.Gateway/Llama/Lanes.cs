@@ -23,7 +23,7 @@ public interface ILanes
 }
 
 /// <summary>
-/// One model at a time, through llama-server's router (docs/superpowers/specs/2026-11-04-deep-measurements.md). Runs inside
+/// One model at a time, through llama-server's router. Runs inside
 /// the request queue's items, so only one caller at a time, except for a load a stopped caller left running.
 /// </summary>
 public sealed class Lanes(Func<ILlamaClient> llama, RequestQueue queue, TimeProvider? time = null, TimeSpan? pollEvery = null) : ILanes

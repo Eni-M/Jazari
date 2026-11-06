@@ -6,8 +6,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace MyOwnLLM.Cli;
 
 /// <summary>
-/// /review's pre-pass: problems a rule finds for certain, without the model (reports/Lessons from similar local
-/// assistants.md, item 9). Secrets in any file, like gitleaks, and a few C# patterns read from the syntax tree. Nothing is
+/// /review's pre-pass: problems a rule finds for certain, without the model. Secrets in any file, like gitleaks, and a few C# patterns read from the syntax tree. Nothing is
 /// built or run: a cloned project's build could run its own code, so analyzers that need a build are out.
 /// </summary>
 public static partial class StaticChecks

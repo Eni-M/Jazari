@@ -15,7 +15,7 @@ public sealed record Passage(string Title, string Url, string Text);
 /// On 47 practice questions, ranking passages directly sent a wrong page 13 times and a right one 25; this sends 2 and 27.
 ///
 /// There is no score threshold on purpose. reame measured similarity at a median of 0.895 for answerable questions and
-/// 0.879 for traps, so no threshold separates them (reports/Local inference sources for Jazari.md). Instead each step
+/// 0.879 for traps, so no threshold separates them. Instead each step
 /// below rules a page or passage out on something it can check: a name or version it lacks, a word no passage holds, too few of
 /// the question's words.
 ///

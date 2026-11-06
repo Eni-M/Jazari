@@ -1,7 +1,7 @@
 """Times the two ways of switching between the fast and the deep model on this PC, a plain stop-and-start and llama-server's
 router mode, and measures each lane's memory. Port 8099 only; stop the real Jazari and other heavy work first.
 
-    py -I eval/measure_lanes.py [--threads]       # prints the numbers as JSON, for docs/superpowers/specs/2026-11-04-deep-measurements.md
+    py -I eval/measure_lanes.py [--threads]       # prints the numbers as JSON
 """
 import argparse, json, os, statistics, subprocess, sys, tempfile, time, urllib.request
 

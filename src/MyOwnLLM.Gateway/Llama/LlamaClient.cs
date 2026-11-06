@@ -13,7 +13,7 @@ public sealed class LlamaClient(HttpClient http, string? keyFile = null) : ILlam
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
     const double CodeTemperature = 0.2; // llama-server's default of 0.8 is meant for prose; code wants the likeliest answer
     // llama-server's own defaults at b11982, written out so an upgrade that changes them can't change Jazari's answers
-    // (reports/Jazari CLI and model enhancements.md, section 2). Changing them needs an eval/ run.
+    // Changing them needs an eval/ run.
     const int TopK = 40;
     const double TopP = 0.95, MinP = 0.05;
 

@@ -74,7 +74,7 @@ def paired(base, candidate):
 
 def pair_report(base, candidate):
     """What the candidate won and lost against the base. On 45 questions a few wins can't be told from chance: +3 with no
-    losses gives p = 0.25, and it takes 6 wins and 0 losses to get under 0.05 (reports/Jazari enhancements after law book.md)."""
+    losses gives p = 0.25, and it takes 6 wins and 0 losses to get under 0.05."""
     p = paired(base, candidate)
     wins, losses = len(p["gained"]), len(p["lost"])
     value = mcnemar_p(wins, losses)

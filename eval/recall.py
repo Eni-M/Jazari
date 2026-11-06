@@ -16,7 +16,7 @@ MAX_TOKENS = 40
 DEEP_CONTEXT, CUT_CONTEXT = 16384, 10240
 
 Fact = collections.namedtuple("Fact", "fact question want")
-# From research_notes/Local inference sources/recall_probe.py. Six confusable pairs: the same kind of value twice, so a
+# Six confusable pairs: the same kind of value twice, so a
 # model that half-remembers picks the wrong one.
 FACTS = [
     Fact("The refund service retries 3 times before giving up.", "How many times does the refund service retry?", r"\b(3|three)\b"),

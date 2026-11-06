@@ -804,7 +804,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (broken.Count > 0)
         {
             // One more try with the errors, as Aider does after its lint. Only one: a retry added nothing to a 0.5B model and
-            // a few points at 1.5-3B (reports/Lessons from similar local assistants.md), and each costs a whole answer.
+            // a few points at 1.5-3B, and each costs a whole answer.
             ui.Metadata($"That change breaks the C# syntax ({broken[0]}). Asking once more, with the errors.");
             if (await ProposeAsync($"{asked}\n\nYour previous edits broke the C# syntax: {string.Join("; ", broken.Take(3))}. Give the edits again so the file still parses.")
                 is not var (retried, retriedApplied, _)) return false;

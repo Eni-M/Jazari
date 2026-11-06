@@ -8,7 +8,7 @@ namespace MyOwnLLM.Cli;
 /// What `/review --changed` reads: only the code that changed since the last commit, as small parts. A changed C# member
 /// (method, property, constructor) goes whole, so the model sees what the change does; elsewhere the changed lines go
 /// with a few lines around them. Small parts are where review holds up: one study measured F1 0.657 on diffs under 10
-/// lines and 0.043 over 150 (reports/Lessons from similar local assistants.md). Each part keeps the file's line numbers.
+/// lines and 0.043 over 150. Each part keeps the file's line numbers.
 /// </summary>
 public static partial class ChangedCode
 {

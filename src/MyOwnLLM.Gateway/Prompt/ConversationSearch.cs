@@ -7,7 +7,7 @@ namespace MyOwnLLM.Gateway.Prompt;
 /// <summary>
 /// Finds the user's own earlier lines that answer the question, so they can go right next to it. Deep in a conversation,
 /// or after a history cut, Granite 4.0-H Tiny swaps similar values or invents them; a short list of the facts placed
-/// before the question brought it back to 12 of 12 (reports/Local inference sources for Jazari.md). Plain BM25 over the
+/// before the question brought it back to 12 of 12. Plain BM25 over the
 /// conversation the CLI already sends: nothing is stored, and nothing a model wrote is pinned, because its answers can be wrong.
 /// </summary>
 public static partial class ConversationSearch

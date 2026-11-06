@@ -7,7 +7,7 @@ namespace MyOwnLLM.Cli;
 
 /// <summary>
 /// The shape of C# files without their bodies: each type and the signatures of its members, the way Aider's repo map
-/// shows a project the model can't read in full (reports/Lessons from similar local assistants.md, item 8). /read gives
+/// shows a project the model can't read in full. /read gives
 /// it the files that didn't fit, so the model knows what exists and where, at a fraction of the tokens.
 /// </summary>
 public static partial class RepoMap
