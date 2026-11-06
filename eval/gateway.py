@@ -43,11 +43,14 @@ def build_gateway():
         raise ServerDidNotStart("the gateway didn't build")
 
 
-def gateway_env(data_dir, llama_port, port, law_book=None):
-    """The gateway's settings, pointed at the temporary server and folder. law_book: the law book file it searches, if any."""
+def gateway_env(data_dir, llama_port, port, law_book=None, search_models=None):
+    """The gateway's settings, pointed at the temporary server and folder. law_book: the law book file it searches, if any.
+    search_models: the folder holding the law book search's two models (spike/models), if any."""
     env = {**os.environ, "Gateway__LlamaUrl": f"http://127.0.0.1:{llama_port}", "Gateway__Port": str(port), "Gateway__DataDir": data_dir}
     if law_book:
         env["Gateway__LawBookFile"] = os.path.abspath(law_book)
+    if search_models:
+        env["Gateway__SearchModelsDir"] = os.path.abspath(search_models)
     return env
 
 

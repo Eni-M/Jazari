@@ -24,6 +24,12 @@ if (args is ["search-law", var lawQuestion, ..]) // for lawbook/try_dev.py: what
     return;
 }
 
+if (args is ["embed-law-book", ..]) // after lawbook/build.py: a vector per passage, with the models in Gateway:SearchModelsDir
+{
+    Environment.ExitCode = LawBook.Embed(options, Console.Out) ? 0 : 1;
+    return;
+}
+
 if (args is ["check-answer", var answersFile, ..]) // for eval/check_saved.py: a JSON array of answers in, what the checker says and how long it took out
 {
     var checker = new SnippetChecker();
