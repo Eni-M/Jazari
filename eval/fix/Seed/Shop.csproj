@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The clean project eval/fix_bench.py breaks one error at a time. The two warnings count as errors so they can be seeds. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <WarningsAsErrors>CS8618;CS4014</WarningsAsErrors>
+  </PropertyGroup>
+</Project>

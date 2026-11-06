@@ -27,10 +27,23 @@ public static partial class ProjectLookup
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return null; } // a lookup is only a help
     }
 
+    /// <summary>The files declaring these names, however they're spelled: a compiler's message names 'Order' for certain,
+    /// where a question's plain words need the inner capital that says they're code.</summary>
+    public static LookedUp? ForNames(string project, IReadOnlyList<string> names, string? alreadyRead)
+    {
+        try { return Find(project, [], names, alreadyRead); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
+    }
+
     static LookedUp? Find(string project, string question, string? alreadyRead)
     {
         var fileNames = FileName().Matches(question).Select(m => m.Value.Replace('\\', '/').TrimStart('.', '/')).Where(n => ProjectFiles.Wanted(n)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var names = Identifier().Matches(question).Select(m => m.Value).Where(IsCodeName).Distinct().ToList();
+        return Find(project, fileNames, names, alreadyRead);
+    }
+
+    static LookedUp? Find(string project, IReadOnlyList<string> fileNames, IReadOnlyList<string> names, string? alreadyRead)
+    {
         if ((fileNames.Count == 0 && names.Count == 0) || !InRepository(project)) return null;
 
         var paths = ProjectFiles.Paths(project).Take(MaxWalked).ToList();

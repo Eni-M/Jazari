@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using MyOwnLLM.Cli.Terminal;
 
 namespace MyOwnLLM.Cli;
@@ -16,6 +17,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         ("/read <path>", "Read a file or folder for the next questions"), ("/diff [ref]", "Read your uncommitted changes (or the changes since ref)"),
         ("/context", "What the next question will send"), ("/review [path]", "Review a whole project, or only what changed (--changed)"),
         ("/edit <file> <what>", "Change a file, after showing you the change"), ("/undo", "Undo the last /edit"),
+        ("/fix [project]", "Fix a compile error, then rebuild to check"),
         ("/commit", "Write a commit message for the staged changes"), ("/docs <question>", "Look it up in the .NET docs, without the model"),
         ("/save [file]", "Save the conversation as Markdown"),
         ("/clear", "Clear conversation and files read"), ("/retry", "Ask the last question again"), ("/deep [question]", "Ask with the smarter model; alone, ask the last question again"), ("/details", "Details of the last error"), ("/exit", "Quit"),
@@ -25,7 +27,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     public static IEnumerable<string> CommandNames => Commands.Select(c => c.Command.Split(' ')[0]);
 
     /// <summary>Commands whose argument is a path, so Tab completes file and folder names after them.</summary>
-    public static readonly string[] PathCommands = ["/read", "/review", "/edit"];
+    public static readonly string[] PathCommands = ["/read", "/review", "/edit", "/fix"];
 
     readonly List<ChatTurn> _history = [];
     string? _lastQuestion;
@@ -138,6 +140,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             case "/review": return new ProjectReview(gateway, ui, ReviewDir).RunAsync(Resolve(Argument(input) ?? project), ct);
             case "/edit": return Stoppable(() => EditAsync(input.Split(' ', 2) is [_, var rest] ? rest : null, ct), ct);
             case "/undo": Undo(); break;
+            case "/fix": return Stoppable(() => FixAsync(Argument(input), ct), ct);
             case "/docs": return DocsAsync(Argument(input), ct);
             case "/save": Save(Argument(input)); break;
             case "/clear": _warming?.Cancel(); _history.Clear(); _context = _contextLabel = _chip = null; _timings = null; _droppedTurns = 0; ForgetSaved(); ui.Metadata("Conversation cleared."); break;
@@ -658,15 +661,18 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
 
     /// <summary>The errors an edit adds to the project (file, project root, before, after). Replaced in tests.</summary>
     public Func<string, string, string, string, CancellationToken, Task<IReadOnlyList<string>?>> ProjectErrors { get; init; } = ProjectCheck.NewErrorsAsync;
+    /// <summary>Builds a project for /fix. Replaced in tests.</summary>
+    public Func<string, CancellationToken, Task<BuildResult?>> Build { get; init; } = (projectFile, ct) =>
+        ProjectBuild.RunAsync(projectFile, new ProcessRunner(), UpdateCheck.FromAbsolutePath("dotnet.exe", Environment.GetEnvironmentVariable("PATH")), ct);
     /// <summary>Where the projects the user trusted are remembered.</summary>
     public string TrustFile { get; init; } = ProjectTrust.DefaultPath;
 
     /// <summary>Whether this project's build scripts may run: asked once for them as they are now, and no means the same question next time.</summary>
-    bool MayLoadProject(string projectFile)
+    bool MayLoadProject(string projectFile, string question = "Checking this edit loads the project, which runs its build scripts. Only say yes for code you trust. Load it?")
     {
         var trust = new ProjectTrust(TrustFile);
         if (trust.IsTrusted(projectFile, project)) return true;
-        if (!Confirm("Checking this edit loads the project, which runs its build scripts. Only say yes for code you trust. Load it?")) return false;
+        if (!Confirm(question)) return false;
         trust.Trust(projectFile, project);
         return true;
     }
@@ -678,17 +684,110 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
         if (!InsideProject(path)) { ui.Metadata("Jazari only edits files inside this project."); return; }
         if (!File.Exists(path)) { ui.Metadata($"Can't find {path}."); return; }
 
-        if (FileEdit.Read(path) is not { } stored) { ui.Metadata("That file isn't UTF-8 or UTF-16 text, so Jazari can't edit it without damaging it."); return; }
+        await ProposeEditAsync(path, file, request, null, deep, deep, ct);
+    }
+
+    /// <summary>
+    /// /fix: plain code builds, reads the errors and picks the file; the model only writes the edit, and the rebuild says
+    /// whether it worked. One file per run, so every write has its own yes. ponytail: compile errors only. Running failing
+    /// tests runs the user's code, so that needs a sandbox first.
+    /// </summary>
+    async Task FixAsync(string? argument, CancellationToken ct)
+    {
+        var (projectFile, problem) = FixTarget.Find(project, argument);
+        if (projectFile is null) { ui.Metadata(problem!); return; }
+        if (!MayLoadProject(projectFile, "/fix builds the project, which runs its build scripts. Only say yes for code you trust. Build it?")) { ui.Metadata("Nothing was built."); return; }
+
+        ui.Metadata($"Building {Path.GetFileName(projectFile)}.");
+        if (await Build(projectFile, ct) is not { } before) { ui.Metadata(".NET SDK not found on PATH."); return; }
+        if (before.Succeeded) { ui.Metadata("The build passes. Nothing to fix."); return; }
+        if (before.Errors.Count == 0)
+        {
+            if (before.Output.Contains("NETSDK1004", StringComparison.Ordinal)) ui.Metadata("This project hasn't been restored. Run dotnet restore, then /fix again.");
+            else { ui.Metadata("The build failed, but not on a compiler error, so there's nothing to fix in the code:"); ShowEnd(before.Output); }
+            return;
+        }
+        var chosen = FixTarget.Editable([.. before.Errors.Where(e => File.Exists(e.File) && InsideProject(Path.GetFullPath(e.File)))], project);
+        if (chosen.Count == 0)
+        {
+            ui.Metadata("The errors are in generated or outside files, so Jazari won't change them:");
+            foreach (var error in before.Errors.Take(FixTarget.MaxErrors)) ui.Metadata($"{error.File}({error.Line}): {error.Code} {error.Message}");
+            return;
+        }
+
+        var path = Path.GetFullPath(chosen[0].File);
+        var request = "Fix these compiler errors in the file above. Change only what they need, and don't remove code to hide an error.\n\n" +
+            string.Join("\n", chosen.Select(e => $"line {e.Line}: {e.Code} {FixTarget.MessageForModel(e)}"));
+        var file = Path.GetRelativePath(project, path);
+        if (!await ProposeEditAsync(path, file, request, await FixContextAsync(chosen, file, ct), true, false, ct)) return;
+
+        BuildResult? after;
+        ui.Metadata("Building again.");
+        try { after = await Build(projectFile, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            ui.Metadata("Stopped before the build finished, so it's not known whether that worked. The change stays written; /undo puts it back.");
+            return;
+        }
+        if (after is null) { ui.Metadata(".NET SDK not found on PATH. The change stays written; /undo puts it back."); return; }
+        if (after.Succeeded) { ui.Metadata("Fixed: the build passes."); return; }
+        if (after.Errors.Count == 0)
+        {
+            ui.Metadata("The build failed, but not on a compiler error, so it's not known whether that worked. The change stays written; /undo puts it back:");
+            ShowEnd(after.Output);
+            return;
+        }
+        if (after.Errors.Count < before.Errors.Count && BuildErrors.New(before.Errors, after.Errors).Count == 0)
+        {
+            ui.Metadata($"{Errors(after.Errors.Count)} left. /fix again for the next one.");
+            return;
+        }
+        if (Confirm($"That didn't help: {Errors(after.Errors.Count)} now, {before.Errors.Count} before. Undo the change?")) Undo();
+    }
+
+    /// <summary>What the file alone doesn't show: the code the errors name, since CS1061 on Order can't be fixed without reading
+    /// Order, and the law book's page for the first error's code. Either can be missing; the edit is proposed regardless.</summary>
+    async Task<string?> FixContextAsync(IReadOnlyList<BuildError> errors, string file, CancellationToken ct)
+    {
+        var names = errors.SelectMany(e => QuotedName().Matches(FixTarget.MessageForModel(e))).Select(m => m.Groups[1].Value.Split('.')[^1]).Distinct().Take(MaxErrorNames).ToList();
+        var parts = new List<string>();
+        if (ProjectLookup.ForNames(project, names, $"--- {file} ---") is { } code) parts.Add(code.Text);
+        try
+        {
+            var (_, passages) = await gateway.DocsAsync(errors[0].Code, ct);
+            parts.AddRange(passages.Select(p => $"--- .NET docs: {p.Title} ---\n{p.Text}"));
+        }
+        catch (Exception e) when (e is not OperationCanceledException) { } // the docs are a help: the errors alone can still be fixed
+        return parts.Count == 0 ? null : string.Join("\n\n", parts);
+    }
+
+    const int MaxErrorNames = 5; // each one walks the project's C# files
+    [GeneratedRegex(@"'([A-Za-z_][\w.]*)'")] private static partial Regex QuotedName();
+
+    static string Errors(int count) => count == 1 ? "1 error" : $"{count} errors";
+
+    void ShowEnd(string output)
+    {
+        foreach (var line in output.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).TakeLast(15)) ui.Metadata(line);
+    }
+
+    /// <summary>Proposes a change to one file, checks it, shows it, and writes it on yes. True only when it was written.</summary>
+    /// <param name="extraContext">What the model may read beside the file, as data like the file itself.</param>
+    /// <param name="checkProject">Also compile the change in the whole project, which loads the project.</param>
+    public async Task<bool> ProposeEditAsync(string path, string file, string request, string? extraContext, bool checkProject, bool deep, CancellationToken ct)
+    {
+        if (FileEdit.Read(path) is not { } stored) { ui.Metadata("That file isn't UTF-8 or UTF-16 text, so Jazari can't edit it without damaging it."); return false; }
         var original = stored.Text;
-        if (original.Length / 4 > MaxReadTokens) { ui.Metadata("That file is too big to edit in one go."); return; }
+        if (original.Length / 4 > MaxReadTokens) { ui.Metadata("That file is too big to edit in one go."); return false; }
 
         var asked = FileEdit.Instructions + request;
+        var context = $"--- {file} ---\n{original}" + (extraContext is null ? "" : "\n\n" + extraContext);
         var watch = Stopwatch.StartNew();
         string? lastId = null, answerId; // the answer each proposal came from; answerId is the one shown, rated down when it's turned down or undone
         // Asks for the edits and applies them in memory. Null when stopped or the gateway failed (already reported).
         async Task<(string? Text, List<Replacement> Applied, string? Problem)?> ProposeAsync(string question)
         {
-            if (await WithThinking(() => gateway.CompleteAsync(question, $"--- {file} ---\n{original}", FileEdit.Schema, EditAnswerTokens, ct, Conventions(), deep), ct) is not (true, var reply)) return null;
+            if (await WithThinking(() => gateway.CompleteAsync(question, context, FileEdit.Schema, EditAnswerTokens, ct, Conventions(), deep), ct) is not (true, var reply)) return null;
             lastId = reply.Id;
             if (FileEdit.Parse(reply.Text) is not { } edits) return (null, [], "the model's answer couldn't be read");
             var applied = new List<Replacement>();
@@ -696,9 +795,9 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             return (newText, applied, problem);
         }
 
-        if (await ProposeAsync(asked) is not var (text, applied, problem)) return;
+        if (await ProposeAsync(asked) is not var (text, applied, problem)) return false;
         answerId = lastId;
-        if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return; }
+        if (text is null) { ui.Metadata($"Nothing changed: {problem}."); return false; }
         var broken = FileEdit.NewSyntaxErrors(path, original, text);
         if (broken.Count > 0)
         {
@@ -706,14 +805,14 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             // a few points at 1.5-3B (reports/Lessons from similar local assistants.md), and each costs a whole answer.
             ui.Metadata($"That change breaks the C# syntax ({broken[0]}). Asking once more, with the errors.");
             if (await ProposeAsync($"{asked}\n\nYour previous edits broke the C# syntax: {string.Join("; ", broken.Take(3))}. Give the edits again so the file still parses.")
-                is not var (retried, retriedApplied, _)) return;
+                is not var (retried, retriedApplied, _)) return false;
             if (retried is not null && FileEdit.NewSyntaxErrors(path, original, retried) is var still && still.Count < broken.Count)
                 (text, applied, broken, answerId) = (retried, retriedApplied, still, lastId);
         }
 
-        // Only /deep, and only if the syntax check above didn't already use the one retry.
+        // Only /deep and /fix, and only if the syntax check above didn't already use the one retry.
         IReadOnlyList<string>? projectErrors = null;
-        if (deep && broken.Count == 0 && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && ProjectCheck.FindProject(path, project) is { } projectFile && MayLoadProject(projectFile))
+        if (checkProject && broken.Count == 0 && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && ProjectCheck.FindProject(path, project) is { } projectFile && MayLoadProject(projectFile))
         {
             ui.Metadata("Checking the project. Loading it can take a minute.");
             projectErrors = await ProjectErrors(path, project, original, text, ct);
@@ -721,7 +820,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             {
                 ui.Metadata($"That change doesn't compile in the project ({projectErrors[0]}). Asking once more, with the errors.");
                 if (await ProposeAsync($"{asked}\n\nYour previous edits don't compile: {string.Join("; ", projectErrors.Take(3))}. Give the edits again so they do.")
-                    is not var (again, againApplied, _)) return;
+                    is not var (again, againApplied, _)) return false;
                 if (again is not null && FileEdit.NewSyntaxErrors(path, original, again).Count == 0
                     && await ProjectErrors(path, project, original, again, ct) is { } after && after.Count < projectErrors.Count)
                     (text, applied, projectErrors, answerId) = (again, againApplied, after, lastId);
@@ -743,12 +842,13 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
             ui.Error("This change breaks the C# syntax.", string.Join("; ", broken.Take(3)), "Say no, then /edit again with a clearer request.");
         if (projectErrors is { Count: > 0 })
             ui.Error("This change doesn't compile in the project.", string.Join("; ", projectErrors.Take(3)), "Say no, then /deep /edit again with a clearer request.");
-        if (!Confirm($"Apply this change to {file}?")) { RateDown(answerId); ui.Metadata("Nothing changed."); return; }
+        if (!Confirm($"Apply this change to {file}?")) { RateDown(answerId); ui.Metadata("Nothing changed."); return false; }
         var written = FileEdit.Encode(text, stored.Encoding);
         File.WriteAllBytes(path, written);
         _undo = (path, stored.Bytes, written, answerId);
         _hint = "/undo puts it back";
         ui.Metadata("Changed. /undo puts it back.");
+        return true;
     }
 
     /// <summary>The line a piece of text starts on, from 1; 0 when it isn't there.</summary>
@@ -846,7 +946,7 @@ public sealed partial class Session(IGatewayClient gateway, Ui ui, Func<Markdown
     static readonly (string Label, string[] Commands)[] HelpGroups =
     [
         ("Ask", ["/retry", "/status", "/docs"]),
-        ("Files and code", ["/read", "/diff", "/context", "/edit", "/undo", "/copy", "/review", "/commit"]),
+        ("Files and code", ["/read", "/diff", "/context", "/edit", "/fix", "/undo", "/copy", "/review", "/commit"]),
         ("Session", ["/model", "/save", "/clear", "/details", "/help", "/exit"]),
     ];
 
